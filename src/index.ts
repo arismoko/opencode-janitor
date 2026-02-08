@@ -96,7 +96,6 @@ const TheJanitor: Plugin = async (ctx) => {
         parentSessionId,
         prompt,
         config,
-        agent,
       });
       return sessionId;
     },
@@ -143,13 +142,24 @@ const TheJanitor: Plugin = async (ctx) => {
   return {
     name: 'the-janitor',
 
+    // Register the janitor agent in OpenCode's agent registry.
+    // Plugins must mutate the config object in place — the return value
+    // of the config hook is ignored. This lets promptAsync reference
+    // agent: 'janitor' and get the correct model, prompt, and tools.
+    config: async (opencodeConfig: Record<string, unknown>) => {
+      const agents = (opencodeConfig.agent ?? {}) as Record<string, unknown>;
+      agents[agent.name] = {
+        ...agent.config,
+        description: agent.description,
+      };
+      opencodeConfig.agent = agents;
+      log(`registered agent '${agent.name}' in config hook`);
+    },
+
     cleanup: () => {
       detector.stop();
       log('plugin cleanup: detector stopped');
     },
-
-    // Agent registration is not supported by OpenCode's plugin contract.
-    // The janitor persona is injected via the `system` field on promptAsync.
 
     // Accelerator: detect git commit via tool hook.
     // Gated on autoReview.onCommit — the accelerator is just a faster

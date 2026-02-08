@@ -41,14 +41,3 @@ export async function notifyError(
   const text = `⚠️ **[Janitor Error]** ${context}\n\n\`\`\`\n${errMsg}\n\`\`\``;
   await injectMessage(ctx, sessionId, text);
 }
-
-/**
- * Notify the user of a janitor status update in the parent session.
- */
-export async function notifyStatus(
-  ctx: PluginInput,
-  sessionId: string,
-  message: string,
-): Promise<void> {
-  await injectMessage(ctx, sessionId, `🔍 **[Janitor]** ${message}`);
-}

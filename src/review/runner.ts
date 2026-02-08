@@ -1,24 +1,15 @@
 import type { PluginInput } from '@opencode-ai/plugin';
 import type { JanitorConfig } from '../config/schema';
 import { error, log } from '../utils/logger';
-import type { AgentDefinition } from './janitor-agent';
-
-/** Tools available to the janitor agent */
-const JANITOR_TOOLS: Record<string, boolean> = {
-  glob: true,
-  grep: true,
-  Read: true,
-  ast_grep_search: true,
-};
 
 /**
  * Spawn an isolated background session for a janitor review.
  * Returns the session ID for tracking completion.
  *
- * The janitor agent is NOT registered in OpenCode's agent registry
- * (plugins can't do that). Instead we pass the system prompt via the
- * `system` field and let the session use the default/configured agent
- * with our custom instructions injected.
+ * The janitor agent is registered in OpenCode's agent registry via the
+ * plugin's `config` hook (see index.ts). We reference it by name here
+ * so the session uses the janitor's model, temperature, prompt, and tool
+ * permissions instead of the default orchestrator agent.
  */
 export async function spawnJanitorReview(
   ctx: PluginInput,
@@ -26,7 +17,6 @@ export async function spawnJanitorReview(
     parentSessionId: string;
     prompt: string;
     config: JanitorConfig;
-    agent: AgentDefinition;
   },
 ): Promise<string> {
   log('[runner] spawning review session');
@@ -47,20 +37,20 @@ export async function spawnJanitorReview(
   const sessionId = session.data.id;
   log(`[runner] session created: ${sessionId}`);
 
-  // Build prompt body — use `system` to inject the janitor persona
-  // instead of `agent: 'janitor'` which would require registry support.
+  // Build prompt body — reference the 'janitor' agent registered via
+  // the config hook. OpenCode resolves it from the agent registry and
+  // applies its model, temperature, system prompt, and tool permissions.
   const body: {
     parts: Array<{ type: 'text'; text: string }>;
-    system?: string;
-    tools?: Record<string, boolean>;
+    agent?: string;
     model?: { providerID: string; modelID: string };
   } = {
-    system: opts.agent.config.prompt,
-    tools: JANITOR_TOOLS,
+    agent: 'janitor',
     parts: [{ type: 'text', text: opts.prompt }],
   };
 
-  // Override model if configured
+  // Override model if explicitly configured (takes precedence over
+  // the model set in the agent's config)
   if (opts.config.model.id) {
     const slashIdx = opts.config.model.id.indexOf('/');
     if (slashIdx > 0) {
@@ -73,8 +63,7 @@ export async function spawnJanitorReview(
 
   // Send prompt asynchronously — promptAsync returns 204 (fire-and-forget)
   // and lets the review session run in the background. The synchronous
-  // prompt() expects to parse a full JSON response body which fails
-  // because the server streams the LLM response via SSE.
+  // prompt() would block until the LLM finishes streaming.
   try {
     await ctx.client.session.promptAsync({
       path: { id: sessionId },
