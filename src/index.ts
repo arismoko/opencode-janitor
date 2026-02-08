@@ -14,12 +14,22 @@ import { ReviewOrchestrator } from './review/orchestrator';
 import { buildReviewPrompt } from './review/prompt-builder';
 import { spawnJanitorReview } from './review/runner';
 import { CommitStore } from './state/store';
-import { log } from './utils/logger';
+import { log, warn } from './utils/logger';
+
+/** Best-effort toast — swallows errors so it never breaks init. */
+function toast(ctx: Parameters<Plugin>[0], message: string) {
+  try {
+    (ctx.client as any).tui?.showToast?.({ message }).catch(() => {});
+  } catch {
+    // TUI may not be available
+  }
+}
 
 const TheJanitor: Plugin = async (ctx) => {
   const config = loadConfig(ctx.directory);
   if (!config.enabled) {
     log('disabled by config');
+    toast(ctx, 'Janitor: disabled by config');
     return { name: 'the-janitor' } as any;
   }
 
@@ -43,7 +53,15 @@ const TheJanitor: Plugin = async (ctx) => {
     return result;
   };
 
-  const gitDir = await resolveGitDir(ctx.directory, exec);
+  let gitDir: string;
+  try {
+    gitDir = await resolveGitDir(ctx.directory, exec);
+  } catch {
+    warn(`no git repo at ${ctx.directory} — janitor inactive`);
+    toast(ctx, `Janitor: no git repo found — inactive`);
+    return { name: 'the-janitor' } as any;
+  }
+
   const agent = createJanitorAgent(config);
   const store = new CommitStore(ctx.directory);
 
@@ -118,6 +136,9 @@ const TheJanitor: Plugin = async (ctx) => {
     await detector.start(gitDir);
   }
 
+  toast(ctx, 'Janitor: watching for commits');
+  log(`initialized — watching ${gitDir}`);
+
   return {
     name: 'the-janitor',
 
@@ -133,7 +154,7 @@ const TheJanitor: Plugin = async (ctx) => {
     // path into the same detection pipeline, so it must respect the toggle.
     'tool.execute.after': async (
       input: { tool: string; sessionID: string; callID: string },
-      output: { title: string; output: string; metadata: any },
+      output: { title: string; output: string; metadata: unknown },
     ) => {
       if (!config.autoReview.onCommit) return;
       if (input.tool !== 'Bash' && input.tool !== 'bash') return;

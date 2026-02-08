@@ -93,6 +93,7 @@ opencode-janitor/
       store.ts                        # Processed commit cache, lock state
     utils/
       logger.ts                       # Structured logging
+      notifier.ts                     # Session message injection and error toasts
       limits.ts                       # Diff truncation helpers
   package.json
   tsconfig.json
@@ -337,7 +338,17 @@ export const JanitorConfigSchema = z.object({
 export type JanitorConfig = z.infer<typeof JanitorConfigSchema>;
 ```
 
-Config is loaded from `janitor.json` in the project root, or from an `opencode.jsonc` extension field.
+### Configuration Resolution
+
+Config is loaded from the OpenCode ecosystem paths with layered deep-merge:
+
+| Layer | Path | Purpose |
+|-------|------|---------|
+| 1. Schema defaults | (built-in) | Zod defaults for all fields |
+| 2. User global | `~/.config/opencode/janitor.json` | Per-user preferences (respects `$XDG_CONFIG_HOME`) |
+| 3. Project local | `<project>/.opencode/janitor.json` | Per-project overrides |
+
+Later layers override earlier ones. Each layer is deep-merged (objects recurse, arrays replace) before Zod validation, so partial overrides work naturally.
 
 ---
 
@@ -345,85 +356,24 @@ Config is loaded from `janitor.json` in the project root, or from an `opencode.j
 
 ### A. Commit Detection + Deduplication
 
+Key hardening from PR #2:
+
+- SHA added to `processed` **after** `onNewCommit()` succeeds (not before)
+- `markProcessed()` API for seeding from persistent store on restart
+- `start()` is idempotent (guards against double-start)
+- `stop()` nulls timers and resets `started` flag for clean restart
+- Watch targets existence-checked before `fs.watch`
+
 ```typescript
-// git/commit-detector.ts
-import { watch, type FSWatcher } from 'node:fs';
-import { log } from '../utils/logger';
+// git/commit-detector.ts — verify() critical path
+private async verify(signal: CommitSignal): Promise<void> {
+  const head = (await this.getHead()).trim();
+  if (!head || head === this.lastSeenHead) return;
+  this.lastSeenHead = head;
+  if (this.processed.has(head)) return;
 
-export type SignalSource = 'fswatch' | 'tool-hook' | 'poll';
-export type CommitSignal = { source: SignalSource; ts: number };
-export type CommitCallback = (sha: string, signal: CommitSignal) => Promise<void>;
-
-export class CommitDetector {
-  private lastSeenHead: string | null = null;
-  private processed = new Set<string>();
-  private watchers: FSWatcher[] = [];
-  private pollTimer: ReturnType<typeof setInterval> | null = null;
-  private debounceTimer: ReturnType<typeof setTimeout> | null = null;
-
-  constructor(
-    private getHead: () => Promise<string>,
-    private onNewCommit: CommitCallback,
-    private debounceMs: number = 1200,
-    private pollIntervalSec: number = 15,
-  ) {}
-
-  /** Start watching for commits */
-  async start(gitDir: string): Promise<void> {
-    // Initialize last seen HEAD
-    this.lastSeenHead = (await this.getHead()).trim();
-
-    // Primary: fs.watch on git refs
-    const targets = [`${gitDir}/HEAD`, `${gitDir}/refs/heads`];
-    for (const target of targets) {
-      try {
-        const watcher = watch(target, { recursive: true }, () => {
-          this.signal({ source: 'fswatch', ts: Date.now() });
-        });
-        this.watchers.push(watcher);
-      } catch {
-        log(`[commit-detector] could not watch ${target}`);
-      }
-    }
-
-    // Safety net: periodic poll
-    this.pollTimer = setInterval(() => {
-      this.signal({ source: 'poll', ts: Date.now() });
-    }, this.pollIntervalSec * 1000);
-  }
-
-  /** Receive accelerator signal from tool.execute.after hook */
-  accelerate(): void {
-    this.signal({ source: 'tool-hook', ts: Date.now() });
-  }
-
-  /** Process any signal with debounce */
-  private signal(s: CommitSignal): void {
-    if (this.debounceTimer) clearTimeout(this.debounceTimer);
-    this.debounceTimer = setTimeout(() => this.verify(s), this.debounceMs);
-  }
-
-  /** Verify HEAD and trigger callback if new commit */
-  private async verify(s: CommitSignal): Promise<void> {
-    try {
-      const head = (await this.getHead()).trim();
-      if (!head || head === this.lastSeenHead) return;
-      this.lastSeenHead = head;
-      if (this.processed.has(head)) return;
-      this.processed.add(head);
-      await this.onNewCommit(head, s);
-    } catch (err) {
-      log(`[commit-detector] verify failed: ${err}`);
-    }
-  }
-
-  /** Clean up watchers and timers */
-  stop(): void {
-    for (const w of this.watchers) w.close();
-    this.watchers = [];
-    if (this.pollTimer) clearInterval(this.pollTimer);
-    if (this.debounceTimer) clearTimeout(this.debounceTimer);
-  }
+  await this.onNewCommit(head, signal);  // callback FIRST
+  this.processed.add(head);               // mark AFTER success
 }
 ```
 
@@ -609,115 +559,53 @@ export async function spawnJanitorReview(
 
 ### D. Plugin Entry Point
 
-```typescript
-// index.ts
-import type { Plugin } from '@opencode-ai/plugin';
-import { loadConfig } from './config/loader';
-import { CommitDetector } from './git/commit-detector';
-import { resolveGitDir } from './git/repo-locator';
-import { getCommitContext } from './git/commit-resolver';
-import { ReviewOrchestrator } from './review/orchestrator';
-import { buildReviewPrompt } from './review/prompt-builder';
-import { createJanitorAgent } from './review/janitor-agent';
-import { spawnJanitorReview } from './review/runner';
-import { toastSink, sessionSink, fileSink } from './results/sinks';
-import { log } from './utils/logger';
+Key hardening from PR #2:
 
+- **Exec bridge** centralizes `git -C <workspace>` pinning with shell-safe quoting
+- **Hollow review guard** rejects empty commit context before spawning agent
+- **Persistent state** seeds detector with previously processed SHAs on restart
+- **Cleanup hook** calls `detector.stop()` on plugin teardown
+- **Tool-hook gating** respects `autoReview.onCommit` toggle
+- **Orchestrator completion callback** persists SHA to store only after success
+
+```typescript
+// index.ts — critical wiring (simplified)
 const TheJanitor: Plugin = async (ctx) => {
   const config = loadConfig(ctx.directory);
-  if (!config.enabled) {
-    log('[janitor] disabled by config');
-    return { name: 'the-janitor' };
-  }
+  const exec = async (cmd: string): Promise<string> => {
+    // Pin git commands to workspace with shell-safe quoting
+    const quoted = `'${ctx.directory.replace(/'/g, "'\\''")}'`;
+    const pinned = cmd.startsWith('git ')
+      ? `git -C ${quoted} ${cmd.slice(4)}`
+      : cmd;
+    return ctx.$`${{ raw: pinned }}`.quiet().text();
+  };
 
-  const gitDir = await resolveGitDir(ctx.directory, ctx.$);
-  const agent = createJanitorAgent(config);
-
-  // Track current session for result delivery
-  let currentSessionId: string | undefined;
-
-  // Orchestrator handles queuing and review lifecycle
-  const orchestrator = new ReviewOrchestrator(config, async (sha) => {
-    const commit = await getCommitContext(sha, config, ctx.$);
-    const prompt = buildReviewPrompt(commit, {
-      categories: Object.entries(config.categories)
-        .filter(([, v]) => v)
-        .map(([k]) => k),
-      maxFindings: config.model.maxFindings,
-      scopeInclude: config.scope.include,
-      scopeExclude: config.scope.exclude,
-    });
-
-    if (currentSessionId) {
-      return spawnJanitorReview(ctx, {
-        parentSessionId: currentSessionId,
-        prompt,
-        config,
-      });
+  const store = new CommitStore(ctx.directory);
+  const orchestrator = new ReviewOrchestrator(config, async (sha, parentSessionId) => {
+    const commit = await getCommitContext(sha, config, exec);
+    // Guard: reject empty context
+    if (!commit.patch.trim() && commit.changedFiles.length === 0) {
+      throw new Error(`Empty commit context for ${sha.slice(0, 8)}`);
     }
-    return null;
+    // ... build prompt and spawn review
   });
 
-  // Commit detector
-  const detector = new CommitDetector(
-    async () => {
-      const result = await ctx.$`git rev-parse HEAD`.text();
-      return result.trim();
-    },
-    async (sha, signal) => {
-      log(`[janitor] new commit detected: ${sha} via ${signal.source}`);
-      orchestrator.enqueue(sha);
-    },
-    config.autoReview.debounceMs,
-    config.autoReview.pollFallbackSec,
-  );
+  orchestrator.onCompleted((sha) => store.add(sha));
 
-  if (config.autoReview.onCommit) {
-    await detector.start(gitDir);
+  // Seed detector with persistent state
+  for (const sha of store.getProcessed()) {
+    detector.markProcessed(sha);
   }
 
   return {
     name: 'the-janitor',
-
+    cleanup: () => detector.stop(),
     agent: { janitor: agent },
-
-    // Accelerator: detect git commit via tool hook
-    'tool.execute.after': async (input) => {
-      if (
-        input.tool === 'Bash' &&
-        typeof input.args?.command === 'string' &&
-        /git\s+commit/.test(input.args.command)
-      ) {
-        detector.accelerate();
-      }
-    },
-
-    // Completion detection: extract results when review session goes idle
-    event: async (input) => {
-      // Track current session
-      if (input.event.type === 'session.created') {
-        const info = (input.event as any).properties?.info;
-        if (info?.id && !info?.parentID) {
-          currentSessionId = info.id;
-        }
-      }
-
-      // Detect review completion
-      if (input.event.type === 'session.status') {
-        const props = (input.event as any).properties;
-        if (props?.status?.type === 'idle' && props?.sessionID) {
-          await orchestrator.handleCompletion(
-            props.sessionID,
-            ctx,
-            config,
-          );
-        }
-      }
-    },
+    'tool.execute.after': async (input, output) => { /* ... */ },
+    event: async (input) => { /* ... */ },
   };
 };
-
-export default TheJanitor;
 ```
 
 ---
@@ -760,11 +648,28 @@ Only the **oldest running** + **latest pending** are kept. Middle commits are dr
 | **Large monorepos** | Strict include/exclude globs + diff truncation + tool-based exploration |
 | **Detached HEAD** | Still processed by hash; labeled as detached in report |
 | **No parent session** | Review still runs; toast delivery only (no session sink) |
-| **Plugin restart mid-review** | Processed set is in-memory; review may re-trigger. Idempotent by design |
+| **Plugin restart mid-review** | Processed SHAs persist in `.janitor/state.json`; previously reviewed commits are seeded into the detector on startup to prevent re-review |
 
 ---
 
-## 10. Extension Points (Future)
+## 10. Implemented Beyond Original v1 Spec
+
+These features were added during hardening (PR #2) and are now part of the core:
+
+| Feature | Module | Purpose |
+|---------|--------|---------|
+| Persistent SHA store | `state/store.ts` | Processed commits survive restarts via `.janitor/state.json` |
+| Exec bridge with `git -C` pinning | `index.ts` | All git commands pinned to workspace dir with shell-safe quoting |
+| Hollow review guard | `index.ts` | Rejects empty commit context before spawning agent |
+| Session notifier utilities | `utils/notifier.ts` | Low-level helpers for session message injection and error toasts |
+| Cleanup hook | `index.ts` | `detector.stop()` called on plugin teardown to prevent leaked watchers |
+| Path traversal guard | `results/sinks/file-sink.ts` | `reportDir` resolved and rejected if it escapes workspace |
+| Per-block finding parser | `results/parser.ts` | Fields parsed within each block to prevent misalignment |
+| Hardened sentinel check | `results/parser.ts` | `NO_P0_FINDINGS` matched as standalone token, not substring |
+
+---
+
+## 11. Extension Points (Future)
 
 These are **not built in v1** but the architecture accommodates them without refactoring:
 
@@ -778,7 +683,7 @@ These are **not built in v1** but the architecture accommodates them without ref
 
 ---
 
-## 11. Package Manifest
+## 12. Package Manifest
 
 ```json
 {
@@ -798,6 +703,11 @@ These are **not built in v1** but the architecture accommodates them without ref
     "dead-code",
     "dry",
     "yagni"
+  ],
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
   ],
   "scripts": {
     "build": "bun build src/index.ts --outdir dist --target bun --format esm && tsc --emitDeclarationOnly",
@@ -824,7 +734,7 @@ These are **not built in v1** but the architecture accommodates them without ref
 
 ---
 
-## 12. v1.0 Defaults Summary
+## 13. v1.0 Defaults Summary
 
 | Setting | Default |
 |---------|---------|
