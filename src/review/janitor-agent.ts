@@ -1,4 +1,5 @@
 import type { JanitorConfig } from '../config/schema';
+import { CATEGORY_PIPE_STR } from '../types';
 
 /** Agent definition shape matching OpenCode's AgentConfig from @opencode-ai/sdk */
 export interface AgentDefinition {
@@ -33,13 +34,14 @@ You have access to codebase exploration tools: glob, grep, Read, ast_grep_search
 Use them to trace references, find duplicates, and verify your findings with evidence.
 
 Every finding you report MUST be immediately actionable. If it's not worth fixing right now, don't report it.
+No finding is preferred over a weak finding.
 
 Maximum findings per review: ${config.model.maxFindings}
 
 Output format per finding:
 1. **Location**: file:line
-2. **Category**: DRY | DEAD | YAGNI | STRUCTURAL
-3. **Evidence**: concrete proof
+2. **Category**: ${CATEGORY_PIPE_STR}
+3. **Evidence**: concrete proof (must cite 2+ independent signals for STRUCTURAL)
 4. **Prescription**: exact action
 
 If no issues found: output exactly NO_P0_FINDINGS`;
@@ -52,7 +54,7 @@ export function createJanitorAgent(config: JanitorConfig): AgentDefinition {
   return {
     name: 'janitor',
     description:
-      'Structural code health reviewer. Detects DRY violations, dead code, YAGNI, and structural issues.',
+      'Structural code health reviewer. Detects DRY violations, dead code, and structural issues.',
     config: {
       model: config.model.id,
       temperature: 0.1,
