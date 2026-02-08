@@ -1,0 +1,67 @@
+/**
+ * Core domain types for opencode-janitor.
+ * No internal imports — this is the leaf dependency.
+ */
+
+/** Category of structural issue */
+export type FindingCategory = 'DRY' | 'DEAD' | 'YAGNI' | 'STRUCTURAL';
+
+/** A single P0 finding from the janitor agent */
+export interface Finding {
+  location: string;
+  category: FindingCategory;
+  evidence: string;
+  prescription: string;
+}
+
+/** Parsed review result from the janitor agent */
+export interface ReviewResult {
+  sha: string;
+  subject: string;
+  date: Date;
+  findings: Finding[];
+  clean: boolean;
+  raw: string;
+}
+
+/** Changed file entry from git diff-tree */
+export interface ChangedFile {
+  status: string;
+  path: string;
+}
+
+/** Full commit context for building review prompts */
+export interface CommitContext {
+  sha: string;
+  subject: string;
+  parents: string[];
+  changedFiles: ChangedFile[];
+  patch: string;
+  patchTruncated: boolean;
+}
+
+/** Signal source for commit detection */
+export type SignalSource = 'fswatch' | 'tool-hook' | 'poll';
+
+/** A commit detection signal */
+export interface CommitSignal {
+  source: SignalSource;
+  ts: number;
+}
+
+/** Review job in the orchestrator queue */
+export interface ReviewJob {
+  sha: string;
+  sessionId?: string;
+  status: 'pending' | 'running' | 'completed' | 'failed';
+  enqueuedAt: Date;
+  startedAt?: Date;
+  completedAt?: Date;
+  result?: ReviewResult;
+  error?: string;
+}
+
+/** Sink interface for delivering results */
+export interface ResultSink {
+  deliver(result: ReviewResult, parentSessionId?: string): Promise<void>;
+}
