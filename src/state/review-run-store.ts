@@ -18,8 +18,6 @@ export interface ActiveRun {
   parentSessionId: string;
   /** ISO timestamp when the run started */
   startedAt: string;
-  /** Number of resume attempts after crash recovery */
-  resumeAttempts: number;
 }
 
 interface StoreData {
@@ -40,10 +38,10 @@ export class ReviewRunStore {
     this.load();
   }
 
-  /** Add a run with resumeAttempts=0 and persist */
-  track(run: Omit<ActiveRun, 'resumeAttempts'>): void {
+  /** Add a run and persist */
+  track(run: ActiveRun): void {
     this.runs = this.runs.filter((r) => r.id !== run.id);
-    this.runs.push({ ...run, resumeAttempts: 0 });
+    this.runs.push(run);
     this.persist();
   }
 
@@ -51,15 +49,6 @@ export class ReviewRunStore {
   complete(id: string): void {
     this.runs = this.runs.filter((r) => r.id !== id);
     this.persist();
-  }
-
-  /** Bump resumeAttempts for a run and persist */
-  incrementResumeAttempts(id: string): void {
-    const run = this.runs.find((r) => r.id === id);
-    if (run) {
-      run.resumeAttempts++;
-      this.persist();
-    }
   }
 
   /** Return all active runs */

@@ -67,13 +67,34 @@ function extractJSON(raw: string): Record<string, unknown> | null {
   // Try bare JSON — find matching brace pairs from right to left.
   // Scanning from the end avoids the first-{-to-last-} corruption when
   // multiple JSON objects exist (e.g. from double resume output).
+  // String-aware: braces inside JSON string values don't affect depth.
   let depth = 0;
   let end = -1;
+  let inString = false;
   for (let i = raw.length - 1; i >= 0; i--) {
-    if (raw[i] === '}') {
+    const ch = raw[i];
+
+    // Toggle string state on unescaped double-quotes.
+    // Count consecutive backslashes before the quote to determine
+    // if it's escaped (odd count) or real (even count, including 0).
+    if (ch === '"') {
+      let backslashes = 0;
+      for (let j = i - 1; j >= 0 && raw[j] === '\\'; j--) {
+        backslashes++;
+      }
+      if (backslashes % 2 === 0) {
+        inString = !inString;
+      }
+      continue;
+    }
+
+    // Inside a string, braces are literal characters — skip them
+    if (inString) continue;
+
+    if (ch === '}') {
       if (depth === 0) end = i;
       depth++;
-    } else if (raw[i] === '{') {
+    } else if (ch === '{') {
       depth--;
       if (depth === 0 && end !== -1) {
         try {
