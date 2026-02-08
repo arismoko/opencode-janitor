@@ -57,7 +57,7 @@ Maximum findings: ${config.maxFindings}
 - Abstraction layers that pass-through without transformation
 
 ## STRUCTURAL
-- Files >300 lines (probably doing too much)
+- Files >500 lines (probably doing too much)
 - Circular dependencies between modules
 - Imports that cross architectural layer boundaries
 - Modules with mixed responsibilities
