@@ -82,6 +82,11 @@ export class PrDetector {
   /**
    * Verify current PR key and trigger callback if new state.
    * This is the single source of truth — all signals funnel here.
+   *
+   * State transitions (`lastSeenKey`, `processed`) are committed ONLY
+   * after the callback succeeds. If `onNewState` throws (transient git/gh
+   * failure), the same key will be retried on the next poll instead of
+   * being silently swallowed.
    */
   private async verify(signal: PrSignal): Promise<void> {
     try {
@@ -89,15 +94,22 @@ export class PrDetector {
       if (!key) return;
 
       if (key === this.lastSeenKey) return;
-      this.lastSeenKey = key;
 
       if (this.processed.has(key)) {
+        // Advance lastSeenKey to suppress future redundant logs,
+        // but don't re-trigger the callback.
+        this.lastSeenKey = key;
         log(`[pr-detector] already processed: ${key}`);
         return;
       }
 
       log(`[pr-detector] new state: ${key} via ${signal.source}`);
       await this.onNewState(key, signal);
+
+      // Only commit state after successful callback — a transient failure
+      // (network, git, gh CLI) leaves lastSeenKey unchanged so the next
+      // poll retries the same key.
+      this.lastSeenKey = key;
       this.processed.add(key);
       this.evictProcessed();
     } catch (err) {

@@ -24,7 +24,7 @@ export async function spawnJanitorReview(
     prompt: opts.prompt,
     title: 'Janitor Review',
     agent: 'janitor',
-    modelId: opts.config.model.id,
+    modelId: opts.config.agents.janitor.modelId ?? opts.config.model.id,
   });
 }
 

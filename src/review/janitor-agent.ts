@@ -56,7 +56,7 @@ export function createJanitorAgent(config: JanitorConfig): AgentDefinition {
     description:
       'Structural code health reviewer. Detects DRY violations, dead code, and structural issues.',
     config: {
-      model: config.model.id,
+      model: config.agents.janitor.modelId ?? config.model.id,
       temperature: 0.1,
       prompt: buildSystemPrompt(config),
       mode: 'subagent',

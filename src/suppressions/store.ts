@@ -34,11 +34,27 @@ export class SuppressionStore {
       // YAGNI was merged into STRUCTURAL; without this, any pre-existing
       // YAGNI entries would fail schema validation and cause load() to
       // discard the entire suppressions file.
+      //
+      // Must also rewrite exactKey/scopedKey — both are prefixed with the
+      // category name (e.g. "YAGNI|utils/foo.ts:42|..."). Without this,
+      // migrated entries would never match new STRUCTURAL findings.
       let migrated = false;
       if (Array.isArray(parsed?.suppressions)) {
         for (const entry of parsed.suppressions) {
           if (entry?.original?.category === 'YAGNI') {
             entry.original.category = 'STRUCTURAL';
+            if (typeof entry.exactKey === 'string') {
+              entry.exactKey = entry.exactKey.replace(
+                /^YAGNI\|/,
+                'STRUCTURAL|',
+              );
+            }
+            if (typeof entry.scopedKey === 'string') {
+              entry.scopedKey = entry.scopedKey.replace(
+                /^YAGNI\|/,
+                'STRUCTURAL|',
+              );
+            }
             migrated = true;
           }
         }
@@ -58,7 +74,15 @@ export class SuppressionStore {
 
       if (migrated) {
         log('[suppressions] migrated legacy YAGNI entries → STRUCTURAL');
-        this.save();
+        // Best-effort persist — don't let a write failure (read-only FS,
+        // disk full) discard the successfully parsed in-memory suppressions.
+        try {
+          this.save();
+        } catch (saveErr) {
+          warn('[suppressions] migration save failed, will retry next load', {
+            error: saveErr instanceof Error ? saveErr.message : String(saveErr),
+          });
+        }
       }
     } catch (err) {
       warn('Failed to read suppressions file', {
