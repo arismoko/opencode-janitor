@@ -1,9 +1,6 @@
 import type { JanitorConfig } from '../config/schema';
 import type { AgentDefinition } from './janitor-agent';
 
-/** Agent definition shape for the code reviewer agent */
-export type ReviewerAgentDefinition = AgentDefinition;
-
 /**
  * Build the system prompt for the reviewer agent.
  * Enforces strict JSON-only output with the exact finding schema.
@@ -46,9 +43,7 @@ Rules:
 /**
  * Create the reviewer agent definition.
  */
-export function createReviewerAgent(
-  config: JanitorConfig,
-): ReviewerAgentDefinition {
+export function createReviewerAgent(config: JanitorConfig): AgentDefinition {
   return {
     name: 'code-reviewer',
     description:

@@ -8,12 +8,15 @@ import type { Plugin } from '@opencode-ai/plugin';
 import { loadConfig } from './config/loader';
 import { CommitDetector } from './git/commit-detector';
 import { getCommitContext } from './git/commit-resolver';
-import { getCurrentPrFromGh, isGhAvailable } from './git/gh-pr';
+import {
+  getCurrentPrFromGh,
+  isGhAvailable,
+  postPrReviewWithGh,
+} from './git/gh-pr';
 import { getPrContext, type PrContext } from './git/pr-context-resolver';
 import { PrDetector } from './git/pr-detector';
 import { resolveGitDir } from './git/repo-locator';
 import { HistoryStore } from './history/store';
-import { deliverReviewerToPr } from './results/sinks/reviewer-pr-sink';
 import { createJanitorAgent } from './review/janitor-agent';
 import { ReviewOrchestrator } from './review/orchestrator';
 import { buildReviewPrompt } from './review/prompt-builder';
@@ -201,7 +204,8 @@ const TheJanitor: Plugin = async (ctx) => {
       return sessionId;
     },
     async (prNumber, body) => {
-      return deliverReviewerToPr(exec, prNumber, body);
+      if (!(await isGhAvailable(exec))) return false;
+      return postPrReviewWithGh(exec, prNumber, body);
     },
   );
   reviewerOrchestrator.setContext(ctx);
@@ -281,7 +285,6 @@ const TheJanitor: Plugin = async (ctx) => {
               headRef: ghPr.headRef,
               headSha: ghPr.headSha,
               number: ghPr.number,
-              url: ghPr.url,
               config,
               exec,
             });

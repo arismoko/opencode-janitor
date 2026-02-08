@@ -3,7 +3,6 @@ import { warn } from '../utils/logger';
 /** PR info retrieved from the gh CLI */
 export interface GhPrInfo {
   number: number;
-  url?: string;
   baseRef: string;
   headRef: string;
   headSha: string;
@@ -68,7 +67,6 @@ export async function getCurrentPrFromGh(
 
     return {
       number,
-      url: typeof parsed.url === 'string' ? parsed.url : undefined,
       baseRef,
       headRef,
       headSha,

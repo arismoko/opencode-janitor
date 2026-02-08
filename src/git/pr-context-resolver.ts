@@ -15,7 +15,6 @@ export interface PrContext {
   baseRef: string;
   headRef: string;
   number?: number;
-  url?: string;
   changedFiles: PrChangedFile[];
   patch: string;
   patchTruncated: boolean;
@@ -26,7 +25,6 @@ export interface GetPrContextOpts {
   headRef: string;
   headSha?: string;
   number?: number;
-  url?: string;
   config: JanitorConfig;
   exec: (cmd: string) => Promise<string>;
 }
@@ -72,7 +70,6 @@ export async function getPrContext(opts: GetPrContextOpts): Promise<PrContext> {
     baseRef,
     headRef,
     number: opts.number,
-    url: opts.url,
     changedFiles,
     patch: patch.content,
     patchTruncated: patch.truncated,
