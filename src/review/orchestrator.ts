@@ -14,7 +14,7 @@ import { notifyError } from '../utils/notifier';
  * The orchestrator catches this specifically and keeps the job pending for retry
  * rather than marking it as permanently failed.
  */
-export class NoSessionError extends Error {
+class NoSessionError extends Error {
   constructor() {
     super('No root session available');
     this.name = 'NoSessionError';

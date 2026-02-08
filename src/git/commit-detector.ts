@@ -1,9 +1,7 @@
 import { existsSync, type FSWatcher, watch } from 'node:fs';
 import type { CommitSignal, SignalSource } from '../types';
+import { evictOldest, MAX_PROCESSED } from '../utils/eviction';
 import { log, warn } from '../utils/logger';
-
-/** Max processed SHAs to keep in memory, matching CommitStore.MAX_PROCESSED */
-const MAX_PROCESSED = 1000;
 
 export type CommitCallback = (
   sha: string,
@@ -129,12 +127,7 @@ export class CommitDetector {
 
   /** Evict oldest entries when the processed set exceeds the cap. */
   private evictProcessed(): void {
-    if (this.processed.size <= MAX_PROCESSED) return;
-    const entries = [...this.processed];
-    const toRemove = entries.slice(0, entries.length - MAX_PROCESSED);
-    for (const sha of toRemove) {
-      this.processed.delete(sha);
-    }
+    evictOldest(this.processed, MAX_PROCESSED);
   }
 
   /**
