@@ -14,13 +14,11 @@ import { error, log } from '../utils/logger';
 export async function spawnJanitorReview(
   ctx: PluginInput,
   opts: {
-    parentSessionId: string;
     prompt: string;
     config: JanitorConfig;
   },
 ): Promise<string> {
   return spawnReviewSession(ctx, {
-    parentSessionId: opts.parentSessionId,
     prompt: opts.prompt,
     title: 'Janitor Review',
     agent: 'janitor',
@@ -35,13 +33,11 @@ export async function spawnJanitorReview(
 export async function spawnReviewerReview(
   ctx: PluginInput,
   opts: {
-    parentSessionId: string;
     prompt: string;
     config: JanitorConfig;
   },
 ): Promise<string> {
   return spawnReviewSession(ctx, {
-    parentSessionId: opts.parentSessionId,
     prompt: opts.prompt,
     title: 'Code Review',
     agent: 'code-reviewer',
@@ -50,7 +46,6 @@ export async function spawnReviewerReview(
 }
 
 interface SpawnOpts {
-  parentSessionId: string;
   prompt: string;
   title: string;
   agent: string;
@@ -66,7 +61,6 @@ async function spawnReviewSession(
   // Create isolated session
   const session = await ctx.client.session.create({
     body: {
-      parentID: opts.parentSessionId,
       title: opts.title,
     },
     query: { directory: ctx.directory },

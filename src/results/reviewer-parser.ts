@@ -19,6 +19,10 @@ import { log } from '../utils/logger';
  * Ignores malformed findings; keeps only valid ones.
  */
 export function parseReviewerOutput(raw: string, id: string): ReviewerResult {
+  if (!raw.trim()) {
+    throw new Error('No text output from reviewer agent');
+  }
+
   const parsed = extractJSON(raw);
 
   if (!parsed || !Array.isArray(parsed.findings)) {
