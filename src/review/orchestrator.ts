@@ -21,7 +21,7 @@ export class NoSessionError extends Error {
   }
 }
 
-type ReviewExecutor = (sha: string) => Promise<string>;
+type ReviewExecutor = (sha: string, parentSessionId: string) => Promise<string>;
 
 /**
  * Review orchestrator managing the queue and lifecycle of reviews.
@@ -38,7 +38,8 @@ export class ReviewOrchestrator {
   private queue: string[] = [];
   private activeCount = 0;
   private onReviewCompleted?: (sha: string) => void;
-  private parentSessionId?: string;
+  /** Most recently observed root session, used to assign to new/pending jobs. */
+  private latestSessionId?: string;
   private ctx?: PluginInput;
 
   constructor(
@@ -58,10 +59,19 @@ export class ReviewOrchestrator {
 
   /**
    * Notify the orchestrator that a root session is now available.
-   * Re-drains any pending jobs that were blocked on session availability.
+   * Assigns the session to any pending jobs that lack one, then drains the queue.
    */
   sessionAvailable(sessionId: string): void {
-    this.parentSessionId = sessionId;
+    this.latestSessionId = sessionId;
+
+    // Backfill pending jobs that were queued before any session existed
+    for (const sha of this.queue) {
+      const job = this.jobs.get(sha);
+      if (job && job.status === 'pending' && !job.parentSessionId) {
+        job.parentSessionId = sessionId;
+      }
+    }
+
     log('[orchestrator] root session available, draining queue');
     this.processQueue();
   }
@@ -79,6 +89,7 @@ export class ReviewOrchestrator {
 
     const job: ReviewJob = {
       sha,
+      parentSessionId: this.latestSessionId,
       status: 'pending',
       enqueuedAt: new Date(),
     };
@@ -119,8 +130,15 @@ export class ReviewOrchestrator {
       job.status = 'running';
       job.startedAt = new Date();
 
+      // Each job targets the session that was active when it was enqueued.
+      // If no session was available at enqueue time, NoSessionError re-queues it.
+      const targetSession = job.parentSessionId;
+
       try {
-        const sessionId = await this.executor(sha);
+        if (!targetSession) {
+          throw new NoSessionError();
+        }
+        const sessionId = await this.executor(sha, targetSession);
         job.sessionId = sessionId;
         this.sessionToSha.set(sessionId, sha);
         log(`[orchestrator] review started: ${sha} → ${sessionId}`);
@@ -142,11 +160,11 @@ export class ReviewOrchestrator {
         job.completedAt = new Date();
         warn(`[orchestrator] review failed to start: ${sha} — ${job.error}`);
 
-        // Surface the error to the user in their session
-        if (this.ctx && this.parentSessionId) {
+        // Surface the error to the user in their originating session
+        if (this.ctx && targetSession) {
           notifyError(
             this.ctx,
-            this.parentSessionId,
+            targetSession,
             `Review failed for commit \`${sha.slice(0, 8)}\``,
             err,
           ).catch(() => {}); // fire-and-forget
@@ -205,18 +223,18 @@ export class ReviewOrchestrator {
       this.onReviewCompleted?.(sha);
 
       // Deliver results via configured sinks
-      await this.deliverResults(result, job.sessionId, ctx, config);
+      await this.deliverResults(result, job.parentSessionId, ctx, config);
     } catch (err) {
       job.status = 'failed';
       job.completedAt = new Date();
       job.error = err instanceof Error ? err.message : String(err);
       warn(`[orchestrator] result extraction failed: ${sha} — ${job.error}`);
 
-      // Surface extraction failure to the user
-      if (this.ctx && this.parentSessionId) {
+      // Surface extraction failure to the user in their originating session
+      if (this.ctx && job.parentSessionId) {
         notifyError(
           this.ctx,
-          this.parentSessionId,
+          job.parentSessionId,
           `Failed to extract review results for \`${sha.slice(0, 8)}\``,
           err,
         ).catch(() => {}); // fire-and-forget
@@ -233,7 +251,7 @@ export class ReviewOrchestrator {
    */
   private async deliverResults(
     result: ReviewResult,
-    _reviewSessionId: string | undefined,
+    parentSessionId: string | undefined,
     ctx: PluginInput,
     config: JanitorConfig,
   ): Promise<void> {
@@ -243,8 +261,8 @@ export class ReviewOrchestrator {
       await deliverToast(ctx, result);
     }
 
-    if (config.delivery.sessionMessage && this.parentSessionId) {
-      await deliverToSession(ctx, this.parentSessionId, report);
+    if (config.delivery.sessionMessage && parentSessionId) {
+      await deliverToSession(ctx, parentSessionId, report);
     }
 
     if (config.delivery.reportFile) {

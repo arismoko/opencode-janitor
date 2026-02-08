@@ -52,6 +52,9 @@ export interface CommitSignal {
 /** Review job in the orchestrator queue */
 export interface ReviewJob {
   sha: string;
+  /** The root session that was active when this commit was detected. */
+  parentSessionId?: string;
+  /** The child review session spawned for this job. */
   sessionId?: string;
   status: 'pending' | 'running' | 'completed' | 'failed';
   enqueuedAt: Date;

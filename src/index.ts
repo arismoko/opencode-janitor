@@ -10,7 +10,7 @@ import { CommitDetector } from './git/commit-detector';
 import { getCommitContext } from './git/commit-resolver';
 import { resolveGitDir } from './git/repo-locator';
 import { createJanitorAgent } from './review/janitor-agent';
-import { NoSessionError, ReviewOrchestrator } from './review/orchestrator';
+import { ReviewOrchestrator } from './review/orchestrator';
 import { buildReviewPrompt } from './review/prompt-builder';
 import { spawnJanitorReview } from './review/runner';
 import { CommitStore } from './state/store';
@@ -42,42 +42,38 @@ const TheJanitor: Plugin = async (ctx) => {
   // Seed detector with previously processed SHAs
   const previouslyProcessed = store.getProcessed();
 
-  // Track current root session for result delivery
-  let currentSessionId: string | undefined;
-
   // Orchestrator handles queuing and review lifecycle
-  const orchestrator = new ReviewOrchestrator(config, async (sha) => {
-    const commit = await getCommitContext(sha, config, exec);
+  const orchestrator = new ReviewOrchestrator(
+    config,
+    async (sha, parentSessionId) => {
+      const commit = await getCommitContext(sha, config, exec);
 
-    // Hollow review guard: reject commits with no meaningful diff content.
-    // This prevents wasted review cycles and misleading "all clean" results
-    // when git commands failed silently or the commit is truly empty.
-    if (!commit.patch.trim() && commit.changedFiles.length === 0) {
-      throw new Error(
-        `Empty commit context for ${sha.slice(0, 8)} — no patch or changed files`,
-      );
-    }
+      // Hollow review guard: reject commits with no meaningful diff content.
+      // This prevents wasted review cycles and misleading "all clean" results
+      // when git commands failed silently or the commit is truly empty.
+      if (!commit.patch.trim() && commit.changedFiles.length === 0) {
+        throw new Error(
+          `Empty commit context for ${sha.slice(0, 8)} — no patch or changed files`,
+        );
+      }
 
-    const prompt = buildReviewPrompt(commit, {
-      categories: Object.entries(config.categories)
-        .filter(([, v]) => v)
-        .map(([k]) => k),
-      maxFindings: config.model.maxFindings,
-      scopeInclude: config.scope.include,
-      scopeExclude: config.scope.exclude,
-    });
+      const prompt = buildReviewPrompt(commit, {
+        categories: Object.entries(config.categories)
+          .filter(([, v]) => v)
+          .map(([k]) => k),
+        maxFindings: config.model.maxFindings,
+        scopeInclude: config.scope.include,
+        scopeExclude: config.scope.exclude,
+      });
 
-    if (!currentSessionId) {
-      throw new NoSessionError();
-    }
-
-    const sessionId = await spawnJanitorReview(ctx, {
-      parentSessionId: currentSessionId,
-      prompt,
-      config,
-    });
-    return sessionId;
-  });
+      const sessionId = await spawnJanitorReview(ctx, {
+        parentSessionId,
+        prompt,
+        config,
+      });
+      return sessionId;
+    },
+  );
 
   // Persist SHA only after review completes successfully
   orchestrator.onCompleted((sha) => {
@@ -149,7 +145,6 @@ const TheJanitor: Plugin = async (ctx) => {
       if (event.type === 'session.created') {
         const info = event.properties?.info;
         if (info?.id && !info?.parentID) {
-          currentSessionId = info.id;
           log(`tracking root session: ${info.id}`);
           orchestrator.sessionAvailable(info.id);
         }
