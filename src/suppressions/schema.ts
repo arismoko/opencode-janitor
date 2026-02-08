@@ -5,8 +5,8 @@ const SuppressionSchema = z.object({
   scopedKey: z.string(),
   tier: z.enum(['exact', 'scoped']),
   reason: z.string().optional(),
-  createdAt: z.string(),
-  lastSeenAt: z.string(),
+  createdAt: z.string().datetime(),
+  lastSeenAt: z.string().datetime(),
   ttlDays: z.number().int().min(1),
   needsRevalidation: z.boolean(),
   original: z.object({

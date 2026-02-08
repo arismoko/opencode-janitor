@@ -10,10 +10,12 @@ const MAX_SUPPRESSIONS = 200;
 /** Manages `.janitor/suppressions.json` persistence */
 export class SuppressionStore {
   private filePath: string;
+  private readonly maxEntries: number;
   private suppressions: Suppression[] = [];
 
-  constructor(workspaceDir: string) {
+  constructor(workspaceDir: string, opts?: { maxEntries?: number }) {
     this.filePath = join(workspaceDir, '.janitor', 'suppressions.json');
+    this.maxEntries = opts?.maxEntries ?? MAX_SUPPRESSIONS;
     this.load();
   }
 
@@ -78,7 +80,7 @@ export class SuppressionStore {
     );
 
     // Evict oldest-lastSeenAt entries if at capacity
-    while (this.suppressions.length >= MAX_SUPPRESSIONS) {
+    while (this.suppressions.length >= this.maxEntries) {
       let oldestIdx = 0;
       let oldestTime = new Date(this.suppressions[0].lastSeenAt).getTime();
 
@@ -97,13 +99,20 @@ export class SuppressionStore {
     this.save();
   }
 
-  /** Update lastSeenAt to now */
-  touch(suppression: Suppression): void {
-    const entry = this.suppressions.find(
-      (s) => s.exactKey === suppression.exactKey,
-    );
-    if (entry) {
-      entry.lastSeenAt = new Date().toISOString();
+  /** Update lastSeenAt for multiple suppressions, saving once. */
+  touchMany(exactKeys: string[]): void {
+    const keySet = new Set(exactKeys);
+    const now = new Date().toISOString();
+    let changed = false;
+
+    for (const s of this.suppressions) {
+      if (keySet.has(s.exactKey)) {
+        s.lastSeenAt = now;
+        changed = true;
+      }
+    }
+
+    if (changed) {
       this.save();
     }
   }

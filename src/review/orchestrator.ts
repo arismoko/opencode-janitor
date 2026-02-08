@@ -44,8 +44,8 @@ export class ReviewOrchestrator {
   /** Most recently observed root session, used to assign to new/pending jobs. */
   private latestSessionId?: string;
   private ctx?: PluginInput;
-  private suppressionStore?: SuppressionStore;
-  private historyStore?: HistoryStore;
+  private suppressionStore!: SuppressionStore;
+  private historyStore!: HistoryStore;
 
   constructor(
     private config: JanitorConfig,
@@ -207,6 +207,11 @@ export class ReviewOrchestrator {
     const job = this.jobs.get(sha);
     if (!job || job.status !== 'running') return;
 
+    // Atomically transition to prevent duplicate idle events from double-processing.
+    // JS is single-threaded but the method is async — a second call arriving between
+    // awaits would see 'running' without this guard.
+    job.status = 'completed';
+
     log(`[orchestrator] review completed: ${sha}`);
 
     try {
@@ -232,26 +237,15 @@ export class ReviewOrchestrator {
       const rawOutput = assistantTexts.join('\n\n');
 
       // Process through the full pipeline (parse → suppress → annotate → record)
-      let result: ReviewResult;
-      let enrichment: EnrichmentData | undefined;
-      let suppressedCount = 0;
+      const pipelineResult = await processReviewOutput(rawOutput, sha, {
+        suppressionStore: this.suppressionStore,
+        historyStore: this.historyStore,
+        config,
+      });
+      const result = pipelineResult.result;
+      const enrichment = pipelineResult.enrichment;
+      const suppressedCount = pipelineResult.suppressedCount;
 
-      if (this.suppressionStore && this.historyStore) {
-        const pipelineResult = await processReviewOutput(rawOutput, sha, {
-          suppressionStore: this.suppressionStore,
-          historyStore: this.historyStore,
-          config,
-        });
-        result = pipelineResult.result;
-        enrichment = pipelineResult.enrichment;
-        suppressedCount = pipelineResult.suppressedCount;
-      } else {
-        // Fallback: parse-only when stores aren't available
-        const { parseReviewOutput } = await import('../results/parser');
-        result = parseReviewOutput(rawOutput, sha);
-      }
-
-      job.status = 'completed';
       job.completedAt = new Date();
       job.result = result;
 

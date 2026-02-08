@@ -8,7 +8,10 @@ const MAX_PROMPT_BYTES = 1536;
  * Build a compact suppression block for system prompt injection.
  * Returns empty string if no active suppressions.
  */
-export function buildSuppressionsBlock(suppressions: Suppression[]): string {
+export function buildSuppressionsBlock(
+  suppressions: Suppression[],
+  maxPromptBytes?: number,
+): string {
   const active = suppressions.filter(
     (s) => !isExpired(s) && !s.needsRevalidation,
   );
@@ -23,8 +26,9 @@ export function buildSuppressionsBlock(suppressions: Suppression[]): string {
 
   const header = '[SUPPRESSIONS_V1]\n';
   const footer = '[/SUPPRESSIONS_V1]';
+  const budgetLimit = maxPromptBytes ?? MAX_PROMPT_BYTES;
   let budget =
-    MAX_PROMPT_BYTES - Buffer.byteLength(header) - Buffer.byteLength(footer);
+    budgetLimit - Buffer.byteLength(header) - Buffer.byteLength(footer);
   const lines: string[] = [];
 
   for (const s of active) {

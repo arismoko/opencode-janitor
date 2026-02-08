@@ -35,6 +35,7 @@ export function matchSuppression(
 /** Check if a suppression has expired based on TTL */
 export function isExpired(suppression: Suppression): boolean {
   const lastSeen = new Date(suppression.lastSeenAt).getTime();
+  if (Number.isNaN(lastSeen)) return true; // Treat corrupt dates as expired
   const ttlMs = suppression.ttlDays * 24 * 60 * 60 * 1000;
   return Date.now() - lastSeen > ttlMs;
 }

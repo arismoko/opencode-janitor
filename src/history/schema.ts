@@ -10,7 +10,7 @@ const ReviewFindingSchema = z.object({
 const ReviewRecordSchema = z.object({
   sha: z.string(),
   subject: z.string(),
-  date: z.string(),
+  date: z.string().datetime(),
   findings: z.array(ReviewFindingSchema),
   findingCount: z.number().int().min(0),
   clean: z.boolean(),

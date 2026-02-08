@@ -69,19 +69,24 @@ export async function processReviewOutput(
   if (suppressionsEnabled) {
     const activeSups = suppressionStore.getActive();
     const kept: Finding[] = [];
+    const touchedKeys: string[] = [];
 
     for (const finding of findings) {
       const match = matchSuppression(finding, activeSups);
       if (match.matched) {
         suppressedCount++;
-        // Touch the suppression to refresh its TTL
-        suppressionStore.touch(match.suppression);
+        // Collect key to batch-touch after the loop
+        touchedKeys.push(match.suppression.exactKey);
         log(
           `[pipeline] suppressed: ${finding.category} @ ${finding.location} (${match.tier})`,
         );
       } else {
         kept.push(finding);
       }
+    }
+
+    if (touchedKeys.length > 0) {
+      suppressionStore.touchMany(touchedKeys);
     }
 
     findings = kept;
@@ -107,13 +112,9 @@ export async function processReviewOutput(
     const currentKeys = new Set(annotated.map((a) => a.exactKey));
     const resolved = detectResolved(currentKeys, ledger);
 
-    // Compute trends
-    const trendWindow = config.history?.trendWindow ?? 10;
-    const trends = computeTrends(historyStore.getReviews(), trendWindow);
-
-    enrichment = { annotatedFindings: annotated, resolved, trends };
-
-    // Record this review
+    // Record this review BEFORE computing trends so the current review
+    // is included in the trend window — otherwise the report is always
+    // one review behind.
     const record: ReviewRecord = {
       sha,
       subject: parsed.subject,
@@ -132,6 +133,12 @@ export async function processReviewOutput(
     };
     historyStore.addReview(record);
 
+    // Compute trends (now includes the just-recorded review)
+    const trendWindow = config.history?.trendWindow ?? 10;
+    const trends = computeTrends(historyStore.getReviews(), trendWindow);
+
+    enrichment = { annotatedFindings: annotated, resolved, trends };
+
     log(
       `[pipeline] history: ${annotated.length} annotated, ${resolved.length} resolved`,
     );
@@ -142,21 +149,26 @@ export async function processReviewOutput(
     const churnThreshold = config.suppressions?.revalidationChurn ?? 0.6;
     const ttlDays = config.suppressions?.ttlDays ?? 90;
 
-    for (const annotated of enrichment.annotatedFindings) {
-      if (annotated.lifecycle !== 'persistent') continue;
+    // churnThreshold=1 means "never auto-suppress" — skip entirely
+    if (churnThreshold >= 1) {
+      // noop — auto-suppression disabled
+    } else {
+      for (const annotated of enrichment.annotatedFindings) {
+        if (annotated.lifecycle !== 'persistent') continue;
 
-      // Only auto-suppress after several consecutive appearances
-      const minStreak = Math.ceil(1 / (1 - churnThreshold));
-      if (annotated.streak >= minStreak) {
-        const suppression = createSuppression(annotated.finding, sha, {
-          tier: 'exact',
-          reason: `Auto-suppressed: seen in ${annotated.streak} consecutive reviews`,
-          ttlDays,
-        });
-        suppressionStore.add(suppression);
-        log(
-          `[pipeline] auto-suppressed: ${annotated.finding.category} @ ${annotated.finding.location}`,
-        );
+        // Only auto-suppress after several consecutive appearances
+        const minStreak = Math.ceil(1 / (1 - churnThreshold));
+        if (annotated.streak >= minStreak) {
+          const suppression = createSuppression(annotated.finding, sha, {
+            tier: 'exact',
+            reason: `Auto-suppressed: seen in ${annotated.streak} consecutive reviews`,
+            ttlDays,
+          });
+          suppressionStore.add(suppression);
+          log(
+            `[pipeline] auto-suppressed: ${annotated.finding.category} @ ${annotated.finding.location}`,
+          );
+        }
       }
     }
   }

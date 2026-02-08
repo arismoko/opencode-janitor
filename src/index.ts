@@ -82,7 +82,9 @@ const TheJanitor: Plugin = async (ctx) => {
 
   const agent = createJanitorAgent(config);
   const store = new CommitStore(ctx.directory);
-  const suppressionStore = new SuppressionStore(ctx.directory);
+  const suppressionStore = new SuppressionStore(ctx.directory, {
+    maxEntries: config.suppressions?.maxEntries,
+  });
   const historyStore = new HistoryStore(ctx.directory, {
     maxReviews: config.history?.maxReviews,
     maxBytes: config.history?.maxBytes,
@@ -107,7 +109,10 @@ const TheJanitor: Plugin = async (ctx) => {
       }
 
       const suppressionsBlock = config.suppressions?.enabled
-        ? buildSuppressionsBlock(suppressionStore.getActive())
+        ? buildSuppressionsBlock(
+            suppressionStore.getActive(),
+            config.suppressions?.maxPromptBytes,
+          )
         : '';
       const prompt = buildReviewPrompt(commit, {
         categories: Object.entries(config.categories)
