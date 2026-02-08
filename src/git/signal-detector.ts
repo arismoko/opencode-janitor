@@ -2,24 +2,6 @@ import { evictOldest, MAX_PROCESSED } from '../utils/eviction';
 import { log, warn } from '../utils/logger';
 
 /**
- * Sentinel error for expected retryable conditions in the verify pipeline.
- *
- * Throw this from `getCurrentKey()` or `onDetected()` when the failure is
- * expected and the key should NOT be committed as processed. Examples:
- * - PR closed/merged between detection and callback
- * - PR state advanced (head SHA changed) between detection and re-fetch
- *
- * These are logged at debug level only. All other errors thrown into
- * verify's catch are treated as unexpected and logged as warnings.
- */
-export class RetryableSignalError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = 'RetryableSignalError';
-  }
-}
-
-/**
  * Generic signal detector base class.
  *
  * Owns the debounced verify-and-callback pipeline with:
@@ -91,10 +73,9 @@ export abstract class SignalDetector<
    * Verify current key and trigger callback if new state.
    * This is the single source of truth — all signals funnel here.
    *
-   * State transitions (`lastSeenKey`, `processed`) are committed ONLY
-   * after the callback succeeds. If `onDetected` throws (transient git/gh
-   * failure), the same key will be retried on the next poll instead of
-   * being silently swallowed.
+   * The key is marked as processed regardless of callback outcome —
+   * no auto-retry of the same key. Users can manually trigger reruns
+   * via `/janitor clean` or `/janitor review`.
    *
    * Re-entrancy guard (`inflight`) prevents duplicate callbacks when a
    * slow `onDetected` overlaps with the next poll/tool-hook signal.
@@ -120,26 +101,20 @@ export abstract class SignalDetector<
       this.inflight.add(key);
 
       log(`[${this.label}] new state: ${key} via ${signal.source}`);
+
+      // Commit state BEFORE callback — key is marked processed regardless
+      // of callback outcome. No auto-retry of same key.
+      this.lastSeenKey = key;
+      this.processed.add(key);
+      this.evictProcessed();
+
       try {
         await this.onDetected(key, signal);
       } finally {
         this.inflight.delete(key);
       }
-
-      // Only commit state after successful callback — a transient failure
-      // (network, git, gh CLI) leaves lastSeenKey unchanged so the next
-      // poll retries the same key.
-      this.lastSeenKey = key;
-      this.processed.add(key);
-      this.evictProcessed();
     } catch (err) {
-      if (err instanceof RetryableSignalError) {
-        // Expected: PR closed, state diverged, etc. Debug-only.
-        log(`[${this.label}] verify skipped (will retry): ${err.message}`);
-      } else {
-        // Unexpected: genuine failure — always log to file for diagnosis.
-        warn(`[${this.label}] verify failed: ${err}`);
-      }
+      warn(`[${this.label}] verify failed: ${err}`);
     }
   }
 

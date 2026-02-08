@@ -7,16 +7,23 @@
 import type { Plugin } from '@opencode-ai/plugin';
 import { loadConfig } from './config/loader';
 import { CommitDetector } from './git/commit-detector';
-import { getCommitContext } from './git/commit-resolver';
+import {
+  getCommitContext,
+  getWorkspaceCommitContext,
+} from './git/commit-resolver';
 import {
   getCurrentPrFromGh,
+  getPrByNumberFromGh,
   isGhAvailable,
   postPrReviewWithGh,
 } from './git/gh-pr';
-import { getPrContext, type PrContext } from './git/pr-context-resolver';
+import {
+  getPrContext,
+  getWorkspacePrContext,
+  type PrContext,
+} from './git/pr-context-resolver';
 import { PrDetector } from './git/pr-detector';
 import { resolveGitDir } from './git/repo-locator';
-import { RetryableSignalError } from './git/signal-detector';
 import { HistoryStore } from './history/store';
 import { createJanitorAgent } from './review/janitor-agent';
 import { ReviewOrchestrator } from './review/orchestrator';
@@ -29,13 +36,17 @@ import { CommitStore } from './state/store';
 import { buildSuppressionsBlock } from './suppressions/prompt';
 import { SuppressionStore } from './suppressions/store';
 import { log, warn } from './utils/logger';
+import { injectMessage } from './utils/notifier';
 
 /** Plugin return shape — typed locally since the SDK Plugin type doesn't
  *  export a precise return interface for hooks we use. */
 interface JanitorPluginReturn {
   name: string;
   config?: (config: Record<string, unknown>) => Promise<void>;
-  cleanup?: () => void;
+  'command.execute.before'?: (
+    input: { command: string; sessionID: string; arguments: string },
+    output: { parts: Array<{ type: string; text?: string }> },
+  ) => Promise<void>;
   'tool.execute.after'?: (
     input: { tool: string; sessionID: string; callID: string },
     output: { title: string; output: string; metadata: unknown },
@@ -44,6 +55,8 @@ interface JanitorPluginReturn {
     event: { type: string; properties?: Record<string, unknown> };
   }) => Promise<void>;
 }
+
+let stopActiveRuntime: (() => Promise<void>) | null = null;
 
 /** Best-effort toast — swallows errors so it never breaks init. */
 function toast(ctx: Parameters<Plugin>[0], message: string) {
@@ -62,8 +75,28 @@ function triggerMatches(trigger: TriggerMode, mode: 'commit' | 'pr'): boolean {
   return trigger === mode || trigger === 'both';
 }
 
+function extractReviewerHeadFromKey(key: string): string | null {
+  if (key.startsWith('commit:')) {
+    return key.slice('commit:'.length);
+  }
+  if (key.startsWith('pr:')) {
+    const parts = key.split(':');
+    return parts.length >= 3 ? parts[2] : null;
+  }
+  if (key.startsWith('branch:')) {
+    const parts = key.split(':');
+    return parts.length >= 3 ? parts[2] : null;
+  }
+  return null;
+}
+
 const TheJanitor: Plugin = async (ctx) => {
   const config = loadConfig(ctx.directory);
+  if (stopActiveRuntime) {
+    await stopActiveRuntime();
+    stopActiveRuntime = null;
+  }
+
   if (!config.enabled) {
     log('disabled by config');
     toast(ctx, 'Janitor: disabled by config');
@@ -126,6 +159,12 @@ const TheJanitor: Plugin = async (ctx) => {
   }
 
   const store = new CommitStore(ctx.directory);
+  const runtime = { disposed: false };
+  const paused = store.getPaused();
+  const control = {
+    pausedJanitor: paused.janitor,
+    pausedReviewer: paused.reviewer,
+  };
   const suppressionStore = new SuppressionStore(ctx.directory, {
     maxEntries: config.suppressions?.maxEntries,
   });
@@ -136,19 +175,23 @@ const TheJanitor: Plugin = async (ctx) => {
 
   // Seed detector with previously processed SHAs
   const previouslyProcessed = store.getProcessed();
+  const previouslyProcessedPrKeys = store.getProcessedPrKeys();
 
   // Orchestrator handles queuing and review lifecycle
   const orchestrator = new ReviewOrchestrator(
     config,
-    async (sha) => {
-      const commit = await getCommitContext(sha, config, exec);
+    async (runKey) => {
+      const workspace = runKey.startsWith('workspace:');
+      const commit = workspace
+        ? await getWorkspaceCommitContext(config, exec)
+        : await getCommitContext(runKey, config, exec);
 
       // Hollow review guard: reject commits with no meaningful diff content.
       // This prevents wasted review cycles and misleading "all clean" results
       // when git commands failed silently or the commit is truly empty.
       if (!commit.patch.trim() && commit.changedFiles.length === 0) {
         throw new Error(
-          `Empty commit context for ${sha.slice(0, 8)} — no patch or changed files`,
+          `Empty commit context for ${commit.sha.slice(0, 8)} — no patch or changed files`,
         );
       }
 
@@ -170,6 +213,7 @@ const TheJanitor: Plugin = async (ctx) => {
 
       const sessionId = await spawnJanitorReview(ctx, {
         prompt,
+        runKey,
         config,
       });
       return sessionId;
@@ -180,6 +224,7 @@ const TheJanitor: Plugin = async (ctx) => {
 
   // Persist SHA only after review completes successfully
   orchestrator.onCompleted((sha) => {
+    if (sha.startsWith('workspace:')) return;
     store.add(sha);
     log(`persisted reviewed commit: ${sha}`);
   });
@@ -197,6 +242,7 @@ const TheJanitor: Plugin = async (ctx) => {
 
       const sessionId = await spawnReviewerReview(ctx, {
         prompt,
+        runKey: prContext.key,
         config,
       });
       return sessionId;
@@ -207,6 +253,28 @@ const TheJanitor: Plugin = async (ctx) => {
     },
   );
   reviewerOrchestrator.setContext(ctx);
+  reviewerOrchestrator.onCompleted((key) => {
+    if (key.startsWith('workspace:')) return;
+    store.addPrKey(key);
+    const headSha = extractReviewerHeadFromKey(key);
+    if (headSha) {
+      store.addProcessedReviewerHead(headSha);
+    }
+    log(`persisted reviewed PR key: ${key}`);
+  });
+
+  const hasReviewerHeadInFlight = (headSha: string): boolean => {
+    return reviewerOrchestrator.getJobsSnapshot().some((job) => {
+      if (
+        job.status !== 'pending' &&
+        job.status !== 'starting' &&
+        job.status !== 'running'
+      ) {
+        return false;
+      }
+      return extractReviewerHeadFromKey(job.key) === headSha;
+    });
+  };
 
   // Commit detector
   const detector = new CommitDetector(
@@ -218,13 +286,33 @@ const TheJanitor: Plugin = async (ctx) => {
       return result.trim();
     },
     async (sha, signal) => {
+      if (runtime.disposed) return;
       log(`new commit detected: ${sha} via ${signal.source}`);
 
       if (janitorCommitEnabled) {
-        orchestrator.enqueue(sha);
+        if (!control.pausedJanitor) {
+          if (runtime.disposed) return;
+          orchestrator.enqueue(sha);
+        }
       }
 
       if (reviewerCommitEnabled) {
+        if (control.pausedReviewer) {
+          return;
+        }
+        if (runtime.disposed) return;
+        if (hasReviewerHeadInFlight(sha)) {
+          log(
+            `[reviewer] skipping commit-triggered in-flight duplicate: ${sha.slice(0, 8)}`,
+          );
+          return;
+        }
+        if (store.hasProcessedReviewerHead(sha)) {
+          log(
+            `[reviewer] skipping commit-triggered duplicate for processed head: ${sha.slice(0, 8)}`,
+          );
+          return;
+        }
         const commit = await getCommitContext(sha, config, exec);
 
         if (!commit.patch.trim() && commit.changedFiles.length === 0) {
@@ -269,6 +357,7 @@ const TheJanitor: Plugin = async (ctx) => {
           return `branch:${branch}:${headSha}`;
         },
         async (key, signal) => {
+          if (runtime.disposed) return;
           log(`new PR state detected: ${key} via ${signal.source}`);
 
           let prContext: PrContext;
@@ -286,21 +375,18 @@ const TheJanitor: Plugin = async (ctx) => {
             const ghPr = await getCurrentPrFromGh(exec);
             if (!ghPr) {
               // PR was open when getCurrentKey ran but is now gone.
-              // Throw retryable so verify does NOT mark this key as
-              // processed — next poll's getCurrentKey returns null and
-              // skips naturally.
-              throw new RetryableSignalError(
-                `PR disappeared between detection and callback: ${key}`,
-              );
+              // Log and return — key is already marked processed by verify().
+              warn(`PR disappeared between detection and callback: ${key}`);
+              return;
             }
 
             if (ghPr.number !== detectedPrNum || ghPr.headSha !== detectedSha) {
               // PR state advanced between detection and re-fetch.
-              // Throw retryable so verify doesn't commit the stale key —
-              // the new state will be picked up on the next poll cycle.
-              throw new RetryableSignalError(
+              // Log and return — the new state will be picked up as a new key.
+              warn(
                 `PR state changed between detection and callback: key=${key} but re-fetch got pr:${ghPr.number}:${ghPr.headSha}`,
               );
+              return;
             }
 
             prContext = await getPrContext({
@@ -336,12 +422,45 @@ const TheJanitor: Plugin = async (ctx) => {
             return;
           }
 
+          // Persist observed PR key immediately to avoid restart re-triggers
+          // while a review is still running.
+          if (!store.hasProcessedPrKey(prContext.key)) {
+            store.addPrKey(prContext.key);
+          }
+
           if (janitorPrEnabled) {
-            orchestrator.enqueue(prContext.headSha);
+            if (!control.pausedJanitor) {
+              if (runtime.disposed) return;
+              if (
+                janitorCommitEnabled &&
+                store.hasProcessedSha(prContext.headSha)
+              ) {
+                log(
+                  `[janitor] skipping PR-triggered duplicate for processed SHA: ${prContext.headSha.slice(0, 8)}`,
+                );
+              } else {
+                orchestrator.enqueue(prContext.headSha);
+              }
+            }
           }
 
           if (reviewerPrEnabled) {
-            reviewerOrchestrator.enqueue(prContext);
+            if (!control.pausedReviewer) {
+              if (runtime.disposed) return;
+              if (hasReviewerHeadInFlight(prContext.headSha)) {
+                log(
+                  `[reviewer] skipping PR-triggered in-flight duplicate: ${prContext.headSha.slice(0, 8)}`,
+                );
+                return;
+              }
+              if (store.hasProcessedReviewerHead(prContext.headSha)) {
+                log(
+                  `[reviewer] skipping PR-triggered duplicate for processed head: ${prContext.headSha.slice(0, 8)}`,
+                );
+                return;
+              }
+              reviewerOrchestrator.enqueue(prContext);
+            }
           }
         },
         config.autoReview.debounceMs,
@@ -361,8 +480,24 @@ const TheJanitor: Plugin = async (ctx) => {
   }
 
   if (prDetector) {
+    for (const key of previouslyProcessedPrKeys) {
+      prDetector.markProcessed(key);
+    }
     prDetector.start();
   }
+
+  stopActiveRuntime = async () => {
+    runtime.disposed = true;
+    detector.stop();
+    prDetector?.stop();
+    orchestrator.shutdown();
+    reviewerOrchestrator.shutdown();
+    orchestrator.clearPending();
+    reviewerOrchestrator.clearPending();
+    await orchestrator.abortRunning(ctx);
+    await reviewerOrchestrator.abortRunning(ctx);
+    log('plugin runtime stopped: detectors halted');
+  };
 
   toast(ctx, 'Janitor: watchers active');
   log(`initialized — watching ${gitDir}`);
@@ -383,45 +518,233 @@ const TheJanitor: Plugin = async (ctx) => {
         };
       }
 
+      const commands = (opencodeConfig.command ?? {}) as Record<
+        string,
+        { description?: string; template?: string }
+      >;
+      commands.janitor = {
+        description:
+          'Janitor control: /janitor status|stop|resume [janitor|reviewer|all], /janitor clean, /janitor review [pr#]',
+        template: '',
+      };
+      opencodeConfig.command = commands;
+
       opencodeConfig.agent = agents;
       log("registered agents 'janitor' and 'code-reviewer' in config hook");
     },
 
-    cleanup: () => {
-      detector.stop();
-      prDetector?.stop();
-      log('plugin cleanup: detectors stopped');
+    'command.execute.before': async (
+      hookInput: { command: string; sessionID: string; arguments: string },
+      _output: { parts: Array<{ type: string; text?: string }> },
+    ) => {
+      if (runtime.disposed) return;
+      if (hookInput.command !== 'janitor') return;
+
+      // Workaround until opencode supports hook-level short-circuiting for
+      // command.execute.before without throwing.
+      // Reference: https://github.com/anomalyco/opencode/pull/9307
+      const handled = (): never => {
+        throw new Error('__handled__');
+      };
+
+      const args = hookInput.arguments.trim().split(/\s+/).filter(Boolean);
+      const action = (args[0] ?? 'status').toLowerCase();
+      const target = (args[1] ?? 'all').toLowerCase();
+      const usage =
+        'Usage: /janitor status | /janitor stop|resume [janitor|reviewer|all] | /janitor clean | /janitor review [pr#]';
+
+      const respond = async (text: string) =>
+        injectMessage(ctx, hookInput.sessionID, text, true);
+
+      const renderJobs = () => {
+        const janitorJobs = orchestrator.getJobsSnapshot();
+        const reviewerJobs = reviewerOrchestrator.getJobsSnapshot();
+        const janitorRunning = janitorJobs.filter(
+          (j) => j.status === 'running',
+        );
+        const janitorPending = janitorJobs.filter(
+          (j) => j.status === 'pending',
+        );
+        const reviewerRunning = reviewerJobs.filter(
+          (j) => j.status === 'running',
+        );
+        const reviewerPending = reviewerJobs.filter(
+          (j) => j.status === 'pending',
+        );
+
+        return [
+          `paused: janitor=${control.pausedJanitor}, reviewer=${control.pausedReviewer}`,
+          `jobs: janitor running=${janitorRunning.length}, pending=${janitorPending.length}; reviewer running=${reviewerRunning.length}, pending=${reviewerPending.length}`,
+          janitorRunning.length
+            ? `janitor running: ${janitorRunning.map((j) => `${j.key} (${j.sessionId ?? 'starting'})`).join(', ')}`
+            : 'janitor running: none',
+          reviewerRunning.length
+            ? `reviewer running: ${reviewerRunning.map((j) => `${j.key} (${j.sessionId ?? 'starting'})`).join(', ')}`
+            : 'reviewer running: none',
+        ].join('\n');
+      };
+
+      if (action === 'status') {
+        await respond(`📋 **[Janitor Control]**\n\n${renderJobs()}`);
+        handled();
+      }
+
+      if (!['stop', 'resume', 'clean', 'review'].includes(action)) {
+        await respond(usage);
+        handled();
+      }
+
+      const targetJanitor = target === 'all' || target === 'janitor';
+      const targetReviewer = target === 'all' || target === 'reviewer';
+
+      if (
+        (action === 'stop' || action === 'resume') &&
+        !['all', 'janitor', 'reviewer'].includes(target)
+      ) {
+        await respond(usage);
+        handled();
+      }
+
+      if (action === 'stop') {
+        if (targetJanitor) control.pausedJanitor = true;
+        if (targetReviewer) control.pausedReviewer = true;
+        store.setPaused({
+          janitor: control.pausedJanitor,
+          reviewer: control.pausedReviewer,
+        });
+
+        let dropped = 0;
+        let aborted = 0;
+        if (targetJanitor) {
+          dropped += orchestrator.clearPending();
+          aborted += await orchestrator.abortRunning(ctx);
+        }
+        if (targetReviewer) {
+          dropped += reviewerOrchestrator.clearPending();
+          aborted += await reviewerOrchestrator.abortRunning(ctx);
+        }
+
+        await respond(
+          `🛑 **[Janitor Control]** stopped ${target}. dropped=${dropped}, aborted=${aborted}\n\n${renderJobs()}`,
+        );
+        handled();
+      }
+
+      if (action === 'resume') {
+        if (targetJanitor) control.pausedJanitor = false;
+        if (targetReviewer) control.pausedReviewer = false;
+        store.setPaused({
+          janitor: control.pausedJanitor,
+          reviewer: control.pausedReviewer,
+        });
+        await respond(
+          `▶️ **[Janitor Control]** resumed ${target}\n\n${renderJobs()}`,
+        );
+        handled();
+      }
+
+      if (action === 'clean') {
+        const branch = (await exec('git rev-parse --abbrev-ref HEAD')).trim();
+        const headSha = (await exec('git rev-parse HEAD')).trim();
+        if (!branch || branch === 'HEAD' || !headSha) {
+          await respond(
+            '⚠️ **[Janitor Control]** clean requires a checked-out branch and a valid HEAD',
+          );
+          handled();
+        }
+        const workspace = await getWorkspaceCommitContext(config, exec);
+        if (!workspace.patch.trim() && workspace.changedFiles.length === 0) {
+          await respond(
+            '🧼 **[Janitor Control]** clean: no workspace changes to review',
+          );
+          handled();
+        }
+        const runKey = `workspace:${branch}:${headSha}`;
+        orchestrator.enqueue(runKey, hookInput.sessionID);
+        await respond(`🧼 **[Janitor Control]** clean queued: ${runKey}`);
+        handled();
+      }
+
+      if (action === 'review') {
+        let prContext: PrContext | null = null;
+        const prArg = args[1];
+
+        if (prArg) {
+          if (!/^\d+$/.test(prArg)) {
+            await respond(
+              '⚠️ **[Janitor Control]** review expects optional numeric PR number, e.g. `/janitor review 123`',
+            );
+            handled();
+          }
+          const prNumber = Number(prArg);
+          if (!(await isGhAvailable(exec))) {
+            await respond(
+              '⚠️ **[Janitor Control]** review PR requires gh CLI availability',
+            );
+            handled();
+          }
+          const ghPr = await getPrByNumberFromGh(exec, prNumber);
+          if (!ghPr) {
+            await respond(
+              `⚠️ **[Janitor Control]** review: PR #${prNumber} not found or not open`,
+            );
+            handled();
+          }
+          const selectedPr = ghPr!;
+          prContext = await getPrContext({
+            baseRef: selectedPr.baseRef,
+            headRef: selectedPr.headRef,
+            headSha: selectedPr.headSha,
+            number: selectedPr.number,
+            config,
+            exec,
+          });
+        } else {
+          prContext = await getWorkspacePrContext(config, exec);
+        }
+
+        if (!prContext) {
+          await respond(
+            '⚠️ **[Janitor Control]** review requires a checked-out branch and valid repo state',
+          );
+          handled();
+        }
+
+        const reviewContext = prContext!;
+
+        if (
+          !reviewContext.patch.trim() &&
+          reviewContext.changedFiles.length === 0
+        ) {
+          await respond(
+            '🔍 **[Janitor Control]** review: no changes to review',
+          );
+          handled();
+        }
+
+        if (hasReviewerHeadInFlight(reviewContext.headSha)) {
+          await respond(
+            `🔍 **[Janitor Control]** review skipped: in-flight ${reviewContext.headSha.slice(0, 8)}`,
+          );
+          handled();
+        }
+
+        reviewerOrchestrator.enqueue(reviewContext, hookInput.sessionID);
+        await respond(
+          `🔍 **[Janitor Control]** review queued: ${reviewContext.key}`,
+        );
+        handled();
+      }
+
+      await respond(usage);
+      handled();
     },
 
-    // Also bootstraps session tracking: after a restart the plugin may
-    // miss the initial session.created event, so we capture the sessionID
-    // from the first tool call we see.
     'tool.execute.after': async (
       input: { tool: string; sessionID: string; callID: string },
       output: { title: string; output: string; metadata: unknown },
     ) => {
-      // Bootstrap session tracking from any tool call — covers the case
-      // where the plugin loads into an already-existing session and never
-      // receives a session.created event.
-      if (input.sessionID) {
-        const janitorOwnsSession = orchestrator.isOwnSession(input.sessionID);
-        const reviewerOwnsSession = reviewerOrchestrator.isOwnSession(
-          input.sessionID,
-        );
-
-        // Never promote janitor/reviewer run sessions as delivery roots.
-        if (!janitorOwnsSession && !reviewerOwnsSession) {
-          // Bootstrap only when root tracking is missing; normal root rotation
-          // is handled by session.created events.
-          if (!orchestrator.hasRootSession()) {
-            orchestrator.sessionAvailable(input.sessionID);
-          }
-          if (!reviewerOrchestrator.hasRootSession()) {
-            reviewerOrchestrator.sessionAvailable(input.sessionID);
-          }
-        }
-      }
-
+      if (runtime.disposed) return;
       if (input.tool !== 'Bash' && input.tool !== 'bash') return;
 
       const text = output.title || output.output || '';
@@ -445,26 +768,15 @@ const TheJanitor: Plugin = async (ctx) => {
       }
     },
 
-    // Session tracking + review completion detection
+    // Review completion detection
     event: async (input: {
       event: {
         type: string;
         properties?: Record<string, unknown>;
       };
     }) => {
+      if (runtime.disposed) return;
       const { event } = input;
-
-      // Track current root session
-      if (event.type === 'session.created') {
-        const info = event.properties?.info as
-          | { id?: string; parentID?: string }
-          | undefined;
-        if (info?.id && !info?.parentID) {
-          log(`tracking root session: ${info.id}`);
-          orchestrator.sessionAvailable(info.id);
-          reviewerOrchestrator.sessionAvailable(info.id);
-        }
-      }
 
       // Detect review session completion
       if (event.type === 'session.status') {

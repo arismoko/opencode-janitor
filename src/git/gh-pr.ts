@@ -98,6 +98,64 @@ export async function getCurrentPrFromGh(
 }
 
 /**
+ * Get a specific PR by number via `gh pr view <number>`.
+ * Returns null for expected no-PR states and closed/merged PRs.
+ */
+export async function getPrByNumberFromGh(
+  exec: (cmd: string) => Promise<string>,
+  number: number,
+): Promise<GhPrInfo | null> {
+  if (!Number.isFinite(number) || number <= 0) return null;
+  try {
+    const repo = await resolveRepoSlug(exec);
+    if (!repo) return null;
+
+    const raw = await exec(
+      `GH_PROMPT_DISABLED=1 gh pr view ${number} --repo '${shellEscape(repo)}' --json number,url,baseRefName,headRefName,headRefOid,state`,
+    );
+
+    let parsed: Record<string, unknown>;
+    try {
+      parsed = JSON.parse(raw.trim());
+    } catch {
+      log('[gh-pr] failed to parse gh pr view JSON output');
+      return null;
+    }
+
+    if (parsed.state !== 'OPEN') return null;
+
+    const parsedNumber = parsed.number;
+    if (typeof parsedNumber !== 'number' || !Number.isFinite(parsedNumber)) {
+      log('[gh-pr] missing or invalid PR number in gh output');
+      return null;
+    }
+
+    const baseRef = parsed.baseRefName;
+    const headRef = parsed.headRefName;
+    const headSha = parsed.headRefOid;
+
+    if (
+      typeof baseRef !== 'string' ||
+      typeof headRef !== 'string' ||
+      typeof headSha !== 'string'
+    ) {
+      log('[gh-pr] missing ref fields in gh output');
+      return null;
+    }
+
+    return {
+      number: parsedNumber,
+      baseRef,
+      headRef,
+      headSha,
+    };
+  } catch (err) {
+    if (isExpectedNoPrError(err)) return null;
+    throw err;
+  }
+}
+
+/**
  * Post a review comment on a PR using `gh pr review`.
  * Returns true on success, false on any failure.
  */

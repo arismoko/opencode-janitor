@@ -10,9 +10,10 @@ export interface AgentDefinition {
     variant?: string;
     temperature: number;
     prompt: string;
-    /** Controls agent visibility: 'subagent' hides from picker UI */
+    /** Controls agent visibility in picker UI. */
     mode?: 'subagent' | 'primary' | 'all';
-    tools?: Record<string, boolean>;
+    /** Permission rules merged by OpenCode into agent.permission. */
+    permission?: Record<string, string | Record<string, string>>;
   };
 }
 
@@ -31,7 +32,7 @@ Your ONLY concerns are P0-class structural issues in these categories: ${enabled
 
 You do NOT look for bugs, correctness issues, runtime failures, style preferences, or performance issues.
 
-You have access to codebase exploration tools: glob, grep, Read, ast_grep_search.
+You have access to codebase exploration tools: glob, grep, list, read.
 Use them to trace references, find duplicates, and verify your findings with evidence.
 
 Every finding you report MUST be immediately actionable. If it's not worth fixing right now, don't report it.
@@ -61,12 +62,14 @@ export function createJanitorAgent(config: JanitorConfig): AgentDefinition {
       variant: config.agents.janitor.variant,
       temperature: 0.1,
       prompt: buildSystemPrompt(config),
-      mode: 'subagent',
-      tools: {
-        glob: true,
-        grep: true,
-        Read: true,
-        ast_grep_search: true,
+      mode: 'primary',
+      permission: {
+        '*': 'deny',
+        glob: 'allow',
+        grep: 'allow',
+        list: 'allow',
+        read: 'allow',
+        lsp: 'allow',
       },
     },
   };

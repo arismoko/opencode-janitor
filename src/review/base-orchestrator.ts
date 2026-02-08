@@ -9,7 +9,14 @@ export interface BaseJob<TContext, TResult> {
   context: TContext;
   deliverySessionId?: string;
   sessionId?: string;
-  status: 'pending' | 'running' | 'completed' | 'failed';
+  status:
+    | 'pending'
+    | 'starting'
+    | 'running'
+    | 'completed'
+    | 'failed'
+    | 'cancelled';
+  cancelRequested?: boolean;
   enqueuedAt: Date;
   startedAt?: Date;
   completedAt?: Date;
@@ -25,7 +32,7 @@ type Executor<TContext> = (context: TContext) => Promise<string>;
  * Policies:
  * - Serial execution (concurrency=1 default)
  * - Burst coalescing: keeps oldest running + latest pending
- * - Running reviews are never cancelled
+ * - Running reviews can be explicitly cancelled by user command
  * - Review execution never blocks on user root sessions
  *
  * Subclasses provide:
@@ -38,7 +45,7 @@ export abstract class BaseOrchestrator<TContext, TResult> {
   private sessionToKey = new Map<string, string>();
   private queue: string[] = [];
   private activeCount = 0;
-  private latestSessionId?: string;
+  private halted = false;
   private ctx?: PluginInput;
 
   protected readonly tag: string;
@@ -73,40 +80,83 @@ export abstract class BaseOrchestrator<TContext, TResult> {
     this.ctx = ctx;
   }
 
-  /**
-   * Check whether a session ID belongs to a review session owned by this
-   * orchestrator.
-   */
-  isOwnSession(sessionId: string): boolean {
-    return this.sessionToKey.has(sessionId);
+  /** Snapshot current jobs for command/status views. */
+  getJobsSnapshot(): Array<
+    Pick<
+      BaseJob<TContext, TResult>,
+      | 'key'
+      | 'status'
+      | 'sessionId'
+      | 'deliverySessionId'
+      | 'enqueuedAt'
+      | 'startedAt'
+    >
+  > {
+    return [...this.jobs.values()].map((job) => ({
+      key: job.key,
+      status: job.status,
+      sessionId: job.sessionId,
+      deliverySessionId: job.deliverySessionId,
+      enqueuedAt: job.enqueuedAt,
+      startedAt: job.startedAt,
+    }));
   }
 
-  /** Whether a user session is known for delivery backfill. */
-  hasRootSession(): boolean {
-    return Boolean(this.latestSessionId);
-  }
-
-  /**
-   * Notify the orchestrator that a root user session is available for
-   * delivering review messages.
-   */
-  sessionAvailable(sessionId: string): void {
-    if (sessionId === this.latestSessionId) return;
-    this.latestSessionId = sessionId;
-    for (const key of this.queue) {
+  /** Drop all pending jobs from the queue. Running jobs are untouched. */
+  clearPending(): number {
+    let dropped = 0;
+    const keys = [...this.queue];
+    this.queue = [];
+    for (const key of keys) {
       const job = this.jobs.get(key);
-      if (job && job.status === 'pending' && !job.deliverySessionId) {
-        job.deliverySessionId = sessionId;
+      if (!job || job.status !== 'pending') continue;
+      this.jobs.delete(key);
+      dropped++;
+    }
+    return dropped;
+  }
+
+  /** Abort all currently running sessions owned by this orchestrator. */
+  async abortRunning(ctx: PluginInput): Promise<number> {
+    let aborted = 0;
+    for (const job of [...this.jobs.values()]) {
+      if (job.status !== 'running' && job.status !== 'starting') continue;
+      if (!job.sessionId) {
+        job.cancelRequested = true;
+        aborted++;
+        continue;
+      }
+      try {
+        await ctx.client.session.abort({
+          path: { id: job.sessionId },
+          query: { directory: ctx.directory },
+        });
+        job.status = 'cancelled';
+        job.completedAt = new Date();
+        this.sessionToKey.delete(job.sessionId);
+        this.jobs.delete(job.key);
+        this.activeCount = Math.max(0, this.activeCount - 1);
+        aborted++;
+      } catch {
+        warn(`[${this.tag}] failed to abort session: ${job.sessionId}`);
       }
     }
-    log(`[${this.tag}] delivery session available: ${sessionId}`);
+    if (aborted > 0) {
+      this.processQueue();
+    }
+    return aborted;
   }
 
   /**
    * Enqueue a context for review.
    * Applies burst coalescing if dropIntermediate is enabled.
    */
-  enqueue(context: TContext): void {
+  enqueue(context: TContext, deliverySessionId?: string): void {
+    if (this.halted) {
+      log(`[${this.tag}] enqueue ignored while halted`);
+      return;
+    }
+
     const key = this.extractKey(context);
 
     // Already processing this key
@@ -118,7 +168,7 @@ export abstract class BaseOrchestrator<TContext, TResult> {
     const job: BaseJob<TContext, TResult> = {
       key,
       context,
-      deliverySessionId: this.latestSessionId,
+      deliverySessionId,
       status: 'pending',
       enqueuedAt: new Date(),
     };
@@ -146,6 +196,7 @@ export abstract class BaseOrchestrator<TContext, TResult> {
    */
   private async processQueue(): Promise<void> {
     while (
+      !this.halted &&
       this.activeCount < this.config.queue.concurrency &&
       this.queue.length > 0
     ) {
@@ -156,11 +207,33 @@ export abstract class BaseOrchestrator<TContext, TResult> {
       if (!job || job.status !== 'pending') continue;
 
       this.activeCount++;
-      job.status = 'running';
+      job.status = 'starting';
       job.startedAt = new Date();
 
       try {
         const sessionId = await this.executor(job.context);
+
+        if (job.cancelRequested) {
+          if (this.ctx) {
+            try {
+              await this.ctx.client.session.abort({
+                path: { id: sessionId },
+                query: { directory: this.ctx.directory },
+              });
+            } catch {
+              // Best effort; session may already be terminal.
+            }
+          }
+          job.status = 'cancelled';
+          job.completedAt = new Date();
+          this.jobs.delete(key);
+          this.activeCount = Math.max(0, this.activeCount - 1);
+          log(`[${this.tag}] cancelled during startup: ${key} → ${sessionId}`);
+          this.processQueue();
+          continue;
+        }
+
+        job.status = 'running';
         job.sessionId = sessionId;
         this.sessionToKey.set(sessionId, key);
         log(`[${this.tag}] review started: ${key} → ${sessionId}`);
@@ -188,6 +261,11 @@ export abstract class BaseOrchestrator<TContext, TResult> {
     }
   }
 
+  /** Halt new queue work for runtime teardown. */
+  shutdown(): void {
+    this.halted = true;
+  }
+
   /**
    * Handle session completion event.
    * Delegates to subclass `onJobCompleted` for result extraction and delivery.
@@ -211,6 +289,9 @@ export abstract class BaseOrchestrator<TContext, TResult> {
     log(`[${this.tag}] review completed: ${key}`);
 
     try {
+      if (!job.deliverySessionId) {
+        job.deliverySessionId = await this.resolveLatestRootSessionId(ctx);
+      }
       await this.onJobCompleted(job, sessionId, ctx, config);
     } catch (err) {
       job.status = 'failed';
@@ -246,6 +327,7 @@ export abstract class BaseOrchestrator<TContext, TResult> {
   ): Promise<string> {
     const messagesResult = await ctx.client.session.messages({
       path: { id: sessionId },
+      query: { directory: ctx.directory },
     });
     const messages = (messagesResult.data ?? []) as Array<{
       info?: { role: string };
@@ -263,5 +345,35 @@ export abstract class BaseOrchestrator<TContext, TResult> {
     }
 
     return assistantTexts.join('\n\n');
+  }
+
+  private async resolveLatestRootSessionId(
+    ctx: PluginInput,
+  ): Promise<string | undefined> {
+    try {
+      const result = await ctx.client.session.list({
+        query: {
+          directory: ctx.directory,
+        },
+      });
+      const sessions = ((result as { data?: unknown[] }).data ?? []) as Array<{
+        id?: string;
+        title?: string;
+        parentID?: string;
+        time?: { updated?: number };
+      }>;
+      const root = sessions
+        .filter(
+          (session) =>
+            session.id &&
+            !session.parentID &&
+            !session.title?.startsWith('[janitor-run] ') &&
+            !session.title?.startsWith('[reviewer-run] '),
+        )
+        .sort((a, b) => (b.time?.updated ?? 0) - (a.time?.updated ?? 0))[0];
+      return root?.id;
+    } catch {
+      return undefined;
+    }
   }
 }

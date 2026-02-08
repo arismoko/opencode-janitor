@@ -11,7 +11,7 @@ function buildReviewerPrompt(): string {
 
 Your concerns span ALL domains: bugs, security vulnerabilities, performance issues, architecture problems, documentation drift, and spec compliance.
 
-You have access to codebase exploration tools: glob, grep, Read, ast_grep_search.
+You have access to codebase exploration tools: glob, grep, list, read.
 Use them to trace references, verify context, and ground your findings in evidence.
 
 You MUST output ONLY valid JSON — no prose, no markdown, no explanation outside the JSON.
@@ -59,12 +59,14 @@ export function createReviewerAgent(config: JanitorConfig): AgentDefinition {
       variant: config.agents.reviewer.variant,
       temperature: 0.1,
       prompt: buildReviewerPrompt(),
-      mode: 'subagent',
-      tools: {
-        glob: true,
-        grep: true,
-        Read: true,
-        ast_grep_search: true,
+      mode: 'primary',
+      permission: {
+        '*': 'deny',
+        glob: 'allow',
+        grep: 'allow',
+        list: 'allow',
+        read: 'allow',
+        lsp: 'allow',
       },
     },
   };

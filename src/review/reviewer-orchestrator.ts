@@ -28,12 +28,19 @@ export class ReviewerOrchestrator extends BaseOrchestrator<
   PrContext,
   ReviewerResult
 > {
+  private onReviewCompleted?: (key: string) => void;
+
   constructor(
     config: JanitorConfig,
     executor: ReviewerExecutor,
     private readonly postGhReview?: GhPostReview,
   ) {
     super(config, executor, 'reviewer-orchestrator');
+  }
+
+  /** Register a callback invoked when a reviewer run completes successfully. */
+  onCompleted(callback: (key: string) => void): void {
+    this.onReviewCompleted = callback;
   }
 
   protected extractKey(context: PrContext): string {
@@ -51,13 +58,20 @@ export class ReviewerOrchestrator extends BaseOrchestrator<
     config: JanitorConfig,
   ): Promise<void> {
     const rawOutput = await this.extractAssistantOutput(sessionId, ctx);
-    const result = parseReviewerOutput(rawOutput, job.key);
+    const resultId =
+      job.key.startsWith('workspace:') && job.key.split(':').length >= 3
+        ? job.key.split(':')[2]
+        : job.key;
+    const result = parseReviewerOutput(rawOutput, resultId);
     const report = formatReviewerReport(result);
 
     job.completedAt = new Date();
     job.result = result;
 
     await this.deliverResults(result, report, job, ctx, config);
+
+    // Persist key only after successful extraction + delivery
+    this.onReviewCompleted?.(job.key);
   }
 
   private async deliverResults(

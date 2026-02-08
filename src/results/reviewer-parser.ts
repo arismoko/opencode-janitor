@@ -99,6 +99,7 @@ function extractJSON(raw: string): Record<string, unknown> | null {
       if (depth === 0) end = i;
       depth++;
     } else if (ch === '{') {
+      if (depth === 0) continue;
       depth--;
       if (depth === 0 && end !== -1) {
         try {

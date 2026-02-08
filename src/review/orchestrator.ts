@@ -54,9 +54,13 @@ export class ReviewOrchestrator extends BaseOrchestrator<string, ReviewResult> {
     config: JanitorConfig,
   ): Promise<void> {
     const rawOutput = await this.extractAssistantOutput(sessionId, ctx);
+    const sha =
+      job.key.startsWith('workspace:') && job.key.split(':').length >= 3
+        ? job.key.split(':')[2]
+        : job.key;
 
     // Process through the full pipeline (parse -> suppress -> annotate -> record)
-    const pipelineResult = await processReviewOutput(rawOutput, job.key, {
+    const pipelineResult = await processReviewOutput(rawOutput, sha, {
       suppressionStore: this.suppressionStore,
       historyStore: this.historyStore,
       config,
@@ -68,9 +72,6 @@ export class ReviewOrchestrator extends BaseOrchestrator<string, ReviewResult> {
     job.completedAt = new Date();
     job.result = result;
 
-    // Persist the SHA as processed only after successful completion
-    this.onReviewCompleted?.(job.key);
-
     // Deliver results via configured sinks
     await this.deliverResults(
       result,
@@ -80,6 +81,9 @@ export class ReviewOrchestrator extends BaseOrchestrator<string, ReviewResult> {
       enrichment,
       suppressedCount,
     );
+
+    // Persist the SHA only after successful extraction + delivery
+    this.onReviewCompleted?.(job.key);
   }
 
   /**

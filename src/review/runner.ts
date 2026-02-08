@@ -15,12 +15,13 @@ export async function spawnJanitorReview(
   ctx: PluginInput,
   opts: {
     prompt: string;
+    runKey: string;
     config: JanitorConfig;
   },
 ): Promise<string> {
   return spawnReviewSession(ctx, {
     prompt: opts.prompt,
-    title: 'Janitor Review',
+    title: `[janitor-run] ${opts.runKey}`,
     agent: 'janitor',
     modelId: opts.config.agents.janitor.modelId ?? opts.config.model.id,
   });
@@ -34,12 +35,13 @@ export async function spawnReviewerReview(
   ctx: PluginInput,
   opts: {
     prompt: string;
+    runKey: string;
     config: JanitorConfig;
   },
 ): Promise<string> {
   return spawnReviewSession(ctx, {
     prompt: opts.prompt,
-    title: 'Code Review',
+    title: `[reviewer-run] ${opts.runKey}`,
     agent: 'code-reviewer',
     modelId: opts.config.agents.reviewer.modelId ?? opts.config.model.id,
   });
