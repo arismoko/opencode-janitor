@@ -20,13 +20,13 @@ export const REVIEWER_SEVERITY_GUIDE = [
   'P3: Nice to have — style nits, minor improvements, documentation gaps',
 ] as const;
 
-/** Allowed severity levels for reviewer findings (derived from REVIEWER_SEVERITY_GUIDE) */
-export const REVIEWER_SEVERITIES = REVIEWER_SEVERITY_GUIDE.map(
-  (s) => s.split(':')[0] as 'P0' | 'P1' | 'P2' | 'P3',
-);
-
 /** Severity level type for reviewer findings */
 export type ReviewerSeverity = 'P0' | 'P1' | 'P2' | 'P3';
+
+/** Allowed severity levels for reviewer findings (derived from REVIEWER_SEVERITY_GUIDE) */
+export const REVIEWER_SEVERITIES = REVIEWER_SEVERITY_GUIDE.map(
+  (s) => s.split(':')[0] as ReviewerSeverity,
+);
 
 /** Allowed domain categories for reviewer findings */
 export const REVIEWER_DOMAINS = [

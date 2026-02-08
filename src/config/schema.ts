@@ -24,6 +24,7 @@ export const JanitorConfigSchema = z.object({
           enabled: z.boolean().default(true),
           trigger: TriggerModeSchema.default('commit'),
           modelId: z.string().optional(),
+          variant: z.string().optional(),
         })
         .default(() => ({ enabled: true, trigger: 'commit' as const })),
       reviewer: z
@@ -31,6 +32,7 @@ export const JanitorConfigSchema = z.object({
           enabled: z.boolean().default(true),
           trigger: TriggerModeSchema.default('pr'),
           modelId: z.string().optional(),
+          variant: z.string().optional(),
         })
         .default(() => ({
           enabled: true,

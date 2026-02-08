@@ -56,6 +56,7 @@ export function createReviewerAgent(config: JanitorConfig): AgentDefinition {
       'Comprehensive code reviewer for PRs. Detects bugs, security vulnerabilities, performance issues, architecture problems, and docs/spec drift.',
     config: {
       model: config.agents.reviewer.modelId ?? config.model.id,
+      variant: config.agents.reviewer.variant,
       temperature: 0.1,
       prompt: buildReviewerPrompt(),
       mode: 'subagent',
