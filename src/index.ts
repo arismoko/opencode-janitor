@@ -23,9 +23,12 @@ const TheJanitor: Plugin = async (ctx) => {
     return { name: 'the-janitor' } as any;
   }
 
-  // Bridge ctx.$ to the exec(cmd) => string interface our modules expect
+  // Bridge ctx.$ to the exec(cmd) => string interface our modules expect.
+  // Uses { raw } to prevent Bun's shell from escaping the command as a
+  // single token — without this, "git log -1" would be treated as one
+  // executable name instead of "git" with arguments "log" and "-1".
   const exec = async (cmd: string): Promise<string> => {
-    const result = await ctx.$`${cmd}`.quiet().nothrow().text();
+    const result = await ctx.$`${{ raw: cmd }}`.quiet().nothrow().text();
     return result;
   };
 
