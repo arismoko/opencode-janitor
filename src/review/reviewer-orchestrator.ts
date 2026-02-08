@@ -76,7 +76,7 @@ export class ReviewerOrchestrator extends BaseOrchestrator<
       await deliverReviewerToast(ctx, result);
     }
 
-    if (delivery.sessionMessage && job.parentSessionId) {
+    if (delivery.sessionMessage && job.parentSessionId && !result.clean) {
       await deliverReviewerToSession(ctx, job.parentSessionId, report);
     }
 
