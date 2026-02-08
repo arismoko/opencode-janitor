@@ -3,8 +3,11 @@ import { warn } from './logger';
 
 /**
  * Injects a message into a session without triggering an LLM response.
- * Uses the `noReply: true` flag on the prompt API so the message appears
- * in the conversation history but doesn't interrupt the current flow.
+ *
+ * Uses the synchronous `prompt()` API with `noReply: true` so the server
+ * persists the message and returns a regular JSON response (no SSE streaming).
+ * This gives us confirmation that the message was written to the session
+ * history, unlike `promptAsync` which is fire-and-forget (204 No Content).
  */
 export async function injectMessage(
   ctx: PluginInput,
@@ -12,7 +15,7 @@ export async function injectMessage(
   text: string,
 ): Promise<void> {
   try {
-    await ctx.client.session.promptAsync({
+    await ctx.client.session.prompt({
       path: { id: sessionId },
       body: {
         noReply: true,

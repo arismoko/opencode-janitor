@@ -96,6 +96,7 @@ const TheJanitor: Plugin = async (ctx) => {
         parentSessionId,
         prompt,
         config,
+        agent,
       });
       return sessionId;
     },
@@ -147,7 +148,8 @@ const TheJanitor: Plugin = async (ctx) => {
       log('plugin cleanup: detector stopped');
     },
 
-    agent: { janitor: agent },
+    // Agent registration is not supported by OpenCode's plugin contract.
+    // The janitor persona is injected via the `system` field on promptAsync.
 
     // Accelerator: detect git commit via tool hook.
     // Gated on autoReview.onCommit — the accelerator is just a faster

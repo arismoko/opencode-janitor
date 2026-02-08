@@ -1,6 +1,7 @@
 import type { PluginInput } from '@opencode-ai/plugin';
 import type { JanitorConfig } from '../config/schema';
 import { error, log } from '../utils/logger';
+import type { AgentDefinition } from './janitor-agent';
 
 /** Tools available to the janitor agent */
 const JANITOR_TOOLS: Record<string, boolean> = {
@@ -13,6 +14,11 @@ const JANITOR_TOOLS: Record<string, boolean> = {
 /**
  * Spawn an isolated background session for a janitor review.
  * Returns the session ID for tracking completion.
+ *
+ * The janitor agent is NOT registered in OpenCode's agent registry
+ * (plugins can't do that). Instead we pass the system prompt via the
+ * `system` field and let the session use the default/configured agent
+ * with our custom instructions injected.
  */
 export async function spawnJanitorReview(
   ctx: PluginInput,
@@ -20,6 +26,7 @@ export async function spawnJanitorReview(
     parentSessionId: string;
     prompt: string;
     config: JanitorConfig;
+    agent: AgentDefinition;
   },
 ): Promise<string> {
   log('[runner] spawning review session');
@@ -40,14 +47,15 @@ export async function spawnJanitorReview(
   const sessionId = session.data.id;
   log(`[runner] session created: ${sessionId}`);
 
-  // Build prompt body
+  // Build prompt body — use `system` to inject the janitor persona
+  // instead of `agent: 'janitor'` which would require registry support.
   const body: {
     parts: Array<{ type: 'text'; text: string }>;
-    agent?: string;
+    system?: string;
     tools?: Record<string, boolean>;
     model?: { providerID: string; modelID: string };
   } = {
-    agent: 'janitor',
+    system: opts.agent.config.prompt,
     tools: JANITOR_TOOLS,
     parts: [{ type: 'text', text: opts.prompt }],
   };
