@@ -51,7 +51,7 @@ export function suffix2(location: string): string {
  * structurally similar findings produce the same hash regardless of
  * variable names or literal values.
  */
-export function codeShapeHash(evidence: string): string {
+function codeShapeHash(evidence: string): string {
   const normalized = evidence
     .trim()
     .toLowerCase()
@@ -67,7 +67,7 @@ export function codeShapeHash(evidence: string): string {
  * FNV-1a 32-bit hash → 8-char hex string.
  * Fast, no crypto dependency, good distribution for short strings.
  */
-export function fnv1a(str: string): string {
+function fnv1a(str: string): string {
   let hash = 0x811c9dc5;
   for (let i = 0; i < str.length; i++) {
     hash ^= str.charCodeAt(i);

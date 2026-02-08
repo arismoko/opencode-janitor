@@ -131,6 +131,8 @@ const TheJanitor: Plugin = async (ctx) => {
       });
       return sessionId;
     },
+    suppressionStore,
+    historyStore,
   );
 
   // Persist SHA only after review completes successfully
@@ -141,7 +143,6 @@ const TheJanitor: Plugin = async (ctx) => {
 
   // Give orchestrator access to the SDK client for error injection
   orchestrator.setContext(ctx);
-  orchestrator.setStores(suppressionStore, historyStore);
 
   // Commit detector
   const detector = new CommitDetector(

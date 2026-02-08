@@ -44,12 +44,12 @@ export class ReviewOrchestrator {
   /** Most recently observed root session, used to assign to new/pending jobs. */
   private latestSessionId?: string;
   private ctx?: PluginInput;
-  private suppressionStore!: SuppressionStore;
-  private historyStore!: HistoryStore;
 
   constructor(
     private config: JanitorConfig,
     private executor: ReviewExecutor,
+    private readonly suppressionStore: SuppressionStore,
+    private readonly historyStore: HistoryStore,
   ) {}
 
   /** Register a callback invoked when a review completes successfully. */
@@ -60,15 +60,6 @@ export class ReviewOrchestrator {
   /** Set the plugin context for error notification injection. */
   setContext(ctx: PluginInput): void {
     this.ctx = ctx;
-  }
-
-  /** Set memory stores for suppression + history pipeline processing. */
-  setStores(
-    suppressionStore: SuppressionStore,
-    historyStore: HistoryStore,
-  ): void {
-    this.suppressionStore = suppressionStore;
-    this.historyStore = historyStore;
   }
 
   /**
