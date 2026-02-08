@@ -22,10 +22,7 @@ export function warn(message: string, data?: Record<string, unknown>): void {
   }
 }
 
-export function error(
-  message: string,
-  err?: unknown,
-): void {
+export function error(message: string, err?: unknown): void {
   const errMsg = err instanceof Error ? err.message : String(err ?? '');
   console.error(`[janitor] ERROR: ${message}${errMsg ? ` — ${errMsg}` : ''}`);
 }

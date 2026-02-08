@@ -1,6 +1,6 @@
 import type { PluginInput } from '@opencode-ai/plugin';
 import type { JanitorConfig } from '../config/schema';
-import { log, error } from '../utils/logger';
+import { error, log } from '../utils/logger';
 
 /** Tools available to the janitor agent */
 const JANITOR_TOOLS: Record<string, boolean> = {
@@ -41,7 +41,12 @@ export async function spawnJanitorReview(
   log(`[runner] session created: ${sessionId}`);
 
   // Build prompt body
-  const body: Record<string, unknown> = {
+  const body: {
+    parts: Array<{ type: 'text'; text: string }>;
+    agent?: string;
+    tools?: Record<string, boolean>;
+    model?: { providerID: string; modelID: string };
+  } = {
     agent: 'janitor',
     tools: JANITOR_TOOLS,
     parts: [{ type: 'text', text: opts.prompt }],
@@ -62,7 +67,7 @@ export async function spawnJanitorReview(
   try {
     await ctx.client.session.prompt({
       path: { id: sessionId },
-      body,
+      body: body as any,
       query: { directory: ctx.directory },
     });
     log(`[runner] prompt sent to session: ${sessionId}`);

@@ -19,10 +19,7 @@ const NO_FINDINGS_SENTINEL = 'NO_P0_FINDINGS';
  * 3. **Evidence**: ...
  * 4. **Prescription**: ...
  */
-export function parseReviewOutput(
-  raw: string,
-  sha: string,
-): ReviewResult {
+export function parseReviewOutput(raw: string, sha: string): ReviewResult {
   // Check for clean codebase sentinel
   if (raw.includes(NO_FINDINGS_SENTINEL)) {
     log('[parser] clean codebase — no P0 findings');
@@ -58,26 +55,20 @@ function extractFindings(raw: string): Finding[] {
   const findings: Finding[] = [];
 
   // Match finding blocks — look for Location + Category + Evidence + Prescription
-  const locationPattern =
-    /\*{0,2}Location\*{0,2}:\s*`?([^`\n]+)`?/gi;
-  const categoryPattern =
-    /\*{0,2}Category\*{0,2}:\s*`?(\w+)`?/gi;
+  const locationPattern = /\*{0,2}Location\*{0,2}:\s*`?([^`\n]+)`?/gi;
+  const categoryPattern = /\*{0,2}Category\*{0,2}:\s*`?(\w+)`?/gi;
   const evidencePattern =
     /\*{0,2}Evidence\*{0,2}:\s*(.+?)(?=\n\s*\d+\.\s*\*{0,2}(?:Prescription|Location)|$)/gis;
   const prescriptionPattern =
     /\*{0,2}Prescription\*{0,2}:\s*(.+?)(?=\n\s*(?:\d+\.\s*\*{0,2}Location|\n#{1,3}\s|\n---)|$)/gis;
 
-  const locations = [...raw.matchAll(locationPattern)].map(
-    (m) => m[1].trim(),
-  );
+  const locations = [...raw.matchAll(locationPattern)].map((m) => m[1].trim());
   const categories = [...raw.matchAll(categoryPattern)].map(
     (m) => m[1].trim().toUpperCase() as FindingCategory,
   );
-  const evidences = [...raw.matchAll(evidencePattern)].map(
-    (m) => m[1].trim(),
-  );
-  const prescriptions = [...raw.matchAll(prescriptionPattern)].map(
-    (m) => m[1].trim(),
+  const evidences = [...raw.matchAll(evidencePattern)].map((m) => m[1].trim());
+  const prescriptions = [...raw.matchAll(prescriptionPattern)].map((m) =>
+    m[1].trim(),
   );
 
   const count = Math.min(

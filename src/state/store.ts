@@ -1,5 +1,5 @@
-import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
-import { join, dirname } from 'node:path';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import { log, warn } from '../utils/logger';
 
 const STATE_FILE = '.janitor/state.json';
@@ -19,7 +19,7 @@ export class CommitStore {
   private lastHead: string | null = null;
   private statePath: string;
 
-  constructor(private workspaceDir: string) {
+  constructor(workspaceDir: string) {
     this.statePath = join(workspaceDir, STATE_FILE);
     this.load();
   }
@@ -107,10 +107,7 @@ export class CommitStore {
     if (this.processed.size <= MAX_PROCESSED) return;
 
     const entries = [...this.processed];
-    const toRemove = entries.slice(
-      0,
-      entries.length - MAX_PROCESSED,
-    );
+    const toRemove = entries.slice(0, entries.length - MAX_PROCESSED);
     for (const sha of toRemove) {
       this.processed.delete(sha);
     }

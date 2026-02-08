@@ -1,6 +1,6 @@
-import { watch, existsSync, type FSWatcher } from 'node:fs';
-import { log, warn } from '../utils/logger';
+import { existsSync, type FSWatcher, watch } from 'node:fs';
 import type { CommitSignal, SignalSource } from '../types';
+import { log, warn } from '../utils/logger';
 
 export type CommitCallback = (
   sha: string,
@@ -53,13 +53,9 @@ export class CommitDetector {
         continue;
       }
       try {
-        const watcher = watch(
-          target,
-          { recursive: true },
-          () => {
-            this.signal('fswatch');
-          },
-        );
+        const watcher = watch(target, { recursive: true }, () => {
+          this.signal('fswatch');
+        });
         this.watchers.push(watcher);
         log(`[commit-detector] watching: ${target}`);
       } catch {
