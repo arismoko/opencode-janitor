@@ -1,14 +1,15 @@
 import type { Finding, FindingCategory, ReviewResult } from '../types';
+import { FINDING_CATEGORIES } from '../types';
 import { log } from '../utils/logger';
 
-const VALID_CATEGORIES: FindingCategory[] = ['DRY', 'DEAD', 'STRUCTURAL'];
+const VALID_CATEGORIES: readonly string[] = FINDING_CATEGORIES;
 
 /**
  * Parse raw agent output into a structured ReviewResult.
  *
  * Expects findings in the format:
  * 1. **Location**: file:line
- * 2. **Category**: DRY | DEAD | STRUCTURAL
+ * 2. **Category**: DRY | DEAD | STRUCTURAL (derived from FINDING_CATEGORIES)
  * 3. **Evidence**: ...
  * 4. **Prescription**: ...
  */

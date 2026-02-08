@@ -1,4 +1,5 @@
 import type { CommitContext } from '../types';
+import { CATEGORY_PIPE_STR } from '../types';
 
 export interface PromptConfig {
   categories: string[];
@@ -98,7 +99,7 @@ ${config.suppressionsBlock ? `\n# PREVIOUSLY REVIEWED (may be stale — verify b
 For each finding, output exactly:
 
 1. **Location**: file:line
-2. **Category**: DRY | DEAD | STRUCTURAL
+2. **Category**: ${CATEGORY_PIPE_STR}
 3. **Evidence**: Show the duplication, zero-reference count, etc.
 4. **Prescription**: Exact action — "delete", "extract to X", "merge with Y"
 

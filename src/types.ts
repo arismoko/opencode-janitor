@@ -3,8 +3,14 @@
  * No internal imports — this is the leaf dependency.
  */
 
-/** Category of structural issue */
-export type FindingCategory = 'DRY' | 'DEAD' | 'STRUCTURAL';
+/** Canonical list of finding categories — single source of truth */
+export const FINDING_CATEGORIES = ['DRY', 'DEAD', 'STRUCTURAL'] as const;
+
+/** Category of structural issue (derived from FINDING_CATEGORIES) */
+export type FindingCategory = (typeof FINDING_CATEGORIES)[number];
+
+/** Pipe-separated category string for use in prompt output format instructions */
+export const CATEGORY_PIPE_STR = FINDING_CATEGORIES.join(' | ');
 
 /** A single P0 finding from the janitor agent */
 export interface Finding {

@@ -1,4 +1,5 @@
 import type { JanitorConfig } from '../config/schema';
+import { CATEGORY_PIPE_STR } from '../types';
 
 /** Agent definition shape matching OpenCode's AgentConfig from @opencode-ai/sdk */
 export interface AgentDefinition {
@@ -39,7 +40,7 @@ Maximum findings per review: ${config.model.maxFindings}
 
 Output format per finding:
 1. **Location**: file:line
-2. **Category**: DRY | DEAD | STRUCTURAL
+2. **Category**: ${CATEGORY_PIPE_STR}
 3. **Evidence**: concrete proof (must cite 2+ independent signals for STRUCTURAL)
 4. **Prescription**: exact action
 

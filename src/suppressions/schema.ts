@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { FINDING_CATEGORIES } from '../types';
 
 const SuppressionSchema = z.object({
   exactKey: z.string(),
@@ -9,7 +10,7 @@ const SuppressionSchema = z.object({
   lastSeenAt: z.string().datetime(),
   ttlDays: z.number().int().min(1),
   original: z.object({
-    category: z.enum(['DRY', 'DEAD', 'STRUCTURAL']),
+    category: z.enum(FINDING_CATEGORIES),
     location: z.string(),
     evidence: z.string(),
     prescription: z.string(),
