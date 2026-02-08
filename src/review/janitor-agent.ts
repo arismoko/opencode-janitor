@@ -1,6 +1,6 @@
 import type { JanitorConfig } from '../config/schema';
 
-/** Agent definition shape matching OpenCode's expected format */
+/** Agent definition shape matching OpenCode's AgentConfig from @opencode-ai/sdk */
 export interface AgentDefinition {
   name: string;
   description: string;
@@ -8,6 +8,9 @@ export interface AgentDefinition {
     model?: string;
     temperature: number;
     prompt: string;
+    /** Controls agent visibility: 'subagent' hides from picker UI */
+    mode?: 'subagent' | 'primary' | 'all';
+    tools?: Record<string, boolean>;
   };
 }
 
@@ -54,6 +57,13 @@ export function createJanitorAgent(config: JanitorConfig): AgentDefinition {
       model: config.model.id,
       temperature: 0.1,
       prompt: buildSystemPrompt(config),
+      mode: 'subagent',
+      tools: {
+        glob: true,
+        grep: true,
+        Read: true,
+        ast_grep_search: true,
+      },
     },
   };
 }

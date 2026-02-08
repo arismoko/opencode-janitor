@@ -1,30 +1,109 @@
 import { existsSync, readFileSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { join } from 'node:path';
-import { log } from '../utils/logger';
+import { log, warn } from '../utils/logger';
 import { type JanitorConfig, JanitorConfigSchema } from './schema';
 
-const CONFIG_FILENAME = 'janitor.json';
+/**
+ * Resolve the XDG-compliant user config directory.
+ * Respects $XDG_CONFIG_HOME, falls back to ~/.config.
+ */
+function getUserConfigDir(): string {
+  return process.env.XDG_CONFIG_HOME || join(homedir(), '.config');
+}
 
 /**
- * Load janitor configuration from the project root.
- * Falls back to defaults if no config file is found.
+ * Try to read and parse a JSON config file.
+ * Returns the parsed object or null if the file doesn't exist or is invalid.
+ */
+function loadJsonFile(
+  filePath: string,
+  label: string,
+): Record<string, unknown> | null {
+  if (!existsSync(filePath)) return null;
+
+  try {
+    const raw = readFileSync(filePath, 'utf-8');
+    const json = JSON.parse(raw);
+    log(`[config] loaded ${label}: ${filePath}`);
+    return json as Record<string, unknown>;
+  } catch (err) {
+    warn(
+      `[config] failed to parse ${label} at ${filePath}: ${err instanceof Error ? err.message : err}`,
+    );
+    return null;
+  }
+}
+
+/**
+ * Deep-merge two plain objects. Arrays are replaced, not concatenated.
+ * Source values override target values at each level.
+ */
+function deepMerge(
+  target: Record<string, unknown>,
+  source: Record<string, unknown>,
+): Record<string, unknown> {
+  const result = { ...target };
+
+  for (const key of Object.keys(source)) {
+    const sv = source[key];
+    const tv = target[key];
+
+    if (
+      sv != null &&
+      typeof sv === 'object' &&
+      !Array.isArray(sv) &&
+      tv != null &&
+      typeof tv === 'object' &&
+      !Array.isArray(tv)
+    ) {
+      result[key] = deepMerge(
+        tv as Record<string, unknown>,
+        sv as Record<string, unknown>,
+      );
+    } else {
+      result[key] = sv;
+    }
+  }
+
+  return result;
+}
+
+/**
+ * Load janitor configuration from the OpenCode ecosystem paths.
+ *
+ * Resolution order (later overrides earlier):
+ *   1. Schema defaults
+ *   2. User global:   ~/.config/opencode/janitor.json  (or $XDG_CONFIG_HOME)
+ *   3. Project local:  <project>/.opencode/janitor.json
+ *
+ * Each layer is deep-merged before Zod validation, so partial overrides work.
  */
 export function loadConfig(directory: string): JanitorConfig {
-  const configPath = join(directory, CONFIG_FILENAME);
+  const userConfigPath = join(getUserConfigDir(), 'opencode', 'janitor.json');
+  const projectConfigPath = join(directory, '.opencode', 'janitor.json');
 
-  if (!existsSync(configPath)) {
-    log('[config] no janitor.json found, using defaults');
-    return JanitorConfigSchema.parse({});
+  const userConfig = loadJsonFile(userConfigPath, 'user config');
+  const projectConfig = loadJsonFile(projectConfigPath, 'project config');
+
+  // Merge: project > user > {} (schema defaults applied by Zod parse)
+  let merged: Record<string, unknown> = {};
+
+  if (userConfig) {
+    merged = deepMerge(merged, userConfig);
+  }
+  if (projectConfig) {
+    merged = deepMerge(merged, projectConfig);
+  }
+
+  if (!userConfig && !projectConfig) {
+    log('[config] no config files found, using defaults');
   }
 
   try {
-    const raw = readFileSync(configPath, 'utf-8');
-    const json = JSON.parse(raw);
-    const config = JanitorConfigSchema.parse(json);
-    log('[config] loaded janitor.json');
-    return config;
+    return JanitorConfigSchema.parse(merged);
   } catch (err) {
-    log(`[config] failed to parse janitor.json: ${err}`);
+    warn(`[config] validation failed, falling back to defaults: ${err}`);
     return JanitorConfigSchema.parse({});
   }
 }

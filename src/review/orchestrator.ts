@@ -14,7 +14,7 @@ import { notifyError } from '../utils/notifier';
  * The orchestrator catches this specifically and keeps the job pending for retry
  * rather than marking it as permanently failed.
  */
-export class NoSessionError extends Error {
+class NoSessionError extends Error {
   constructor() {
     super('No root session available');
     this.name = 'NoSessionError';
@@ -60,8 +60,10 @@ export class ReviewOrchestrator {
   /**
    * Notify the orchestrator that a root session is now available.
    * Assigns the session to any pending jobs that lack one, then drains the queue.
+   * Idempotent — repeated calls with the same ID are no-ops.
    */
   sessionAvailable(sessionId: string): void {
+    if (sessionId === this.latestSessionId) return;
     this.latestSessionId = sessionId;
 
     // Backfill pending jobs that were queued before any session existed
@@ -158,6 +160,7 @@ export class ReviewOrchestrator {
         job.status = 'failed';
         job.error = err instanceof Error ? err.message : String(err);
         job.completedAt = new Date();
+        this.jobs.delete(sha);
         warn(`[orchestrator] review failed to start: ${sha} — ${job.error}`);
 
         // Surface the error to the user in their originating session
@@ -242,6 +245,8 @@ export class ReviewOrchestrator {
     } finally {
       this.sessionToSha.delete(sessionId);
       this.activeCount--;
+      // Prune terminal jobs to prevent unbounded growth
+      this.jobs.delete(sha);
       this.processQueue();
     }
   }

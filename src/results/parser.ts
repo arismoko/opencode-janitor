@@ -8,8 +8,6 @@ const VALID_CATEGORIES: FindingCategory[] = [
   'STRUCTURAL',
 ];
 
-const NO_FINDINGS_SENTINEL = 'NO_P0_FINDINGS';
-
 /**
  * Parse raw agent output into a structured ReviewResult.
  *
@@ -20,8 +18,9 @@ const NO_FINDINGS_SENTINEL = 'NO_P0_FINDINGS';
  * 4. **Prescription**: ...
  */
 export function parseReviewOutput(raw: string, sha: string): ReviewResult {
-  // Check for clean codebase sentinel
-  if (raw.includes(NO_FINDINGS_SENTINEL)) {
+  // Check for clean codebase sentinel — match as standalone token,
+  // optionally wrapped in backticks, not as a substring of other text.
+  if (/(?:^|\s|`)NO_P0_FINDINGS(?:`|\s|$)/m.test(raw)) {
     log('[parser] clean codebase — no P0 findings');
     return {
       sha,
@@ -49,45 +48,51 @@ export function parseReviewOutput(raw: string, sha: string): ReviewResult {
 
 /**
  * Extract structured findings from raw text.
- * Uses regex to find the Location/Category/Evidence/Prescription pattern.
+ *
+ * Parses per-finding blocks to keep all 4 fields aligned.
+ * Each finding block starts with a Location field and ends
+ * before the next Location or end-of-text.
+ *
+ * The numeric prefix (e.g. "1.") is optional so we parse both
+ * numbered ("1. **Location**: ...") and unnumbered ("**Location**: ...")
+ * outputs without silently dropping findings.
  */
 function extractFindings(raw: string): Finding[] {
   const findings: Finding[] = [];
 
-  // Match finding blocks — look for Location + Category + Evidence + Prescription
-  const locationPattern = /\*{0,2}Location\*{0,2}:\s*`?([^`\n]+)`?/gi;
-  const categoryPattern = /\*{0,2}Category\*{0,2}:\s*`?(\w+)`?/gi;
-  const evidencePattern =
-    /\*{0,2}Evidence\*{0,2}:\s*(.+?)(?=\n\s*\d+\.\s*\*{0,2}(?:Prescription|Location)|$)/gis;
-  const prescriptionPattern =
-    /\*{0,2}Prescription\*{0,2}:\s*(.+?)(?=\n\s*(?:\d+\.\s*\*{0,2}Location|\n#{1,3}\s|\n---)|$)/gis;
+  // Split into per-finding blocks anchored on Location fields.
+  // Each block runs from one Location to the next (or end of string).
+  // The numeric prefix (\d+\.) is optional to handle unnumbered output.
+  const blockStarts = [
+    ...raw.matchAll(/(?:\d+\.\s*)?\*{0,2}Location\*{0,2}:/gi),
+  ];
 
-  const locations = [...raw.matchAll(locationPattern)].map((m) => m[1].trim());
-  const categories = [...raw.matchAll(categoryPattern)].map(
-    (m) => m[1].trim().toUpperCase() as FindingCategory,
-  );
-  const evidences = [...raw.matchAll(evidencePattern)].map((m) => m[1].trim());
-  const prescriptions = [...raw.matchAll(prescriptionPattern)].map((m) =>
-    m[1].trim(),
-  );
+  for (let i = 0; i < blockStarts.length; i++) {
+    const start = blockStarts[i].index;
+    const end =
+      i + 1 < blockStarts.length ? blockStarts[i + 1].index : raw.length;
+    const block = raw.slice(start, end);
 
-  const count = Math.min(
-    locations.length,
-    categories.length,
-    evidences.length,
-    prescriptions.length,
-  );
+    const location = block
+      .match(/\*{0,2}Location\*{0,2}:\s*`?([^`\n]+)`?/i)?.[1]
+      ?.trim();
+    const category = block
+      .match(/\*{0,2}Category\*{0,2}:\s*`?(\w+)`?/i)?.[1]
+      ?.trim()
+      .toUpperCase() as FindingCategory | undefined;
+    const evidence = block
+      .match(
+        /\*{0,2}Evidence\*{0,2}:\s*(.+?)(?=\n\s*(?:\d+\.\s*)?\*{0,2}Prescription|$)/is,
+      )?.[1]
+      ?.trim();
+    const prescription = block
+      .match(/\*{0,2}Prescription\*{0,2}:\s*(.+?)$/is)?.[1]
+      ?.trim();
 
-  for (let i = 0; i < count; i++) {
-    const category = categories[i];
+    if (!location || !category || !evidence || !prescription) continue;
     if (!VALID_CATEGORIES.includes(category)) continue;
 
-    findings.push({
-      location: locations[i],
-      category,
-      evidence: evidences[i],
-      prescription: prescriptions[i],
-    });
+    findings.push({ location, category, evidence, prescription });
   }
 
   return findings;

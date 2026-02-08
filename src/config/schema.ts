@@ -69,13 +69,11 @@ export const JanitorConfigSchema = z.object({
       maxPatchBytes: z.number().int().min(10_000).default(200_000),
       maxFilesInPatch: z.number().int().min(1).default(50),
       maxHunksPerFile: z.number().int().min(1).default(8),
-      mergeMode: z.enum(['first-parent', 'combined']).default('first-parent'),
     })
     .default(() => ({
       maxPatchBytes: 200_000,
       maxFilesInPatch: 50,
       maxHunksPerFile: 8,
-      mergeMode: 'first-parent' as const,
     })),
 
   delivery: z

@@ -5,7 +5,7 @@ import {
   unlinkSync,
   writeFileSync,
 } from 'node:fs';
-import { join } from 'node:path';
+import { join, resolve, sep } from 'node:path';
 import type { ReviewResult } from '../../types';
 import { log, warn } from '../../utils/logger';
 
@@ -21,7 +21,15 @@ export async function deliverToFile(
   workspaceDir: string,
 ): Promise<void> {
   try {
-    const absDir = join(workspaceDir, reportDir);
+    const absDir = resolve(workspaceDir, reportDir);
+    const normalizedRoot = resolve(workspaceDir) + sep;
+    if (
+      !absDir.startsWith(normalizedRoot) &&
+      absDir !== resolve(workspaceDir)
+    ) {
+      warn(`[file-sink] reportDir escapes workspace: ${reportDir}`);
+      return;
+    }
 
     // Ensure directory exists
     if (!existsSync(absDir)) {

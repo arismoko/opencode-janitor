@@ -1,9 +1,9 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
+import { evictOldest, MAX_PROCESSED } from '../utils/eviction';
 import { log, warn } from '../utils/logger';
 
 const STATE_FILE = '.janitor/state.json';
-const MAX_PROCESSED = 1000;
 
 interface StateData {
   processedShas: string[];
@@ -104,14 +104,11 @@ export class CommitStore {
    * Keeps the most recent MAX_PROCESSED entries.
    */
   private evictOld(): void {
-    if (this.processed.size <= MAX_PROCESSED) return;
-
-    const entries = [...this.processed];
-    const toRemove = entries.slice(0, entries.length - MAX_PROCESSED);
-    for (const sha of toRemove) {
-      this.processed.delete(sha);
+    const before = this.processed.size;
+    evictOldest(this.processed, MAX_PROCESSED);
+    const evicted = before - this.processed.size;
+    if (evicted > 0) {
+      log(`[store] evicted ${evicted} old entries`);
     }
-
-    log(`[store] evicted ${toRemove.length} old entries`);
   }
 }
