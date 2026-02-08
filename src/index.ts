@@ -16,6 +16,7 @@ import {
 import { getPrContext, type PrContext } from './git/pr-context-resolver';
 import { PrDetector } from './git/pr-detector';
 import { resolveGitDir } from './git/repo-locator';
+import { RetryableSignalError } from './git/signal-detector';
 import { HistoryStore } from './history/store';
 import { createJanitorAgent } from './review/janitor-agent';
 import { ReviewOrchestrator } from './review/orchestrator';
@@ -287,18 +288,19 @@ const TheJanitor: Plugin = async (ctx) => {
             const ghPr = await getCurrentPrFromGh(exec);
             if (!ghPr) {
               // PR was open when getCurrentKey ran but is now gone.
-              // Throw so verify does NOT mark this key as processed —
-              // next poll's getCurrentKey returns null and skips naturally.
-              throw new Error(
+              // Throw retryable so verify does NOT mark this key as
+              // processed — next poll's getCurrentKey returns null and
+              // skips naturally.
+              throw new RetryableSignalError(
                 `PR disappeared between detection and callback: ${key}`,
               );
             }
 
             if (ghPr.number !== detectedPrNum || ghPr.headSha !== detectedSha) {
               // PR state advanced between detection and re-fetch.
-              // Throw so verify doesn't commit the stale key — the new
-              // state will be picked up on the next poll cycle.
-              throw new Error(
+              // Throw retryable so verify doesn't commit the stale key —
+              // the new state will be picked up on the next poll cycle.
+              throw new RetryableSignalError(
                 `PR state changed between detection and callback: key=${key} but re-fetch got pr:${ghPr.number}:${ghPr.headSha}`,
               );
             }

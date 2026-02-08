@@ -2,6 +2,24 @@ import { evictOldest, MAX_PROCESSED } from '../utils/eviction';
 import { log, warn } from '../utils/logger';
 
 /**
+ * Sentinel error for expected retryable conditions in the verify pipeline.
+ *
+ * Throw this from `getCurrentKey()` or `onDetected()` when the failure is
+ * expected and the key should NOT be committed as processed. Examples:
+ * - PR closed/merged between detection and callback
+ * - PR state advanced (head SHA changed) between detection and re-fetch
+ *
+ * These are logged at debug level only. All other errors thrown into
+ * verify's catch are treated as unexpected and logged as warnings.
+ */
+export class RetryableSignalError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'RetryableSignalError';
+  }
+}
+
+/**
  * Generic signal detector base class.
  *
  * Owns the debounced verify-and-callback pipeline with:
@@ -115,7 +133,13 @@ export abstract class SignalDetector<
       this.processed.add(key);
       this.evictProcessed();
     } catch (err) {
-      warn(`[${this.label}] verify failed: ${err}`);
+      if (err instanceof RetryableSignalError) {
+        // Expected: PR closed, state diverged, etc. Debug-only.
+        log(`[${this.label}] verify skipped (will retry): ${err.message}`);
+      } else {
+        // Unexpected: genuine failure — always log to file for diagnosis.
+        warn(`[${this.label}] verify failed: ${err}`);
+      }
     }
   }
 
