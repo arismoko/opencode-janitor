@@ -33,8 +33,11 @@ const TheJanitor: Plugin = async (ctx) => {
   const exec = async (cmd: string): Promise<string> => {
     // Pin all git commands to the workspace directory so they don't
     // depend on process cwd, which may differ from the project root.
+    // Shell-quote the directory so paths with spaces/metacharacters
+    // are passed as a single argument to git -C.
+    const quoted = `'${ctx.directory.replace(/'/g, "'\\''")}'`;
     const pinned = cmd.startsWith('git ')
-      ? `git -C ${ctx.directory} ${cmd.slice(4)}`
+      ? `git -C ${quoted} ${cmd.slice(4)}`
       : cmd;
     const result = await ctx.$`${{ raw: pinned }}`.quiet().text();
     return result;

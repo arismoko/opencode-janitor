@@ -52,13 +52,20 @@ export function parseReviewOutput(raw: string, sha: string): ReviewResult {
  * Parses per-finding blocks to keep all 4 fields aligned.
  * Each finding block starts with a Location field and ends
  * before the next Location or end-of-text.
+ *
+ * The numeric prefix (e.g. "1.") is optional so we parse both
+ * numbered ("1. **Location**: ...") and unnumbered ("**Location**: ...")
+ * outputs without silently dropping findings.
  */
 function extractFindings(raw: string): Finding[] {
   const findings: Finding[] = [];
 
   // Split into per-finding blocks anchored on Location fields.
   // Each block runs from one Location to the next (or end of string).
-  const blockStarts = [...raw.matchAll(/\d+\.\s*\*{0,2}Location\*{0,2}:/gi)];
+  // The numeric prefix (\d+\.) is optional to handle unnumbered output.
+  const blockStarts = [
+    ...raw.matchAll(/(?:\d+\.\s*)?\*{0,2}Location\*{0,2}:/gi),
+  ];
 
   for (let i = 0; i < blockStarts.length; i++) {
     const start = blockStarts[i].index;
@@ -75,7 +82,7 @@ function extractFindings(raw: string): Finding[] {
       .toUpperCase() as FindingCategory | undefined;
     const evidence = block
       .match(
-        /\*{0,2}Evidence\*{0,2}:\s*(.+?)(?=\n\s*\d+\.\s*\*{0,2}Prescription|$)/is,
+        /\*{0,2}Evidence\*{0,2}:\s*(.+?)(?=\n\s*(?:\d+\.\s*)?\*{0,2}Prescription|$)/is,
       )?.[1]
       ?.trim();
     const prescription = block
