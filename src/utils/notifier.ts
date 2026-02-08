@@ -19,12 +19,27 @@ export async function injectMessage(
   noReply = true,
 ): Promise<void> {
   try {
-    await ctx.client.session.prompt({
+    if (noReply) {
+      await ctx.client.session.prompt({
+        path: { id: sessionId },
+        body: {
+          noReply: true,
+          parts: [{ type: 'text' as const, text }],
+        },
+        query: { directory: ctx.directory },
+      });
+      return;
+    }
+
+    // noReply=false can trigger a full LLM response. Use promptAsync so
+    // plugin hooks never block session rendering while the model generates.
+    await ctx.client.session.promptAsync({
       path: { id: sessionId },
       body: {
-        noReply,
+        noReply: false,
         parts: [{ type: 'text' as const, text }],
       },
+      query: { directory: ctx.directory },
     });
   } catch {
     warn(`[notifier] failed to inject message into session ${sessionId}`);

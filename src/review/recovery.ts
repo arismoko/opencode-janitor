@@ -21,6 +21,8 @@ import { resumeReviewSession } from './runner';
 
 const RUN_TTL_MS = 24 * 60 * 60 * 1000;
 const MAX_RESUME_ATTEMPTS = 1;
+const STATUS_TIMEOUT_MS = 3_000;
+const RESUME_TIMEOUT_MS = 5_000;
 
 /**
  * Reconstruct a minimal PrContext from a persisted key string.
@@ -136,7 +138,11 @@ export async function recoverInterruptedRuns(
 
   let statusMap: Record<string, { type?: string }> = {};
   try {
-    const statusResult = await ctx.client.session.status();
+    const statusResult = await withTimeout(
+      ctx.client.session.status(),
+      STATUS_TIMEOUT_MS,
+      'session.status',
+    );
     statusMap = (statusResult.data ?? {}) as Record<string, { type?: string }>;
   } catch (err) {
     warn(`[recovery] failed to load session statuses: ${err}`);
@@ -197,14 +203,18 @@ export async function recoverInterruptedRuns(
     // Send resume prompt. On failure, keep the run attached — it may
     // complete via normal idle events or be retried on next restart.
     try {
-      await resumeReviewSession(ctx, {
-        sessionId: run.sessionId,
-        agent: run.orchestrator === 'janitor' ? 'janitor' : 'code-reviewer',
-        modelId:
-          run.orchestrator === 'janitor'
-            ? (config.agents.janitor.modelId ?? config.model.id)
-            : (config.agents.reviewer.modelId ?? config.model.id),
-      });
+      await withTimeout(
+        resumeReviewSession(ctx, {
+          sessionId: run.sessionId,
+          agent: run.orchestrator === 'janitor' ? 'janitor' : 'code-reviewer',
+          modelId:
+            run.orchestrator === 'janitor'
+              ? (config.agents.janitor.modelId ?? config.model.id)
+              : (config.agents.reviewer.modelId ?? config.model.id),
+        }),
+        RESUME_TIMEOUT_MS,
+        `resume ${run.id}`,
+      );
       runStore.incrementResumeAttempts(run.id);
       log(`[recovery] resumed idle session ${run.id}`);
     } catch (err) {
@@ -215,6 +225,28 @@ export async function recoverInterruptedRuns(
       runStore.incrementResumeAttempts(run.id);
     }
   }
+}
+
+function withTimeout<T>(
+  promise: Promise<T>,
+  timeoutMs: number,
+  label: string,
+): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      reject(new Error(`${label} timed out after ${timeoutMs}ms`));
+    }, timeoutMs);
+
+    promise
+      .then((value) => {
+        clearTimeout(timer);
+        resolve(value);
+      })
+      .catch((err) => {
+        clearTimeout(timer);
+        reject(err);
+      });
+  });
 }
 
 /**
