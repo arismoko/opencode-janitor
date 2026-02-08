@@ -7,6 +7,7 @@ import { deliverReviewerToFile } from '../results/sinks/reviewer-file-sink';
 import { deliverReviewerToSession } from '../results/sinks/reviewer-session-sink';
 import { deliverReviewerToast } from '../results/sinks/reviewer-toast-sink';
 import { log } from '../utils/logger';
+import { extractWorkspaceHeadFromKey } from '../utils/review-key';
 import { type BaseJob, BaseOrchestrator } from './base-orchestrator';
 
 type ReviewerExecutor = (context: PrContext) => Promise<string>;
@@ -58,10 +59,7 @@ export class ReviewerOrchestrator extends BaseOrchestrator<
     config: JanitorConfig,
   ): Promise<void> {
     const rawOutput = await this.extractAssistantOutput(sessionId, ctx);
-    const resultId =
-      job.key.startsWith('workspace:') && job.key.split(':').length >= 3
-        ? job.key.split(':')[2]
-        : job.key;
+    const resultId = extractWorkspaceHeadFromKey(job.key);
     const result = parseReviewerOutput(rawOutput, resultId);
     const report = formatReviewerReport(result);
 

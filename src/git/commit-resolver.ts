@@ -2,13 +2,13 @@ import type { JanitorConfig } from '../config/schema';
 import type { ChangedFile, CommitContext } from '../types';
 import { truncatePatch } from '../utils/limits';
 import { log, warn } from '../utils/logger';
+import {
+  getWorkspaceChangedFiles as getWorkspaceChangedFilesShared,
+  getWorkspacePatch as getWorkspacePatchShared,
+} from '../utils/workspace-git';
 
 /** Empty tree hash for diffing initial commits */
 const EMPTY_TREE = '4b825dc642cb6eb9a060e54bf8d69288fbee4904';
-
-function shellEscape(s: string): string {
-  return `'${s.replace(/'/g, "'\\''")}'`;
-}
 
 /**
  * Extract full commit context for a given SHA.
@@ -51,8 +51,12 @@ export async function getWorkspaceCommitContext(
 ): Promise<CommitContext> {
   const headSha = (await exec('git rev-parse HEAD')).trim();
   const branch = (await exec('git rev-parse --abbrev-ref HEAD')).trim();
-  const changedFiles = await getWorkspaceChangedFiles(exec);
-  const patch = await getWorkspacePatch(config, exec);
+  const changedFiles = await getWorkspaceChangedFilesShared(exec);
+  const patch = await getWorkspacePatchShared(
+    config,
+    exec,
+    '[commit-resolver]',
+  );
 
   return {
     sha: headSha,
@@ -122,64 +126,6 @@ async function getPatch(
     return { content: result.patch, truncated: result.truncated };
   } catch (err) {
     warn(`[commit-resolver] failed to get patch: ${err}`);
-    return { content: '', truncated: false };
-  }
-}
-
-async function getWorkspaceChangedFiles(
-  exec: (cmd: string) => Promise<string>,
-): Promise<ChangedFile[]> {
-  try {
-    const raw = await exec('git status --porcelain=v1 -uall');
-    return raw
-      .split('\n')
-      .filter(Boolean)
-      .map((line) => {
-        const x = line[0] ?? ' ';
-        const y = line[1] ?? ' ';
-        const rest = line.slice(3).trim();
-        const path = rest.includes(' -> ') ? rest.split(' -> ')[1] : rest;
-        const status = x === '?' || y === '?' ? 'A' : x !== ' ' ? x : y;
-        return { status: status || 'M', path };
-      })
-      .filter((f) => f.path);
-  } catch {
-    return [];
-  }
-}
-
-async function getWorkspacePatch(
-  config: JanitorConfig,
-  exec: (cmd: string) => Promise<string>,
-): Promise<{ content: string; truncated: boolean }> {
-  try {
-    let raw = await exec('git diff --no-color HEAD');
-    const untracked = await exec('git ls-files --others --exclude-standard');
-    for (const path of untracked.trim().split('\n').filter(Boolean)) {
-      const addPatch = await exec(
-        `git diff --no-color --no-index -- /dev/null ${shellEscape(path)} || true`,
-      );
-      raw = raw ? `${raw}\n${addPatch}` : addPatch;
-    }
-
-    const result = truncatePatch(raw, {
-      maxPatchBytes: config.diff.maxPatchBytes,
-      maxFilesInPatch: config.diff.maxFilesInPatch,
-      maxHunksPerFile: config.diff.maxHunksPerFile,
-    });
-
-    if (result.truncated) {
-      log('[commit-resolver] workspace patch truncated', {
-        originalBytes: result.stats.originalBytes,
-        finalBytes: result.stats.finalBytes,
-        originalFiles: result.stats.originalFiles,
-        includedFiles: result.stats.includedFiles,
-      });
-    }
-
-    return { content: result.patch, truncated: result.truncated };
-  } catch (err) {
-    warn(`[commit-resolver] failed to get workspace patch: ${err}`);
     return { content: '', truncated: false };
   }
 }

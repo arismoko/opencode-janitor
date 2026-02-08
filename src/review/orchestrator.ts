@@ -9,6 +9,7 @@ import { deliverToSession } from '../results/sinks/session-sink';
 import { deliverToast } from '../results/sinks/toast-sink';
 import type { SuppressionStore } from '../suppressions/store';
 import type { ReviewResult } from '../types';
+import { extractWorkspaceHeadFromKey } from '../utils/review-key';
 import { type BaseJob, BaseOrchestrator } from './base-orchestrator';
 
 type ReviewExecutor = (sha: string) => Promise<string>;
@@ -54,10 +55,7 @@ export class ReviewOrchestrator extends BaseOrchestrator<string, ReviewResult> {
     config: JanitorConfig,
   ): Promise<void> {
     const rawOutput = await this.extractAssistantOutput(sessionId, ctx);
-    const sha =
-      job.key.startsWith('workspace:') && job.key.split(':').length >= 3
-        ? job.key.split(':')[2]
-        : job.key;
+    const sha = extractWorkspaceHeadFromKey(job.key);
 
     // Process through the full pipeline (parse -> suppress -> annotate -> record)
     const pipelineResult = await processReviewOutput(rawOutput, sha, {
