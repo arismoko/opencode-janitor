@@ -152,10 +152,21 @@ const TheJanitor: Plugin = async (ctx) => {
     // Accelerator: detect git commit via tool hook.
     // Gated on autoReview.onCommit — the accelerator is just a faster
     // path into the same detection pipeline, so it must respect the toggle.
+    //
+    // Also bootstraps session tracking: after a restart the plugin may
+    // miss the initial session.created event, so we capture the sessionID
+    // from the first tool call we see.
     'tool.execute.after': async (
       input: { tool: string; sessionID: string; callID: string },
       output: { title: string; output: string; metadata: unknown },
     ) => {
+      // Bootstrap session tracking from any tool call — covers the case
+      // where the plugin loads into an already-existing session and never
+      // receives a session.created event.
+      if (input.sessionID) {
+        orchestrator.sessionAvailable(input.sessionID);
+      }
+
       if (!config.autoReview.onCommit) return;
       if (input.tool !== 'Bash' && input.tool !== 'bash') return;
 

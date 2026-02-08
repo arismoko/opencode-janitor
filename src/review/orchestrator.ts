@@ -60,8 +60,10 @@ export class ReviewOrchestrator {
   /**
    * Notify the orchestrator that a root session is now available.
    * Assigns the session to any pending jobs that lack one, then drains the queue.
+   * Idempotent — repeated calls with the same ID are no-ops.
    */
   sessionAvailable(sessionId: string): void {
+    if (sessionId === this.latestSessionId) return;
     this.latestSessionId = sessionId;
 
     // Backfill pending jobs that were queued before any session existed
