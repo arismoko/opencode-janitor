@@ -112,9 +112,9 @@ export class CommitDetector {
         return;
       }
 
-      this.processed.add(head);
       log(`[commit-detector] new commit: ${head} via ${signal.source}`);
       await this.onNewCommit(head, signal);
+      this.processed.add(head);
     } catch (err) {
       warn(`[commit-detector] verify failed: ${err}`);
     }

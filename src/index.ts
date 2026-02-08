@@ -31,7 +31,12 @@ const TheJanitor: Plugin = async (ctx) => {
   // No .nothrow() — git failures must propagate so callers' try/catch
   // blocks can take their intended error paths (e.g. repo-locator fallback).
   const exec = async (cmd: string): Promise<string> => {
-    const result = await ctx.$`${{ raw: cmd }}`.quiet().text();
+    // Pin all git commands to the workspace directory so they don't
+    // depend on process cwd, which may differ from the project root.
+    const pinned = cmd.startsWith('git ')
+      ? `git -C ${ctx.directory} ${cmd.slice(4)}`
+      : cmd;
+    const result = await ctx.$`${{ raw: pinned }}`.quiet().text();
     return result;
   };
 
@@ -112,6 +117,11 @@ const TheJanitor: Plugin = async (ctx) => {
 
   return {
     name: 'the-janitor',
+
+    cleanup: () => {
+      detector.stop();
+      log('plugin cleanup: detector stopped');
+    },
 
     agent: { janitor: agent },
 
