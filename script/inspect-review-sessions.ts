@@ -1,187 +1,211 @@
 #!/usr/bin/env bun
 
-import { createOpencodeClient } from '@opencode-ai/sdk';
+import { mkdir, writeFile } from 'node:fs/promises';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { createOpencode } from '@opencode-ai/sdk';
 
-type RuntimeStatus = 'idle' | 'busy' | 'retry' | 'unknown';
-
-type SessionInfo = {
+type SessionRow = {
   id: string;
   title?: string;
-  updated?: number;
-  created?: number;
+  time?: {
+    created?: number;
+    updated?: number;
+  };
 };
 
-type ToolCall = {
-  messageId: string;
-  tool: string;
-  status: string;
-  created?: number;
-  description?: string;
-  command?: string;
-};
+type SessionStatus =
+  | { type: 'idle' }
+  | { type: 'busy' }
+  | { type: 'retry'; attempt: number; message: string; next: number };
 
-const REVIEW_TITLE_PREFIXES = ['[janitor-run] ', '[reviewer-run] '];
+const JANITOR_PREFIX = '[janitor-run]';
+const REVIEWER_CODE_REVIEW_TITLE = '[reviewer-run] Code Review';
+const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
+const ARTIFACTS_DIR = join(SCRIPT_DIR, 'artifacts');
 
-function argHas(flag: string): boolean {
-  return process.argv.includes(flag);
-}
+// ── CLI helpers ──
 
 function argValue(flag: string): string | undefined {
   const idx = process.argv.indexOf(flag);
   if (idx < 0) return undefined;
-  return process.argv[idx + 1];
+  const value = process.argv[idx + 1];
+  if (!value || value.startsWith('--')) return undefined;
+  return value;
 }
 
-function fmtTime(ts?: number): string {
+function hasFlag(flag: string): boolean {
+  return process.argv.includes(flag);
+}
+
+// ── Formatting ──
+
+const STATUS_BADGE: Record<string, string> = {
+  idle: '○ idle',
+  busy: '● busy',
+  retry: '⟳ retry',
+};
+
+function fmtStatus(status?: SessionStatus): string {
+  if (!status) return '· done';
+  const badge = STATUS_BADGE[status.type] ?? status.type;
+  if (status.type === 'retry') return `${badge}(${status.attempt})`;
+  return badge;
+}
+
+function fmtAge(ts?: number): string {
   if (!ts) return '-';
-  return new Date(ts).toISOString();
+  const delta = Date.now() - ts;
+  if (delta < 0) return 'just now';
+  const secs = Math.floor(delta / 1_000);
+  if (secs < 60) return `${secs}s ago`;
+  const mins = Math.floor(secs / 60);
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  const days = Math.floor(hrs / 24);
+  return `${days}d ago`;
 }
 
-function isReviewTitle(title?: string): boolean {
+function pad(s: string, len: number): string {
+  return s.padEnd(len);
+}
+
+function shouldShowSession(title?: string): boolean {
   if (!title) return false;
-  return REVIEW_TITLE_PREFIXES.some((prefix) => title.startsWith(prefix));
+  return (
+    title.startsWith(JANITOR_PREFIX) || title === REVIEWER_CODE_REVIEW_TITLE
+  );
 }
 
-async function getStatusMap(
-  client: ReturnType<typeof createOpencodeClient>,
-  directory: string,
-): Promise<Record<string, RuntimeStatus>> {
-  const result = await client.session.status({ query: { directory } });
-  const raw = ((result as { data?: Record<string, { type?: string }> }).data ??
-    {}) as Record<string, { type?: string }>;
-  const out: Record<string, RuntimeStatus> = {};
-  for (const [sessionId, status] of Object.entries(raw)) {
-    const type = status?.type;
-    out[sessionId] =
-      type === 'busy' || type === 'idle' || type === 'retry' ? type : 'unknown';
+function printTable(
+  rows: { id: string; status: string; age: string; title: string }[],
+): void {
+  if (rows.length === 0) {
+    console.log('  (no sessions)');
+    return;
   }
-  return out;
-}
 
-async function collectToolCalls(
-  client: ReturnType<typeof createOpencodeClient>,
-  directory: string,
-  sessionId: string,
-): Promise<ToolCall[]> {
-  const result = await client.session.messages({
-    path: { id: sessionId },
-    query: { directory },
-  });
+  const colW = {
+    id: Math.max(2, ...rows.map((r) => r.id.length)),
+    status: Math.max(6, ...rows.map((r) => r.status.length)),
+    age: Math.max(3, ...rows.map((r) => r.age.length)),
+  };
 
-  const messages = ((result as { data?: unknown[] }).data ?? []) as Array<{
-    info?: { id?: string; time?: { created?: number } };
-    parts?: Array<{
-      type?: string;
-      tool?: string;
-      state?: {
-        status?: string;
-        input?: { description?: string; command?: string };
-      };
-    }>;
-  }>;
+  const header = `  ${pad('ID', colW.id)}  ${pad('STATUS', colW.status)}  ${pad('AGE', colW.age)}  TITLE`;
+  const rule = `  ${'─'.repeat(colW.id)}  ${'─'.repeat(colW.status)}  ${'─'.repeat(colW.age)}  ${'─'.repeat(20)}`;
 
-  const calls: ToolCall[] = [];
-  for (const message of messages) {
-    const messageId = message.info?.id;
-    if (!messageId) continue;
-    for (const part of message.parts ?? []) {
-      if (part.type !== 'tool') continue;
-      calls.push({
-        messageId,
-        tool: part.tool ?? '<unknown>',
-        status: part.state?.status ?? '<unknown>',
-        created: message.info?.time?.created,
-        description: part.state?.input?.description,
-        command: part.state?.input?.command,
-      });
-    }
+  console.log(header);
+  console.log(rule);
+  for (const r of rows) {
+    console.log(
+      `  ${pad(r.id, colW.id)}  ${pad(r.status, colW.status)}  ${pad(r.age, colW.age)}  ${r.title}`,
+    );
   }
-  return calls;
 }
+
+// ── Main ──
 
 async function main(): Promise<void> {
-  const directory = argValue('--directory') ?? process.cwd();
-  const serverUrl = argValue('--server-url') ?? 'http://127.0.0.1:4096';
-  const showAll = argHas('--all');
-  const onlySession = argValue('--session');
+  const dumpSessionId = argValue('--dump');
+  const showAll = hasFlag('--all');
+  const { client, server } = await createOpencode();
 
-  const client = createOpencodeClient({ baseUrl: serverUrl });
-
-  const listResult = await client.session.list({
-    query: { directory },
-  });
-  const sessions = ((listResult as { data?: unknown[] }).data ?? []) as Array<{
-    id?: string;
-    title?: string;
-    time?: { updated?: number; created?: number };
-  }>;
-
-  const statusMap = await getStatusMap(client, directory);
-
-  const rows = sessions
-    .filter((session) => session.id && isReviewTitle(session.title))
-    .filter((session) => !onlySession || session.id === onlySession)
-    .map((session) => {
-      const id = session.id as string;
-      const status = statusMap[id] ?? 'idle';
-      return {
-        session: {
-          id,
-          title: session.title,
-          updated: session.time?.updated,
-          created: session.time?.created,
-        } as SessionInfo,
-        status,
-        running: status === 'busy' || status === 'retry',
-      };
-    })
-    .sort((a, b) => (b.session.updated ?? 0) - (a.session.updated ?? 0));
-
-  const filtered = showAll ? rows : rows.filter((row) => row.running);
-
-  console.log(`Server:    ${serverUrl}`);
-  console.log(`Directory: ${directory}`);
-  console.log(
-    `Sessions:  ${filtered.length}${showAll ? ` (of ${rows.length} review sessions)` : ' active review session(s)'}`,
-  );
-
-  for (const row of filtered) {
-    console.log('');
-    console.log(`- ${row.session.id}`);
-    console.log(`  title:    ${row.session.title ?? '-'}`);
-    console.log(
-      `  status:   ${row.running ? 'running' : 'idle'} (${row.status})`,
-    );
-    console.log(`  updated:  ${fmtTime(row.session.updated)}`);
-    console.log(`  created:  ${fmtTime(row.session.created)}`);
-
-    const calls = await collectToolCalls(client, directory, row.session.id);
-    if (calls.length === 0) {
-      console.log('  tools:    none');
-      continue;
-    }
-
-    console.log('  tool-calls:');
-    for (const call of calls) {
-      const summary = call.command ?? call.description ?? '';
-      const suffix = summary ? ` | ${summary}` : '';
-      console.log(
-        `    - ${fmtTime(call.created)} | ${call.messageId} | ${call.tool} | ${call.status}${suffix}`,
+  try {
+    if (dumpSessionId) {
+      const session = (
+        await client.session.get({ path: { id: dumpSessionId } })
+      ).data;
+      const messages = (
+        await client.session.messages({ path: { id: dumpSessionId } })
+      ).data;
+      const payload = { session, messages };
+      const json = JSON.stringify(payload, null, 2);
+      const artifactPath = join(
+        ARTIFACTS_DIR,
+        `session-${dumpSessionId}.full.json`,
       );
-    }
-  }
 
-  if (filtered.length === 0) {
-    console.log('');
-    console.log(
-      showAll
-        ? 'No review sessions found.'
-        : 'No active review sessions found. Use --all to inspect recent completed ones.',
-    );
+      await mkdir(ARTIFACTS_DIR, { recursive: true });
+      await writeFile(artifactPath, `${json}\n`, 'utf8');
+      console.error(`artifact=${artifactPath}`);
+      console.log(json);
+      return;
+    }
+
+    // Fetch sessions and status in parallel
+    const [listResult, statusResult] = await Promise.all([
+      client.session.list(),
+      client.session.status(),
+    ]);
+
+    const sessions = ((listResult as { data?: unknown[] }).data ??
+      []) as SessionRow[];
+    const statusMap = ((statusResult as { data?: unknown }).data ??
+      {}) as Record<string, SessionStatus>;
+
+    const filtered = showAll
+      ? sessions
+      : sessions.filter((s) => shouldShowSession(s.title));
+
+    // Split into janitor vs reviewer groups
+    const janitorRows: {
+      id: string;
+      status: string;
+      age: string;
+      title: string;
+    }[] = [];
+    const reviewerRows: {
+      id: string;
+      status: string;
+      age: string;
+      title: string;
+    }[] = [];
+    const otherRows: {
+      id: string;
+      status: string;
+      age: string;
+      title: string;
+    }[] = [];
+
+    for (const s of filtered) {
+      const row = {
+        id: s.id,
+        status: fmtStatus(statusMap[s.id]),
+        age: fmtAge(s.time?.updated),
+        title: s.title ?? '(untitled)',
+      };
+
+      if (s.title?.startsWith(JANITOR_PREFIX)) janitorRows.push(row);
+      else if (s.title === REVIEWER_CODE_REVIEW_TITLE) reviewerRows.push(row);
+      else otherRows.push(row);
+    }
+
+    console.log(`\n  ${filtered.length} session(s)\n`);
+
+    if (janitorRows.length > 0) {
+      console.log('  ── Janitor ──');
+      printTable(janitorRows);
+      console.log();
+    }
+
+    if (reviewerRows.length > 0) {
+      console.log('  ── Reviewer ──');
+      printTable(reviewerRows);
+      console.log();
+    }
+
+    if (otherRows.length > 0) {
+      console.log('  ── Other ──');
+      printTable(otherRows);
+      console.log();
+    }
+  } finally {
+    server.close();
   }
 }
 
-main().catch((err) => {
-  console.error(err instanceof Error ? err.message : String(err));
+main().catch((error) => {
+  console.error(error instanceof Error ? error.message : String(error));
   process.exit(1);
 });

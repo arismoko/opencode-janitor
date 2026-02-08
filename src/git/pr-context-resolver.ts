@@ -1,16 +1,11 @@
 import type { JanitorConfig } from '../config/schema';
+import type { ChangedFile } from '../types';
 import { truncatePatch } from '../utils/limits';
 import { log, warn } from '../utils/logger';
 import {
   getWorkspaceChangedFiles as getWorkspaceChangedFilesShared,
   getWorkspacePatch as getWorkspacePatchShared,
 } from '../utils/workspace-git';
-
-/** Changed file entry from git diff */
-export interface PrChangedFile {
-  status: string;
-  path: string;
-}
 
 /** Full PR context for building review prompts */
 export interface PrContext {
@@ -19,7 +14,7 @@ export interface PrContext {
   baseRef: string;
   headRef: string;
   number?: number;
-  changedFiles: PrChangedFile[];
+  changedFiles: ChangedFile[];
   patch: string;
   patchTruncated: boolean;
 }
@@ -116,7 +111,7 @@ async function getChangedFiles(
   mergeBase: string,
   headRef: string,
   exec: (cmd: string) => Promise<string>,
-): Promise<PrChangedFile[]> {
+): Promise<ChangedFile[]> {
   try {
     const raw = await exec(`git diff --name-status ${mergeBase}..${headRef}`);
     return raw

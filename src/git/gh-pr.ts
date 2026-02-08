@@ -1,9 +1,5 @@
 import { log, warn } from '../utils/logger';
-
-/** Escape a string for safe use inside single quotes in shell commands. */
-function shellEscape(s: string): string {
-  return s.replace(/'/g, "'\\''");
-}
+import { shellEscapeQuoted } from '../utils/workspace-git';
 
 /** PR info retrieved from the gh CLI */
 export interface GhPrInfo {
@@ -47,7 +43,7 @@ export async function getCurrentPrFromGh(
     if (!branch || branch === 'HEAD') return null;
 
     const raw = await exec(
-      `GH_PROMPT_DISABLED=1 gh pr view '${shellEscape(branch)}' --repo '${shellEscape(repo)}' --json number,url,baseRefName,headRefName,headRefOid,state`,
+      `GH_PROMPT_DISABLED=1 gh pr view ${shellEscapeQuoted(branch)} --repo ${shellEscapeQuoted(repo)} --json number,url,baseRefName,headRefName,headRefOid,state`,
     );
 
     let parsed: Record<string, unknown>;
@@ -111,7 +107,7 @@ export async function getPrByNumberFromGh(
     if (!repo) return null;
 
     const raw = await exec(
-      `GH_PROMPT_DISABLED=1 gh pr view ${number} --repo '${shellEscape(repo)}' --json number,url,baseRefName,headRefName,headRefOid,state`,
+      `GH_PROMPT_DISABLED=1 gh pr view ${number} --repo ${shellEscapeQuoted(repo)} --json number,url,baseRefName,headRefName,headRefOid,state`,
     );
 
     let parsed: Record<string, unknown>;
@@ -169,9 +165,9 @@ export async function postPrReviewWithGh(
     if (!repo) return false;
 
     // Escape single quotes in body and repo for shell safety
-    const escapedBody = shellEscape(body);
+    const escapedBody = shellEscapeQuoted(body);
     await exec(
-      `GH_PROMPT_DISABLED=1 gh pr review ${prNumber} --repo '${shellEscape(repo)}' --comment --body '${escapedBody}'`,
+      `GH_PROMPT_DISABLED=1 gh pr review ${prNumber} --repo ${shellEscapeQuoted(repo)} --comment --body ${escapedBody}`,
     );
     return true;
   } catch (err) {
