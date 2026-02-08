@@ -15,6 +15,7 @@ import type { PluginInput } from '@opencode-ai/plugin';
 import type { JanitorConfig } from '../config/schema';
 import type { PrContext } from '../git/pr-context-resolver';
 import type { ActiveRun, ReviewRunStore } from '../state/review-run-store';
+import { withTimeout } from '../utils/async';
 import { log, warn } from '../utils/logger';
 import type { BaseOrchestrator } from './base-orchestrator';
 import { resumeReviewSession } from './runner';
@@ -225,28 +226,6 @@ export async function recoverInterruptedRuns(
       runStore.incrementResumeAttempts(run.id);
     }
   }
-}
-
-function withTimeout<T>(
-  promise: Promise<T>,
-  timeoutMs: number,
-  label: string,
-): Promise<T> {
-  return new Promise<T>((resolve, reject) => {
-    const timer = setTimeout(() => {
-      reject(new Error(`${label} timed out after ${timeoutMs}ms`));
-    }, timeoutMs);
-
-    promise
-      .then((value) => {
-        clearTimeout(timer);
-        resolve(value);
-      })
-      .catch((err) => {
-        clearTimeout(timer);
-        reject(err);
-      });
-  });
 }
 
 /**

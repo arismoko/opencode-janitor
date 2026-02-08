@@ -4,13 +4,10 @@ import { getErrorMessage, warn } from './logger';
 /**
  * Injects a message into a session.
  *
- * When `noReply` is true (default for error notifications), uses `noReply: true`
- * so the message appears without triggering an LLM response.
- * When `noReply` is false (default for review output), the parent session
- * receives the message and can reply — letting the user's agent act on findings.
- *
- * Uses the synchronous `prompt()` API so we get confirmation the message
- * was written to session history, unlike `promptAsync` (fire-and-forget 204).
+ * Always uses `promptAsync` to avoid blocking plugin hooks or the UI —
+ * even `noReply: true` inserts can stall on network/server with sync `prompt()`.
+ * The `noReply` flag controls only whether the assistant generates a reply,
+ * not the transport mode.
  */
 export async function injectMessage(
   ctx: PluginInput,
@@ -19,24 +16,10 @@ export async function injectMessage(
   noReply = true,
 ): Promise<void> {
   try {
-    if (noReply) {
-      await ctx.client.session.prompt({
-        path: { id: sessionId },
-        body: {
-          noReply: true,
-          parts: [{ type: 'text' as const, text }],
-        },
-        query: { directory: ctx.directory },
-      });
-      return;
-    }
-
-    // noReply=false can trigger a full LLM response. Use promptAsync so
-    // plugin hooks never block session rendering while the model generates.
     await ctx.client.session.promptAsync({
       path: { id: sessionId },
       body: {
-        noReply: false,
+        noReply,
         parts: [{ type: 'text' as const, text }],
       },
       query: { directory: ctx.directory },
