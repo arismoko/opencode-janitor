@@ -1,7 +1,7 @@
 import { existsSync, type FSWatcher, watch } from 'node:fs';
 import type { CommitSignal, SignalSource } from '../types';
-import { evictOldest, MAX_PROCESSED } from '../utils/eviction';
 import { log, warn } from '../utils/logger';
+import { SignalDetector } from './signal-detector';
 
 export type CommitCallback = (
   sha: string,
@@ -15,20 +15,27 @@ export type CommitCallback = (
  * triggering the callback. Ensures exactly-once processing
  * per commit hash.
  */
-export class CommitDetector {
-  private lastSeenHead: string | null = null;
-  private processed = new Set<string>();
+export class CommitDetector extends SignalDetector<CommitSignal> {
   private watchers: FSWatcher[] = [];
-  private pollTimer: ReturnType<typeof setInterval> | null = null;
-  private debounceTimer: ReturnType<typeof setTimeout> | null = null;
-  private started = false;
 
   constructor(
-    private getHead: () => Promise<string>,
-    private onNewCommit: CommitCallback,
-    private debounceMs: number = 1200,
-    private pollIntervalSec: number = 15,
-  ) {}
+    private readonly getHead: () => Promise<string>,
+    onNewCommit: CommitCallback,
+    debounceMs: number = 1200,
+    pollIntervalSec: number = 15,
+  ) {
+    super(
+      'commit-detector',
+      (key, sig) => onNewCommit(key, sig),
+      debounceMs,
+      pollIntervalSec,
+    );
+  }
+
+  protected async getCurrentKey(): Promise<string | null> {
+    const head = (await this.getHead()).trim();
+    return head || null;
+  }
 
   /**
    * Start watching for commits.
@@ -40,8 +47,8 @@ export class CommitDetector {
 
     // Initialize last seen HEAD
     try {
-      this.lastSeenHead = (await this.getHead()).trim();
-      log(`[commit-detector] initial HEAD: ${this.lastSeenHead}`);
+      this.lastSeenKey = (await this.getHead()).trim();
+      log(`[commit-detector] initial HEAD: ${this.lastSeenKey}`);
     } catch {
       warn('[commit-detector] could not read initial HEAD');
     }
@@ -55,7 +62,7 @@ export class CommitDetector {
       }
       try {
         const watcher = watch(target, { recursive: true }, () => {
-          this.signal('fswatch');
+          this.signal({ source: 'fswatch', ts: Date.now() });
         });
         this.watchers.push(watcher);
         log(`[commit-detector] watching: ${target}`);
@@ -66,85 +73,18 @@ export class CommitDetector {
 
     // Safety net: periodic poll
     this.pollTimer = setInterval(() => {
-      this.signal('poll');
+      this.signal({ source: 'poll', ts: Date.now() });
     }, this.pollIntervalSec * 1000);
 
     log('[commit-detector] started');
   }
 
   /**
-   * Receive accelerator signal from tool.execute.after hook.
-   * Routes through the standard debounced signal pipeline — does NOT
-   * bypass debounce, but provides faster detection than the poll
-   * fallback by triggering an immediate debounced check.
-   */
-  accelerate(): void {
-    this.signal('tool-hook');
-  }
-
-  /**
-   * Mark a SHA as already processed (e.g., on plugin restart).
-   */
-  markProcessed(sha: string): void {
-    this.processed.add(sha);
-    this.evictProcessed();
-  }
-
-  /**
-   * Process any signal with debounce.
-   */
-  private signal(source: SignalSource): void {
-    if (this.debounceTimer) clearTimeout(this.debounceTimer);
-    this.debounceTimer = setTimeout(() => {
-      this.verify({ source, ts: Date.now() });
-    }, this.debounceMs);
-  }
-
-  /**
-   * Verify HEAD and trigger callback if new commit.
-   * This is the single source of truth — all signals funnel here.
-   */
-  private async verify(signal: CommitSignal): Promise<void> {
-    try {
-      const head = (await this.getHead()).trim();
-      if (!head || head === this.lastSeenHead) return;
-
-      this.lastSeenHead = head;
-
-      if (this.processed.has(head)) {
-        log(`[commit-detector] already processed: ${head}`);
-        return;
-      }
-
-      log(`[commit-detector] new commit: ${head} via ${signal.source}`);
-      await this.onNewCommit(head, signal);
-      this.processed.add(head);
-      this.evictProcessed();
-    } catch (err) {
-      warn(`[commit-detector] verify failed: ${err}`);
-    }
-  }
-
-  /** Evict oldest entries when the processed set exceeds the cap. */
-  private evictProcessed(): void {
-    evictOldest(this.processed, MAX_PROCESSED);
-  }
-
-  /**
    * Clean up watchers and timers.
    */
-  stop(): void {
+  override stop(): void {
     for (const w of this.watchers) w.close();
     this.watchers = [];
-    if (this.pollTimer) {
-      clearInterval(this.pollTimer);
-      this.pollTimer = null;
-    }
-    if (this.debounceTimer) {
-      clearTimeout(this.debounceTimer);
-      this.debounceTimer = null;
-    }
-    this.started = false;
-    log('[commit-detector] stopped');
+    super.stop();
   }
 }

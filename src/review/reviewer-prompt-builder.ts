@@ -1,7 +1,6 @@
 import type { PrContext } from '../git/pr-context-resolver';
 
 export interface ReviewerPromptConfig {
-  maxFindings: number;
   scopeInclude: string[];
   scopeExclude: string[];
 }
@@ -32,8 +31,11 @@ File patterns included: ${config.scopeInclude.join(', ')}
 File patterns excluded: ${config.scopeExclude.join(', ')}
 
 # SEVERITY
-Allowed severities: CRITICAL, HIGH, MEDIUM, LOW
-Maximum findings: ${config.maxFindings}
+Allowed severities: P0, P1, P2, P3
+- P0: Must fix before merge — correctness bugs, security holes, data loss risks
+- P1: Should fix before merge — performance regressions, architectural violations, missing error handling
+- P2: Fix soon — code quality, maintainability, minor edge cases
+- P3: Nice to have — style nits, minor improvements, documentation gaps
 
 # DOMAINS
 Allowed domains: BUG, SECURITY, PERFORMANCE, ARCHITECTURE, DOCS, SPEC
@@ -41,8 +43,8 @@ Allowed domains: BUG, SECURITY, PERFORMANCE, ARCHITECTURE, DOCS, SPEC
 # REVIEW STRATEGY
 1. Read the patch to understand intent
 2. Use tools (grep, glob, Read, ast_grep_search) for validation and context
-3. Report only actionable findings with concrete evidence
-4. Prioritize severity and impact
+3. Report all findings with concrete evidence, organized by severity
+4. Be thorough — report issues at every severity level
 
 # CHANGE CONTEXT
 Changed files:
@@ -61,7 +63,7 @@ Return ONLY a JSON object in this exact schema:
   "findings": [
     {
       "location": "path:line",
-      "severity": "CRITICAL|HIGH|MEDIUM|LOW",
+      "severity": "P0|P1|P2|P3",
       "domain": "BUG|SECURITY|PERFORMANCE|ARCHITECTURE|DOCS|SPEC",
       "evidence": "concrete proof",
       "prescription": "exact fix action"

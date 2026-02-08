@@ -191,7 +191,6 @@ const TheJanitor: Plugin = async (ctx) => {
     config,
     async (prContext, parentSessionId) => {
       const prompt = buildReviewerPrompt(prContext, {
-        maxFindings: config.agents.reviewer.maxFindings,
         scopeInclude: config.scope.include,
         scopeExclude: config.scope.exclude,
       });

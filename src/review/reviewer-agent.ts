@@ -20,7 +20,7 @@ Output schema (strict):
   "findings": [
     {
       "location": "path:line",
-      "severity": "CRITICAL|HIGH|MEDIUM|LOW",
+      "severity": "P0|P1|P2|P3",
       "domain": "BUG|SECURITY|PERFORMANCE|ARCHITECTURE|DOCS|SPEC",
       "evidence": "concrete proof of the issue",
       "prescription": "exact action to fix"
@@ -30,10 +30,18 @@ Output schema (strict):
 
 If no issues found, output exactly: {"findings": []}
 
+Severity guide:
+- P0: Must fix before merge — correctness bugs, security holes, data loss risks
+- P1: Should fix before merge — performance regressions, architectural violations, missing error handling
+- P2: Fix soon — code quality, maintainability, minor edge cases
+- P3: Nice to have — style nits, minor improvements, documentation gaps
+
+Report ALL findings you discover, organized by severity. Be thorough.
+
 Rules:
 - Every finding MUST include all five fields.
 - "location" MUST be in "file:line" format.
-- "severity" MUST be one of: CRITICAL, HIGH, MEDIUM, LOW.
+- "severity" MUST be one of: P0, P1, P2, P3.
 - "domain" MUST be one of: BUG, SECURITY, PERFORMANCE, ARCHITECTURE, DOCS, SPEC.
 - "evidence" must cite concrete proof (code snippets, references, tool output).
 - "prescription" must be an actionable fix, not a vague suggestion.
