@@ -37,6 +37,8 @@ export interface FindingLedgerEntry {
   firstSeenSha: string;
   lastSeenSha: string;
   occurrences: number;
+  /** Consecutive reviews this finding has appeared in (resets on resolve) */
+  consecutiveRuns: number;
   state: 'active' | 'resolved';
 }
 

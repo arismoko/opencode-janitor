@@ -109,8 +109,13 @@ export async function processReviewOutput(
     const annotated = analyzeLifecycle(findings, ledger);
 
     // Detect resolved findings
-    const currentKeys = new Set(annotated.map((a) => a.exactKey));
-    const resolved = detectResolved(currentKeys, ledger);
+    const currentExactKeys = new Set(annotated.map((a) => a.exactKey));
+    const currentScopedKeys = new Set(annotated.map((a) => a.scopedKey));
+    const resolved = detectResolved(
+      currentExactKeys,
+      currentScopedKeys,
+      ledger,
+    );
 
     // Record this review BEFORE computing trends so the current review
     // is included in the trend window — otherwise the report is always

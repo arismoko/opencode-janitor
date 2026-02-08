@@ -117,6 +117,7 @@ export class HistoryStore {
         if (existing) {
           existing.lastSeenSha = review.sha;
           existing.occurrences += 1;
+          existing.consecutiveRuns += 1;
           existing.state = 'active';
         } else {
           entries.set(f.exactKey, {
@@ -127,6 +128,7 @@ export class HistoryStore {
             firstSeenSha: review.sha,
             lastSeenSha: review.sha,
             occurrences: 1,
+            consecutiveRuns: 1,
             state: 'active',
           });
         }
@@ -136,6 +138,7 @@ export class HistoryStore {
       for (const entry of entries.values()) {
         if (entry.state === 'active' && !seenKeys.has(entry.exactKey)) {
           entry.state = 'resolved';
+          entry.consecutiveRuns = 0;
         }
       }
     }

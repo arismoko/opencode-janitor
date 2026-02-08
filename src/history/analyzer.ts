@@ -30,7 +30,7 @@ export function analyzeLifecycle(
       streak = 1;
     } else {
       lifecycle = 'persistent';
-      streak = entry.occurrences + 1;
+      streak = entry.consecutiveRuns + 1;
     }
 
     return {
@@ -45,11 +45,14 @@ export function analyzeLifecycle(
 
 /** Detect findings that were active in the ledger but absent from current review */
 export function detectResolved(
-  currentFingerprints: Set<string>,
+  currentExactKeys: Set<string>,
+  currentScopedKeys: Set<string>,
   ledger: FindingLedgerEntry[],
 ): FindingLedgerEntry[] {
   return ledger.filter(
     (entry) =>
-      entry.state === 'active' && !currentFingerprints.has(entry.exactKey),
+      entry.state === 'active' &&
+      !currentExactKeys.has(entry.exactKey) &&
+      !currentScopedKeys.has(entry.scopedKey),
   );
 }
