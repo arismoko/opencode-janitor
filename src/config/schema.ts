@@ -1,5 +1,7 @@
 import { z } from 'zod';
 
+const TriggerModeSchema = z.enum(['commit', 'pr', 'both']);
+
 export const JanitorConfigSchema = z.object({
   enabled: z.boolean().default(true),
 
@@ -13,6 +15,32 @@ export const JanitorConfigSchema = z.object({
       onCommit: true,
       debounceMs: 1200,
       pollFallbackSec: 15,
+    })),
+
+  agents: z
+    .object({
+      janitor: z
+        .object({
+          enabled: z.boolean().default(true),
+          trigger: TriggerModeSchema.default('commit'),
+        })
+        .default(() => ({ enabled: true, trigger: 'commit' as const })),
+      reviewer: z
+        .object({
+          enabled: z.boolean().default(true),
+          trigger: TriggerModeSchema.default('pr'),
+          modelId: z.string().optional(),
+          maxFindings: z.number().int().min(1).max(50).default(8),
+        })
+        .default(() => ({
+          enabled: true,
+          trigger: 'pr' as const,
+          maxFindings: 8,
+        })),
+    })
+    .default(() => ({
+      janitor: { enabled: true, trigger: 'commit' as const },
+      reviewer: { enabled: true, trigger: 'pr' as const, maxFindings: 8 },
     })),
 
   categories: z
@@ -82,12 +110,34 @@ export const JanitorConfigSchema = z.object({
       sessionMessage: z.boolean().default(true),
       reportFile: z.boolean().default(true),
       reportDir: z.string().default('.janitor/reports'),
+      reviewer: z
+        .object({
+          toast: z.boolean().default(true),
+          sessionMessage: z.boolean().default(true),
+          reportFile: z.boolean().default(true),
+          reportDir: z.string().default('.janitor/reviewer-reports'),
+          prComment: z.boolean().default(true),
+        })
+        .default(() => ({
+          toast: true,
+          sessionMessage: true,
+          reportFile: true,
+          reportDir: '.janitor/reviewer-reports',
+          prComment: true,
+        })),
     })
     .default(() => ({
       toast: true,
       sessionMessage: true,
       reportFile: true,
       reportDir: '.janitor/reports',
+      reviewer: {
+        toast: true,
+        sessionMessage: true,
+        reportFile: true,
+        reportDir: '.janitor/reviewer-reports',
+        prComment: true,
+      },
     })),
 
   queue: z
@@ -128,6 +178,20 @@ export const JanitorConfigSchema = z.object({
       maxReviews: 50,
       maxBytes: 2_097_152,
       trendWindow: 10,
+    })),
+
+  pr: z
+    .object({
+      pollSec: z.number().int().min(5).default(20),
+      baseBranch: z.string().default('master'),
+      detectToolHook: z.boolean().default(true),
+      postWithGh: z.boolean().default(true),
+    })
+    .default(() => ({
+      pollSec: 20,
+      baseBranch: 'master',
+      detectToolHook: true,
+      postWithGh: true,
     })),
 });
 

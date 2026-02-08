@@ -1,6 +1,6 @@
 # opencode-janitor
 
-Automatic structural code health reviews after every commit. Runs silently in the background inside [OpenCode](https://github.com/anomalyco/opencode), surfacing only P0-class issues that are worth fixing right now.
+Automatic structural and comprehensive code reviews inside [OpenCode](https://github.com/anomalyco/opencode). Runs silently in the background and can trigger on commits, PR updates, or both.
 
 ## What It Does
 
@@ -11,9 +11,18 @@ When you commit, the janitor spawns an isolated background session and reviews y
 | **DRY** | Functions with >60% structural similarity, copy-pasted types, repeated constants |
 | **DEAD** | Exported symbols with zero importers, unreachable branches, dead type chains |
 | **YAGNI** | Single-implementor interfaces, always-same generics, pass-through abstractions |
-| **STRUCTURAL** | Files >300 lines, circular dependencies, layer boundary violations |
+| **STRUCTURAL** | Files >500 lines, circular dependencies, layer boundary violations |
 
-Every finding includes a **location**, **evidence**, and an **exact prescription** (delete, extract, merge). If the codebase is clean, you get a toast and nothing else.
+Every finding includes a **location**, **evidence**, and an **exact prescription** (delete, extract, merge).
+
+### Comprehensive Reviewer
+
+The plugin also ships a second agent: **`code-reviewer`**.
+
+- Focus: bugs, security, performance, architecture, docs drift, and spec drift
+- Default trigger: PR updates
+- Output contract: strict JSON findings parsed and rendered into reports
+- Delivery: toast, session message, file report, and optional direct PR comment via `gh pr review`
 
 ## Install
 
@@ -37,7 +46,7 @@ bun install
 bun run build
 ```
 
-Restart OpenCode. You'll see a toast: **"Janitor: watching for commits"**.
+Restart OpenCode. You'll see a toast: **"Janitor: watchers active"**.
 
 ## Configuration
 
@@ -55,6 +64,17 @@ Both are optional. All fields have defaults. Example:
     "onCommit": true,
     "debounceMs": 1200,
     "pollFallbackSec": 15
+  },
+  "agents": {
+    "janitor": {
+      "enabled": true,
+      "trigger": "commit"
+    },
+    "reviewer": {
+      "enabled": true,
+      "trigger": "pr",
+      "maxFindings": 8
+    }
   },
   "categories": {
     "DRY": true,
@@ -79,7 +99,20 @@ Both are optional. All fields have defaults. Example:
     "toast": true,
     "sessionMessage": true,
     "reportFile": true,
-    "reportDir": ".janitor/reports"
+    "reportDir": ".janitor/reports",
+    "reviewer": {
+      "toast": true,
+      "sessionMessage": true,
+      "reportFile": true,
+      "reportDir": ".janitor/reviewer-reports",
+      "prComment": true
+    }
+  },
+  "pr": {
+    "pollSec": 20,
+    "baseBranch": "master",
+    "detectToolHook": true,
+    "postWithGh": true
   },
   "queue": {
     "concurrency": 1,
@@ -93,9 +126,13 @@ Both are optional. All fields have defaults. Example:
 | Setting | Default | Notes |
 |---------|---------|-------|
 | `model.id` | *(inherits from OpenCode)* | Override with `provider/model` format |
-| `autoReview.onCommit` | `true` | Set `false` to disable automatic reviews |
+| `agents.janitor.trigger` | `commit` | `commit`, `pr`, or `both` |
+| `agents.reviewer.trigger` | `pr` | `commit`, `pr`, or `both` |
+| `agents.reviewer.maxFindings` | `8` | Maximum parsed reviewer findings |
 | `queue.dropIntermediate` | `true` | During rapid commits, only review the latest |
 | `delivery.reportFile` | `true` | Writes reports to `.janitor/reports/<sha>.md` |
+| `delivery.reviewer.prComment` | `true` | Post reviewer report to PR via `gh pr review` when available |
+| `pr.baseBranch` | `master` | Fallback base branch when `gh` PR metadata is unavailable |
 
 ## How It Works
 
@@ -109,13 +146,23 @@ Three signal sources ensure no commits are missed:
 
 All signals are debounced and verified against HEAD before triggering a review.
 
+### PR Detection
+
+PR-mode reviews use a hybrid model:
+
+1. **Tool hook accelerator** — detects `git push` and `gh pr ...` commands inside OpenCode
+2. **PR poller** — periodically checks current PR head state (`gh pr view`) when `gh` is available
+3. **No-`gh` fallback** — after an observed push, reviews current branch diff vs configured base branch
+
+If `gh` is unavailable, PR comments are skipped gracefully and results still land in session/file/toast sinks.
+
 ### Review Pipeline
 
 ```
-commit detected → debounce → verify HEAD → extract diff → build prompt → spawn background session → parse output → deliver results
+signal detected → debounce → resolve context (commit/PR) → build prompt → spawn background session → parse output → deliver results
 ```
 
-- Reviews run in isolated background sessions with their own agent (`janitor`)
+- Reviews run in isolated background sessions with per-agent prompts (`janitor`, `code-reviewer`)
 - The janitor agent gets `glob`, `grep`, `Read`, and `ast_grep_search` tools — no write access
 - Large diffs are truncated; the agent uses tools to explore beyond the patch
 - Burst commits are coalesced: only the oldest running + latest pending are kept
@@ -129,6 +176,7 @@ Results are delivered through three sinks (all independently toggleable):
 | **Toast** | Quick summary: "Janitor: 3 P0 findings in abc1234" |
 | **Session message** | Full markdown report injected into your session |
 | **File report** | Persistent `.janitor/reports/<sha>.md` |
+| **PR comment** | Reviewer posts to GitHub PR via `gh pr review --comment` (optional) |
 
 ## Architecture
 
@@ -141,15 +189,23 @@ src/
   git/
     commit-detector.ts        # Hybrid fs.watch + poll + accelerator
     commit-resolver.ts        # Diff extraction, parent selection
+    pr-detector.ts            # PR poll + tool-hook accelerator
+    pr-context-resolver.ts    # PR merge-base diff extraction
+    gh-pr.ts                  # gh availability + PR metadata + PR comment delivery
     repo-locator.ts           # .git dir resolution
   review/
     orchestrator.ts           # Queue, concurrency, burst coalescing
+    reviewer-orchestrator.ts  # Queue/lifecycle for comprehensive reviewer
     janitor-agent.ts          # Agent definition (model, tools, prompt)
+    reviewer-agent.ts         # Comprehensive reviewer agent definition
     prompt-builder.ts         # Review prompt assembly
+    reviewer-prompt-builder.ts # PR review prompt assembly
     runner.ts                 # Background session spawner
   results/
     parser.ts                 # Structured finding extraction
+    reviewer-parser.ts        # Reviewer JSON extraction
     formatter.ts              # Markdown report rendering
+    reviewer-formatter.ts     # Reviewer markdown rendering
     sinks/                    # Toast, session, file delivery
   state/
     store.ts                  # Processed commit persistence

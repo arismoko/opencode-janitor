@@ -30,7 +30,9 @@ export async function deliverToast(
   }
 
   try {
-    await (ctx.client as any).tui?.showToast?.({ message });
+    await (ctx.client as any).tui?.showToast?.({
+      body: { message, variant: result.clean ? 'success' : 'warning' },
+    });
   } catch {
     warn('[toast-sink] failed to show toast');
   }

@@ -101,7 +101,27 @@ export function loadConfig(directory: string): JanitorConfig {
   }
 
   try {
-    return JanitorConfigSchema.parse(merged);
+    const parsed = JanitorConfigSchema.parse(merged);
+
+    // Backward compatibility: legacy autoReview.onCommit controlled whether
+    // janitor commit auto-reviews were enabled. If agents.janitor is not
+    // explicitly configured, honor the legacy toggle by enabling/disabling
+    // the janitor agent.
+    const legacyAutoReview = merged.autoReview as
+      | { onCommit?: unknown }
+      | undefined;
+    const legacyOnCommit = legacyAutoReview?.onCommit;
+    const hasExplicitJanitorConfig =
+      merged.agents != null &&
+      typeof merged.agents === 'object' &&
+      'janitor' in (merged.agents as Record<string, unknown>);
+
+    if (!hasExplicitJanitorConfig && typeof legacyOnCommit === 'boolean') {
+      parsed.agents.janitor.enabled = legacyOnCommit;
+      parsed.agents.janitor.trigger = 'commit';
+    }
+
+    return parsed;
   } catch (err) {
     warn(`[config] validation failed, falling back to defaults: ${err}`);
     return JanitorConfigSchema.parse({});

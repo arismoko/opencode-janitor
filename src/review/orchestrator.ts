@@ -296,7 +296,7 @@ export class ReviewOrchestrator {
     enrichment?: EnrichmentData,
     suppressedCount?: number,
   ): Promise<void> {
-    const report = formatReport(result, enrichment, suppressedCount);
+    const report = formatReport(result, suppressedCount);
 
     if (config.delivery.toast) {
       await deliverToast(ctx, result, enrichment);

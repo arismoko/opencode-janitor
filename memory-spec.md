@@ -2,6 +2,15 @@
 
 > Suppression memory and review history for persistent, context-aware reviews.
 
+## 2026-02 Addendum: Memory Scope
+
+Memory in this spec is scoped to the structural janitor pipeline. The new
+`code-reviewer` PR pipeline intentionally does not share janitor suppressions or
+history ledgers, to avoid cross-agent semantic contamination.
+
+If reviewer memory is added later, it must use separate stores and fingerprints
+under its own namespace.
+
 This spec covers two complementary systems that give the janitor memory across reviews:
 
 1. **Suppression Memory** — user-controlled "I know, leave it alone" for intentionally accepted findings

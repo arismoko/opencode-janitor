@@ -1,4 +1,3 @@
-import type { EnrichmentData } from '../history/enrichment';
 import type { ReviewResult } from '../types';
 
 /**
@@ -6,7 +5,6 @@ import type { ReviewResult } from '../types';
  */
 export function formatReport(
   result: ReviewResult,
-  enrichment?: EnrichmentData,
   suppressedCount?: number,
 ): string {
   const shortSha = result.sha.slice(0, 7);

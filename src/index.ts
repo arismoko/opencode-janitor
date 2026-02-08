@@ -8,12 +8,19 @@ import type { Plugin } from '@opencode-ai/plugin';
 import { loadConfig } from './config/loader';
 import { CommitDetector } from './git/commit-detector';
 import { getCommitContext } from './git/commit-resolver';
+import { getCurrentPrFromGh, isGhAvailable } from './git/gh-pr';
+import { getPrContext, type PrContext } from './git/pr-context-resolver';
+import { PrDetector } from './git/pr-detector';
 import { resolveGitDir } from './git/repo-locator';
 import { HistoryStore } from './history/store';
+import { deliverReviewerToPr } from './results/sinks/reviewer-pr-sink';
 import { createJanitorAgent } from './review/janitor-agent';
 import { ReviewOrchestrator } from './review/orchestrator';
 import { buildReviewPrompt } from './review/prompt-builder';
-import { spawnJanitorReview } from './review/runner';
+import { createReviewerAgent } from './review/reviewer-agent';
+import { ReviewerOrchestrator } from './review/reviewer-orchestrator';
+import { buildReviewerPrompt } from './review/reviewer-prompt-builder';
+import { spawnJanitorReview, spawnReviewerReview } from './review/runner';
 import { CommitStore } from './state/store';
 import { buildSuppressionsBlock } from './suppressions/prompt';
 import { SuppressionStore } from './suppressions/store';
@@ -37,10 +44,18 @@ interface JanitorPluginReturn {
 /** Best-effort toast — swallows errors so it never breaks init. */
 function toast(ctx: Parameters<Plugin>[0], message: string) {
   try {
-    (ctx.client as any).tui?.showToast?.({ message }).catch(() => {});
+    (ctx.client as any).tui
+      ?.showToast?.({ body: { message, variant: 'info' } })
+      .catch(() => {});
   } catch {
     // TUI may not be available
   }
+}
+
+type TriggerMode = 'commit' | 'pr' | 'both';
+
+function triggerMatches(trigger: TriggerMode, mode: 'commit' | 'pr'): boolean {
+  return trigger === mode || trigger === 'both';
 }
 
 const TheJanitor: Plugin = async (ctx) => {
@@ -80,7 +95,32 @@ const TheJanitor: Plugin = async (ctx) => {
     return { name: 'the-janitor' } as JanitorPluginReturn;
   }
 
-  const agent = createJanitorAgent(config);
+  const janitorAgent = createJanitorAgent(config);
+  const reviewerAgent = createReviewerAgent(config);
+
+  const janitorCommitEnabled =
+    config.agents.janitor.enabled &&
+    triggerMatches(config.agents.janitor.trigger, 'commit');
+  const janitorPrEnabled =
+    config.agents.janitor.enabled &&
+    triggerMatches(config.agents.janitor.trigger, 'pr');
+  const reviewerCommitEnabled =
+    config.agents.reviewer.enabled &&
+    triggerMatches(config.agents.reviewer.trigger, 'commit');
+  const reviewerPrEnabled =
+    config.agents.reviewer.enabled &&
+    triggerMatches(config.agents.reviewer.trigger, 'pr');
+
+  const anyCommitReviews = janitorCommitEnabled || reviewerCommitEnabled;
+  const anyPrReviews = janitorPrEnabled || reviewerPrEnabled;
+
+  const ghAvailableAtStartup = anyPrReviews ? await isGhAvailable(exec) : false;
+  if (anyPrReviews && !ghAvailableAtStartup) {
+    warn(
+      '[init] gh CLI not available — PR reviews will fall back to session/toast/file delivery',
+    );
+  }
+
   const store = new CommitStore(ctx.directory);
   const suppressionStore = new SuppressionStore(ctx.directory, {
     maxEntries: config.suppressions?.maxEntries,
@@ -144,6 +184,28 @@ const TheJanitor: Plugin = async (ctx) => {
   // Give orchestrator access to the SDK client for error injection
   orchestrator.setContext(ctx);
 
+  const reviewerOrchestrator = new ReviewerOrchestrator(
+    config,
+    async (prContext, parentSessionId) => {
+      const prompt = buildReviewerPrompt(prContext, {
+        maxFindings: config.agents.reviewer.maxFindings,
+        scopeInclude: config.scope.include,
+        scopeExclude: config.scope.exclude,
+      });
+
+      const sessionId = await spawnReviewerReview(ctx, {
+        parentSessionId,
+        prompt,
+        config,
+      });
+      return sessionId;
+    },
+    async (prNumber, body) => {
+      return deliverReviewerToPr(exec, prNumber, body);
+    },
+  );
+  reviewerOrchestrator.setContext(ctx);
+
   // Commit detector
   const detector = new CommitDetector(
     async () => {
@@ -155,50 +217,156 @@ const TheJanitor: Plugin = async (ctx) => {
     },
     async (sha, signal) => {
       log(`new commit detected: ${sha} via ${signal.source}`);
-      orchestrator.enqueue(sha);
+
+      if (janitorCommitEnabled) {
+        orchestrator.enqueue(sha);
+      }
+
+      if (reviewerCommitEnabled) {
+        const commit = await getCommitContext(sha, config, exec);
+
+        if (!commit.patch.trim() && commit.changedFiles.length === 0) {
+          warn(`[reviewer] skipping empty commit context: ${sha.slice(0, 8)}`);
+        } else {
+          reviewerOrchestrator.enqueue({
+            key: `commit:${sha}`,
+            headSha: sha,
+            baseRef: commit.parents[0] ?? config.pr.baseBranch,
+            headRef: sha,
+            changedFiles: commit.changedFiles,
+            patch: commit.patch,
+            patchTruncated: commit.patchTruncated,
+          });
+        }
+      }
     },
     config.autoReview.debounceMs,
     config.autoReview.pollFallbackSec,
   );
 
+  let latestGhPr = await getCurrentPrFromGh(exec);
+  let branchPushPending = false;
+
+  const prDetector = anyPrReviews
+    ? new PrDetector(
+        async () => {
+          if (ghAvailableAtStartup) {
+            latestGhPr = await getCurrentPrFromGh(exec);
+            if (!latestGhPr) return null;
+            return `pr:${latestGhPr.number}:${latestGhPr.headSha}`;
+          }
+
+          // No gh available — only react after an observed push command.
+          if (!branchPushPending) return null;
+
+          const branch = (await exec('git rev-parse --abbrev-ref HEAD')).trim();
+          if (!branch || branch === 'HEAD') return null;
+
+          const headSha = (await exec('git rev-parse HEAD')).trim();
+          if (!headSha) return null;
+
+          return `branch:${branch}:${headSha}`;
+        },
+        async (key, signal) => {
+          log(`new PR state detected: ${key} via ${signal.source}`);
+
+          let prContext: PrContext;
+
+          if (key.startsWith('pr:')) {
+            const ghPr = latestGhPr ?? (await getCurrentPrFromGh(exec));
+            if (!ghPr) return;
+
+            prContext = await getPrContext({
+              baseRef: ghPr.baseRef,
+              headRef: ghPr.headRef,
+              headSha: ghPr.headSha,
+              number: ghPr.number,
+              url: ghPr.url,
+              config,
+              exec,
+            });
+          } else {
+            const branch = (
+              await exec('git rev-parse --abbrev-ref HEAD')
+            ).trim();
+            if (!branch || branch === 'HEAD') return;
+
+            const headSha = (await exec('git rev-parse HEAD')).trim();
+            if (!headSha) return;
+
+            prContext = await getPrContext({
+              baseRef: config.pr.baseBranch,
+              headRef: branch,
+              headSha,
+              config,
+              exec,
+            });
+
+            branchPushPending = false;
+          }
+
+          if (!prContext.patch.trim() && prContext.changedFiles.length === 0) {
+            warn(`[pr] skipping empty PR context: ${prContext.key}`);
+            return;
+          }
+
+          if (janitorPrEnabled) {
+            orchestrator.enqueue(prContext.headSha);
+          }
+
+          if (reviewerPrEnabled) {
+            reviewerOrchestrator.enqueue(prContext);
+          }
+        },
+        config.autoReview.debounceMs,
+        config.pr.pollSec,
+      )
+    : null;
+
   // Pre-seed processed SHAs so restarts don't re-review old commits
-  for (const sha of previouslyProcessed) {
-    detector.markProcessed(sha);
+  if (janitorCommitEnabled) {
+    for (const sha of previouslyProcessed) {
+      detector.markProcessed(sha);
+    }
   }
 
-  if (config.autoReview.onCommit) {
+  if (anyCommitReviews) {
     await detector.start(gitDir);
   }
 
-  toast(ctx, 'Janitor: watching for commits');
+  if (prDetector) {
+    prDetector.start();
+  }
+
+  toast(ctx, 'Janitor: watchers active');
   log(`initialized — watching ${gitDir}`);
 
   return {
     name: 'the-janitor',
 
-    // Register the janitor agent in OpenCode's agent registry.
+    // Register janitor + reviewer agents in OpenCode's agent registry.
     // Plugins must mutate the config object in place — the return value
-    // of the config hook is ignored. This lets promptAsync reference
-    // agent: 'janitor' and get the correct model, prompt, and tools.
+    // of the config hook is ignored.
     config: async (opencodeConfig: Record<string, unknown>) => {
       const agents = (opencodeConfig.agent ?? {}) as Record<string, unknown>;
-      agents[agent.name] = {
-        ...agent.config,
-        description: agent.description,
-      };
+
+      for (const agent of [janitorAgent, reviewerAgent]) {
+        agents[agent.name] = {
+          ...agent.config,
+          description: agent.description,
+        };
+      }
+
       opencodeConfig.agent = agents;
-      log(`registered agent '${agent.name}' in config hook`);
+      log("registered agents 'janitor' and 'code-reviewer' in config hook");
     },
 
     cleanup: () => {
       detector.stop();
-      log('plugin cleanup: detector stopped');
+      prDetector?.stop();
+      log('plugin cleanup: detectors stopped');
     },
 
-    // Accelerator: detect git commit via tool hook.
-    // Gated on autoReview.onCommit — the accelerator is just a faster
-    // path into the same detection pipeline, so it must respect the toggle.
-    //
     // Also bootstraps session tracking: after a restart the plugin may
     // miss the initial session.created event, so we capture the sessionID
     // from the first tool call we see.
@@ -209,20 +377,35 @@ const TheJanitor: Plugin = async (ctx) => {
       // Bootstrap session tracking from any tool call — covers the case
       // where the plugin loads into an already-existing session and never
       // receives a session.created event.
-      // Guard: skip session IDs belonging to janitor child review sessions
-      // to prevent them from being promoted to latestSessionId, which would
-      // cause future reviews to nest under a review session.
-      if (input.sessionID && !orchestrator.isOwnSession(input.sessionID)) {
-        orchestrator.sessionAvailable(input.sessionID);
+      if (input.sessionID) {
+        if (!orchestrator.isOwnSession(input.sessionID)) {
+          orchestrator.sessionAvailable(input.sessionID);
+        }
+        if (!reviewerOrchestrator.isOwnSession(input.sessionID)) {
+          reviewerOrchestrator.sessionAvailable(input.sessionID);
+        }
       }
 
-      if (!config.autoReview.onCommit) return;
       if (input.tool !== 'Bash' && input.tool !== 'bash') return;
 
-      // The command is in the output title for Bash tool calls
       const text = output.title || output.output || '';
-      if (/git\s+commit/.test(text)) {
+
+      if (anyCommitReviews && /git\s+commit/.test(text)) {
         detector.accelerate();
+      }
+
+      if (!prDetector || !config.pr.detectToolHook) return;
+
+      if (/git\s+push/.test(text)) {
+        if (!ghAvailableAtStartup) {
+          branchPushPending = true;
+        }
+        prDetector.accelerate();
+        return;
+      }
+
+      if (/gh\s+pr\s+(create|ready|reopen|edit|merge)/.test(text)) {
+        prDetector.accelerate();
       }
     },
 
@@ -243,6 +426,7 @@ const TheJanitor: Plugin = async (ctx) => {
         if (info?.id && !info?.parentID) {
           log(`tracking root session: ${info.id}`);
           orchestrator.sessionAvailable(info.id);
+          reviewerOrchestrator.sessionAvailable(info.id);
         }
       }
 
@@ -253,6 +437,11 @@ const TheJanitor: Plugin = async (ctx) => {
           | undefined;
         if (props?.status?.type === 'idle' && props?.sessionID) {
           await orchestrator.handleCompletion(props.sessionID, ctx, config);
+          await reviewerOrchestrator.handleCompletion(
+            props.sessionID,
+            ctx,
+            config,
+          );
         }
       }
     },

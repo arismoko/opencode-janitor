@@ -2,6 +2,20 @@
 
 > Automatic structural code health reviews after every commit.
 
+## 2026-02 Addendum: Dual-Agent Runtime
+
+This spec now operates inside a dual-agent runtime:
+
+- `janitor` remains structural-only (DRY/DEAD/YAGNI/STRUCTURAL)
+- `code-reviewer` is a separate comprehensive reviewer for PR workflows
+- Each agent has an independent trigger mode: `commit | pr | both`
+- Defaults: janitor=`commit`, reviewer=`pr`
+- PR delivery attempts `gh pr review` when available, but always falls back to
+  session/file/toast sinks without failing the pipeline
+
+See `adr-dual-review-architecture.md` for the concrete runtime decisions and
+output contracts.
+
 ## 0. Goals and Non-Goals
 
 **Goal**: Automatically run a structural code health review after each commit, in background, with actionable P0 findings only.

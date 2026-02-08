@@ -19,19 +19,61 @@ export async function spawnJanitorReview(
     config: JanitorConfig;
   },
 ): Promise<string> {
-  log('[runner] spawning review session');
+  return spawnReviewSession(ctx, {
+    parentSessionId: opts.parentSessionId,
+    prompt: opts.prompt,
+    title: 'Janitor Review',
+    agent: 'janitor',
+    modelId: opts.config.model.id,
+  });
+}
+
+/**
+ * Spawn an isolated background session for a comprehensive PR review.
+ * Returns the session ID for tracking completion.
+ */
+export async function spawnReviewerReview(
+  ctx: PluginInput,
+  opts: {
+    parentSessionId: string;
+    prompt: string;
+    config: JanitorConfig;
+  },
+): Promise<string> {
+  return spawnReviewSession(ctx, {
+    parentSessionId: opts.parentSessionId,
+    prompt: opts.prompt,
+    title: 'Code Review',
+    agent: 'code-reviewer',
+    modelId: opts.config.agents.reviewer.modelId ?? opts.config.model.id,
+  });
+}
+
+interface SpawnOpts {
+  parentSessionId: string;
+  prompt: string;
+  title: string;
+  agent: string;
+  modelId?: string;
+}
+
+async function spawnReviewSession(
+  ctx: PluginInput,
+  opts: SpawnOpts,
+): Promise<string> {
+  log(`[runner] spawning ${opts.agent} session`);
 
   // Create isolated session
   const session = await ctx.client.session.create({
     body: {
       parentID: opts.parentSessionId,
-      title: 'Janitor Review',
+      title: opts.title,
     },
     query: { directory: ctx.directory },
   });
 
   if (!session.data?.id) {
-    throw new Error('Failed to create Janitor review session');
+    throw new Error(`Failed to create ${opts.agent} review session`);
   }
 
   const sessionId = session.data.id;
@@ -45,18 +87,18 @@ export async function spawnJanitorReview(
     agent?: string;
     model?: { providerID: string; modelID: string };
   } = {
-    agent: 'janitor',
+    agent: opts.agent,
     parts: [{ type: 'text', text: opts.prompt }],
   };
 
   // Override model if explicitly configured (takes precedence over
   // the model set in the agent's config)
-  if (opts.config.model.id) {
-    const slashIdx = opts.config.model.id.indexOf('/');
+  if (opts.modelId) {
+    const slashIdx = opts.modelId.indexOf('/');
     if (slashIdx > 0) {
       body.model = {
-        providerID: opts.config.model.id.slice(0, slashIdx),
-        modelID: opts.config.model.id.slice(slashIdx + 1),
+        providerID: opts.modelId.slice(0, slashIdx),
+        modelID: opts.modelId.slice(slashIdx + 1),
       };
     }
   }
