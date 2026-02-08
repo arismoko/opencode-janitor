@@ -2,6 +2,9 @@ import { existsSync, type FSWatcher, watch } from 'node:fs';
 import type { CommitSignal, SignalSource } from '../types';
 import { log, warn } from '../utils/logger';
 
+/** Max processed SHAs to keep in memory, matching CommitStore.MAX_PROCESSED */
+const MAX_PROCESSED = 1000;
+
 export type CommitCallback = (
   sha: string,
   signal: CommitSignal,
@@ -73,7 +76,9 @@ export class CommitDetector {
 
   /**
    * Receive accelerator signal from tool.execute.after hook.
-   * Bypasses debounce for faster response to in-session commits.
+   * Routes through the standard debounced signal pipeline — does NOT
+   * bypass debounce, but provides faster detection than the poll
+   * fallback by triggering an immediate debounced check.
    */
   accelerate(): void {
     this.signal('tool-hook');
@@ -84,6 +89,7 @@ export class CommitDetector {
    */
   markProcessed(sha: string): void {
     this.processed.add(sha);
+    this.evictProcessed();
   }
 
   /**
@@ -115,8 +121,19 @@ export class CommitDetector {
       log(`[commit-detector] new commit: ${head} via ${signal.source}`);
       await this.onNewCommit(head, signal);
       this.processed.add(head);
+      this.evictProcessed();
     } catch (err) {
       warn(`[commit-detector] verify failed: ${err}`);
+    }
+  }
+
+  /** Evict oldest entries when the processed set exceeds the cap. */
+  private evictProcessed(): void {
+    if (this.processed.size <= MAX_PROCESSED) return;
+    const entries = [...this.processed];
+    const toRemove = entries.slice(0, entries.length - MAX_PROCESSED);
+    for (const sha of toRemove) {
+      this.processed.delete(sha);
     }
   }
 

@@ -160,6 +160,7 @@ export class ReviewOrchestrator {
         job.status = 'failed';
         job.error = err instanceof Error ? err.message : String(err);
         job.completedAt = new Date();
+        this.jobs.delete(sha);
         warn(`[orchestrator] review failed to start: ${sha} — ${job.error}`);
 
         // Surface the error to the user in their originating session
@@ -244,6 +245,8 @@ export class ReviewOrchestrator {
     } finally {
       this.sessionToSha.delete(sessionId);
       this.activeCount--;
+      // Prune terminal jobs to prevent unbounded growth
+      this.jobs.delete(sha);
       this.processQueue();
     }
   }

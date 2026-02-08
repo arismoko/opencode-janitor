@@ -16,6 +16,21 @@ import { spawnJanitorReview } from './review/runner';
 import { CommitStore } from './state/store';
 import { log, warn } from './utils/logger';
 
+/** Plugin return shape — typed locally since the SDK Plugin type doesn't
+ *  export a precise return interface for hooks we use. */
+interface JanitorPluginReturn {
+  name: string;
+  config?: (config: Record<string, unknown>) => Promise<void>;
+  cleanup?: () => void;
+  'tool.execute.after'?: (
+    input: { tool: string; sessionID: string; callID: string },
+    output: { title: string; output: string; metadata: unknown },
+  ) => Promise<void>;
+  event?: (input: {
+    event: { type: string; properties?: Record<string, unknown> };
+  }) => Promise<void>;
+}
+
 /** Best-effort toast — swallows errors so it never breaks init. */
 function toast(ctx: Parameters<Plugin>[0], message: string) {
   try {
@@ -30,7 +45,7 @@ const TheJanitor: Plugin = async (ctx) => {
   if (!config.enabled) {
     log('disabled by config');
     toast(ctx, 'Janitor: disabled by config');
-    return { name: 'the-janitor' } as any;
+    return { name: 'the-janitor' } as JanitorPluginReturn;
   }
 
   // Bridge ctx.$ to the exec(cmd) => string interface our modules expect.
@@ -59,7 +74,7 @@ const TheJanitor: Plugin = async (ctx) => {
   } catch {
     warn(`no git repo at ${ctx.directory} — janitor inactive`);
     toast(ctx, `Janitor: no git repo found — inactive`);
-    return { name: 'the-janitor' } as any;
+    return { name: 'the-janitor' } as JanitorPluginReturn;
   }
 
   const agent = createJanitorAgent(config);
@@ -193,14 +208,16 @@ const TheJanitor: Plugin = async (ctx) => {
     event: async (input: {
       event: {
         type: string;
-        properties?: Record<string, any>;
+        properties?: Record<string, unknown>;
       };
     }) => {
       const { event } = input;
 
       // Track current root session
       if (event.type === 'session.created') {
-        const info = event.properties?.info;
+        const info = event.properties?.info as
+          | { id?: string; parentID?: string }
+          | undefined;
         if (info?.id && !info?.parentID) {
           log(`tracking root session: ${info.id}`);
           orchestrator.sessionAvailable(info.id);
@@ -209,13 +226,15 @@ const TheJanitor: Plugin = async (ctx) => {
 
       // Detect review session completion
       if (event.type === 'session.status') {
-        const props = event.properties;
+        const props = event.properties as
+          | { status?: { type?: string }; sessionID?: string }
+          | undefined;
         if (props?.status?.type === 'idle' && props?.sessionID) {
           await orchestrator.handleCompletion(props.sessionID, ctx, config);
         }
       }
     },
-  } as any;
+  } as JanitorPluginReturn;
 };
 
 export default TheJanitor;
