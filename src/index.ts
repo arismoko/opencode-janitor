@@ -27,8 +27,11 @@ const TheJanitor: Plugin = async (ctx) => {
   // Uses { raw } to prevent Bun's shell from escaping the command as a
   // single token — without this, "git log -1" would be treated as one
   // executable name instead of "git" with arguments "log" and "-1".
+  //
+  // No .nothrow() — git failures must propagate so callers' try/catch
+  // blocks can take their intended error paths (e.g. repo-locator fallback).
   const exec = async (cmd: string): Promise<string> => {
-    const result = await ctx.$`${{ raw: cmd }}`.quiet().nothrow().text();
+    const result = await ctx.$`${{ raw: cmd }}`.quiet().text();
     return result;
   };
 
@@ -45,6 +48,16 @@ const TheJanitor: Plugin = async (ctx) => {
   // Orchestrator handles queuing and review lifecycle
   const orchestrator = new ReviewOrchestrator(config, async (sha) => {
     const commit = await getCommitContext(sha, config, exec);
+
+    // Hollow review guard: reject commits with no meaningful diff content.
+    // This prevents wasted review cycles and misleading "all clean" results
+    // when git commands failed silently or the commit is truly empty.
+    if (!commit.patch.trim() && commit.changedFiles.length === 0) {
+      throw new Error(
+        `Empty commit context for ${sha.slice(0, 8)} — no patch or changed files`,
+      );
+    }
+
     const prompt = buildReviewPrompt(commit, {
       categories: Object.entries(config.categories)
         .filter(([, v]) => v)
@@ -71,6 +84,9 @@ const TheJanitor: Plugin = async (ctx) => {
     store.add(sha);
     log(`persisted reviewed commit: ${sha}`);
   });
+
+  // Give orchestrator access to the SDK client for error injection
+  orchestrator.setContext(ctx);
 
   // Commit detector
   const detector = new CommitDetector(
@@ -135,7 +151,7 @@ const TheJanitor: Plugin = async (ctx) => {
         if (info?.id && !info?.parentID) {
           currentSessionId = info.id;
           log(`tracking root session: ${info.id}`);
-          orchestrator.sessionAvailable();
+          orchestrator.sessionAvailable(info.id);
         }
       }
 

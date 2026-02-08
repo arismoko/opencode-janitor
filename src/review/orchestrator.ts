@@ -7,6 +7,7 @@ import { deliverToSession } from '../results/sinks/session-sink';
 import { deliverToast } from '../results/sinks/toast-sink';
 import type { ReviewJob, ReviewResult } from '../types';
 import { log, warn } from '../utils/logger';
+import { notifyError } from '../utils/notifier';
 
 /**
  * Thrown by the executor when no root session is available to host the review.
@@ -37,6 +38,8 @@ export class ReviewOrchestrator {
   private queue: string[] = [];
   private activeCount = 0;
   private onReviewCompleted?: (sha: string) => void;
+  private parentSessionId?: string;
+  private ctx?: PluginInput;
 
   constructor(
     private config: JanitorConfig,
@@ -48,11 +51,17 @@ export class ReviewOrchestrator {
     this.onReviewCompleted = callback;
   }
 
+  /** Set the plugin context for error notification injection. */
+  setContext(ctx: PluginInput): void {
+    this.ctx = ctx;
+  }
+
   /**
    * Notify the orchestrator that a root session is now available.
    * Re-drains any pending jobs that were blocked on session availability.
    */
-  sessionAvailable(): void {
+  sessionAvailable(sessionId: string): void {
+    this.parentSessionId = sessionId;
     log('[orchestrator] root session available, draining queue');
     this.processQueue();
   }
@@ -132,6 +141,17 @@ export class ReviewOrchestrator {
         job.error = err instanceof Error ? err.message : String(err);
         job.completedAt = new Date();
         warn(`[orchestrator] review failed to start: ${sha} — ${job.error}`);
+
+        // Surface the error to the user in their session
+        if (this.ctx && this.parentSessionId) {
+          notifyError(
+            this.ctx,
+            this.parentSessionId,
+            `Review failed for commit \`${sha.slice(0, 8)}\``,
+            err,
+          ).catch(() => {}); // fire-and-forget
+        }
+
         this.processQueue();
       }
     }
@@ -191,6 +211,16 @@ export class ReviewOrchestrator {
       job.completedAt = new Date();
       job.error = err instanceof Error ? err.message : String(err);
       warn(`[orchestrator] result extraction failed: ${sha} — ${job.error}`);
+
+      // Surface extraction failure to the user
+      if (this.ctx && this.parentSessionId) {
+        notifyError(
+          this.ctx,
+          this.parentSessionId,
+          `Failed to extract review results for \`${sha.slice(0, 8)}\``,
+          err,
+        ).catch(() => {}); // fire-and-forget
+      }
     } finally {
       this.sessionToSha.delete(sessionId);
       this.activeCount--;
@@ -203,7 +233,7 @@ export class ReviewOrchestrator {
    */
   private async deliverResults(
     result: ReviewResult,
-    _sessionId: string | undefined,
+    _reviewSessionId: string | undefined,
     ctx: PluginInput,
     config: JanitorConfig,
   ): Promise<void> {
@@ -213,9 +243,8 @@ export class ReviewOrchestrator {
       await deliverToast(ctx, result);
     }
 
-    if (config.delivery.sessionMessage) {
-      // Find the current root session to deliver to
-      await deliverToSession(ctx, report);
+    if (config.delivery.sessionMessage && this.parentSessionId) {
+      await deliverToSession(ctx, this.parentSessionId, report);
     }
 
     if (config.delivery.reportFile) {
