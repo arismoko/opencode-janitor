@@ -12,7 +12,7 @@ export async function injectMessage(
   text: string,
 ): Promise<void> {
   try {
-    await ctx.client.session.prompt({
+    await ctx.client.session.promptAsync({
       path: { id: sessionId },
       body: {
         noReply: true,

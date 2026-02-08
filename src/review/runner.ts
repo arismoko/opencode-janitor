@@ -63,9 +63,12 @@ export async function spawnJanitorReview(
     }
   }
 
-  // Send prompt
+  // Send prompt asynchronously — promptAsync returns 204 (fire-and-forget)
+  // and lets the review session run in the background. The synchronous
+  // prompt() expects to parse a full JSON response body which fails
+  // because the server streams the LLM response via SSE.
   try {
-    await ctx.client.session.prompt({
+    await ctx.client.session.promptAsync({
       path: { id: sessionId },
       body: body as any,
       query: { directory: ctx.directory },
