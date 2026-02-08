@@ -100,7 +100,7 @@ export class ReviewOrchestrator extends BaseOrchestrator<string, ReviewResult> {
       await deliverToast(ctx, result, enrichment);
     }
 
-    if (config.delivery.sessionMessage && parentSessionId) {
+    if (config.delivery.sessionMessage && parentSessionId && !result.clean) {
       await deliverToSession(ctx, parentSessionId, report, enrichment);
     }
 

@@ -7,6 +7,7 @@ export interface AgentDefinition {
   description: string;
   config: {
     model?: string;
+    variant?: string;
     temperature: number;
     prompt: string;
     /** Controls agent visibility: 'subagent' hides from picker UI */
@@ -57,6 +58,7 @@ export function createJanitorAgent(config: JanitorConfig): AgentDefinition {
       'Structural code health reviewer. Detects DRY violations, dead code, and structural issues.',
     config: {
       model: config.agents.janitor.modelId ?? config.model.id,
+      variant: config.agents.janitor.variant,
       temperature: 0.1,
       prompt: buildSystemPrompt(config),
       mode: 'subagent',

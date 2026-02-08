@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { atomicWriteSync } from '../utils/atomic-write';
-import { log, warn } from '../utils/logger';
+import { getErrorMessage, log, warn } from '../utils/logger';
 import { isExpired } from './matcher';
 import { SuppressionsFileSchema } from './schema';
 import type { Suppression, SuppressionsFile } from './types';
@@ -89,14 +89,14 @@ export class SuppressionStore {
           this.save();
         } catch (saveErr) {
           warn('[suppressions] migration save failed, will retry next load', {
-            error: saveErr instanceof Error ? saveErr.message : String(saveErr),
+            error: getErrorMessage(saveErr),
           });
         }
       }
     } catch (err) {
       warn('Failed to read suppressions file', {
         path: this.filePath,
-        error: err instanceof Error ? err.message : String(err),
+        error: getErrorMessage(err),
       });
       this.suppressions = [];
     }

@@ -8,7 +8,13 @@
  * Log file: /tmp/opencode-janitor.log (capped at ~5 MB, single rotation).
  */
 
-import { appendFileSync, renameSync, statSync } from 'node:fs';
+import {
+  appendFileSync,
+  renameSync,
+  statSync,
+  truncateSync,
+  unlinkSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -17,6 +23,14 @@ const LOG_FILE_PREV = `${LOG_FILE}.1`;
 const MAX_LOG_BYTES = 5 * 1024 * 1024; // 5 MB
 const PREFIX = '[janitor]';
 const DEBUG = process.env.JANITOR_DEBUG === '1';
+
+/**
+ * Extract a human-readable message from an unknown thrown value.
+ * Centralizes the `err instanceof Error ? err.message : String(err)` pattern.
+ */
+export function getErrorMessage(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
+}
 
 /** Tracks writes so we don't stat the file on every single append. */
 let writesSinceCheck = 0;
@@ -27,10 +41,20 @@ function rotateIfNeeded(): void {
     const { size } = statSync(LOG_FILE);
     if (size >= MAX_LOG_BYTES) {
       try {
+        // Remove old backup first to avoid rename failure on some platforms
+        try {
+          unlinkSync(LOG_FILE_PREV);
+        } catch {
+          // No previous backup — fine
+        }
         renameSync(LOG_FILE, LOG_FILE_PREV);
       } catch {
-        // Previous backup may be locked — just truncate by
-        // letting the next appendFileSync create a fresh file.
+        // Rename failed — truncate in place as fallback
+        try {
+          truncateSync(LOG_FILE, 0);
+        } catch {
+          // Nothing left to try — next append creates fresh
+        }
       }
     }
   } catch {
@@ -63,6 +87,6 @@ export function warn(message: string, data?: Record<string, unknown>): void {
 }
 
 export function error(message: string, err?: unknown): void {
-  const errMsg = err instanceof Error ? err.message : String(err ?? '');
+  const errMsg = err != null ? getErrorMessage(err) : '';
   append(`${PREFIX} ERROR: ${message}${errMsg ? ` — ${errMsg}` : ''}`);
 }

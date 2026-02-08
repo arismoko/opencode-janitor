@@ -6,8 +6,8 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { join, resolve, sep } from 'node:path';
+import type { ReviewerResult } from '../../types';
 import { log, warn } from '../../utils/logger';
-import type { ReviewerResult } from '../reviewer-parser';
 
 /**
  * Write a reviewer report to the filesystem.

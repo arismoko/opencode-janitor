@@ -1,3 +1,4 @@
+import { formatChangedFiles } from '../results/format-helpers';
 import type { CommitContext } from '../types';
 import { CATEGORY_PIPE_STR } from '../types';
 
@@ -18,9 +19,7 @@ export function buildReviewPrompt(
   config: PromptConfig,
 ): string {
   const categoriesStr = config.categories.join(', ');
-  const filesStr = commit.changedFiles
-    .map((f) => `  ${f.status}\t${f.path}`)
-    .join('\n');
+  const filesStr = formatChangedFiles(commit.changedFiles);
 
   return `
 # ROLE

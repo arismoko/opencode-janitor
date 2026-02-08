@@ -1,5 +1,5 @@
 import type { PluginInput } from '@opencode-ai/plugin';
-import { warn } from './logger';
+import { getErrorMessage, warn } from './logger';
 
 /**
  * Injects a message into a session without triggering an LLM response.
@@ -37,7 +37,7 @@ export async function notifyError(
   context: string,
   err: unknown,
 ): Promise<void> {
-  const errMsg = err instanceof Error ? err.message : String(err);
+  const errMsg = getErrorMessage(err);
   const text = `⚠️ **[Janitor Error]** ${context}\n\n\`\`\`\n${errMsg}\n\`\`\``;
   await injectMessage(ctx, sessionId, text);
 }

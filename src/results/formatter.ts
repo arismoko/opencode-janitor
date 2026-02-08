@@ -1,4 +1,5 @@
 import type { ReviewResult } from '../types';
+import { summarizeLocation } from './format-helpers';
 
 /**
  * Format a ReviewResult as a markdown report.
@@ -47,14 +48,4 @@ export function formatReport(
   });
 
   return [...header, ...findingSections].join('\n');
-}
-
-/**
- * Create a short summary from a location string.
- * e.g., "src/utils/helper.ts:42" → "helper.ts"
- */
-function summarizeLocation(location: string): string {
-  const filePart = location.split(':')[0];
-  const segments = filePart.split('/');
-  return segments[segments.length - 1] || filePart;
 }
