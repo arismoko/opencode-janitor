@@ -1,4 +1,5 @@
 import type { JanitorConfig } from '../config/schema';
+import { REVIEWER_SEVERITY_GUIDE } from '../types';
 import type { AgentDefinition } from './janitor-agent';
 
 /**
@@ -31,10 +32,7 @@ Output schema (strict):
 If no issues found, output exactly: {"findings": []}
 
 Severity guide:
-- P0: Must fix before merge — correctness bugs, security holes, data loss risks
-- P1: Should fix before merge — performance regressions, architectural violations, missing error handling
-- P2: Fix soon — code quality, maintainability, minor edge cases
-- P3: Nice to have — style nits, minor improvements, documentation gaps
+${REVIEWER_SEVERITY_GUIDE.map((s) => `- ${s}`).join('\n')}
 
 Report ALL findings you discover, organized by severity. Be thorough.
 

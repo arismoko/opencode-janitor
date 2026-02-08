@@ -1,6 +1,6 @@
 import type { PluginInput } from '@opencode-ai/plugin';
 import type { JanitorConfig } from '../config/schema';
-import { log, warn } from '../utils/logger';
+import { getErrorMessage, log, warn } from '../utils/logger';
 import { notifyError } from '../utils/notifier';
 
 /**
@@ -206,7 +206,7 @@ export abstract class BaseOrchestrator<TContext, TResult> {
         }
 
         job.status = 'failed';
-        job.error = err instanceof Error ? err.message : String(err);
+        job.error = getErrorMessage(err);
         job.completedAt = new Date();
         this.jobs.delete(key);
         warn(`[${this.tag}] review failed to start: ${key} — ${job.error}`);
@@ -253,7 +253,7 @@ export abstract class BaseOrchestrator<TContext, TResult> {
     } catch (err) {
       job.status = 'failed';
       job.completedAt = new Date();
-      job.error = err instanceof Error ? err.message : String(err);
+      job.error = getErrorMessage(err);
       warn(`[${this.tag}] result extraction failed: ${key} — ${job.error}`);
 
       // Surface extraction failure to the user in their originating session

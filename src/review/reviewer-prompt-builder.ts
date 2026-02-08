@@ -1,4 +1,6 @@
 import type { PrContext } from '../git/pr-context-resolver';
+import { formatChangedFiles } from '../results/format-helpers';
+import { REVIEWER_SEVERITY_GUIDE } from '../types';
 
 export interface ReviewerPromptConfig {
   scopeInclude: string[];
@@ -12,9 +14,7 @@ export function buildReviewerPrompt(
   pr: PrContext,
   config: ReviewerPromptConfig,
 ): string {
-  const filesStr = pr.changedFiles
-    .map((f) => `  ${f.status}\t${f.path}`)
-    .join('\n');
+  const filesStr = formatChangedFiles(pr.changedFiles);
   const id = pr.number ? `PR #${pr.number}` : pr.key;
 
   return `
@@ -32,10 +32,7 @@ File patterns excluded: ${config.scopeExclude.join(', ')}
 
 # SEVERITY
 Allowed severities: P0, P1, P2, P3
-- P0: Must fix before merge — correctness bugs, security holes, data loss risks
-- P1: Should fix before merge — performance regressions, architectural violations, missing error handling
-- P2: Fix soon — code quality, maintainability, minor edge cases
-- P3: Nice to have — style nits, minor improvements, documentation gaps
+${REVIEWER_SEVERITY_GUIDE.map((s) => `- ${s}`).join('\n')}
 
 # DOMAINS
 Allowed domains: BUG, SECURITY, PERFORMANCE, ARCHITECTURE, DOCS, SPEC

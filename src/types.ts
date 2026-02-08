@@ -12,6 +12,14 @@ export type FindingCategory = (typeof FINDING_CATEGORIES)[number];
 /** Pipe-separated category string for use in prompt output format instructions */
 export const CATEGORY_PIPE_STR = FINDING_CATEGORIES.join(' | ');
 
+/** Canonical reviewer severity guide — single source of truth for P0-P3 descriptions */
+export const REVIEWER_SEVERITY_GUIDE = [
+  'P0: Must fix before merge — correctness bugs, security holes, data loss risks',
+  'P1: Should fix before merge — performance regressions, architectural violations, missing error handling',
+  'P2: Fix soon — code quality, maintainability, minor edge cases',
+  'P3: Nice to have — style nits, minor improvements, documentation gaps',
+] as const;
+
 /** A single P0 finding from the janitor agent */
 export interface Finding {
   location: string;

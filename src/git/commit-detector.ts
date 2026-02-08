@@ -1,5 +1,5 @@
 import { existsSync, type FSWatcher, watch } from 'node:fs';
-import type { CommitSignal, SignalSource } from '../types';
+import type { CommitSignal } from '../types';
 import { log, warn } from '../utils/logger';
 import { SignalDetector } from './signal-detector';
 

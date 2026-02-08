@@ -71,8 +71,7 @@ Both are optional. All fields have defaults. Example:
     },
     "reviewer": {
       "enabled": true,
-      "trigger": "pr",
-      "maxFindings": 8
+      "trigger": "pr"
     }
   },
   "categories": {
@@ -126,7 +125,6 @@ Both are optional. All fields have defaults. Example:
 | `model.id` | *(inherits from OpenCode)* | Override with `provider/model` format |
 | `agents.janitor.trigger` | `commit` | `commit`, `pr`, or `both` |
 | `agents.reviewer.trigger` | `pr` | `commit`, `pr`, or `both` |
-| `agents.reviewer.maxFindings` | `8` | Maximum parsed reviewer findings |
 | `queue.dropIntermediate` | `true` | During rapid commits, only review the latest |
 | `delivery.reportFile` | `true` | Writes reports to `.janitor/reports/<sha>.md` |
 | `delivery.reviewer.prComment` | `true` | Post reviewer report to PR via `gh pr review` when available |
