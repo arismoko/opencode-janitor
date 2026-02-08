@@ -48,6 +48,16 @@ type Executor<TContext> = (
  * - `onCompleted(job, sessionId, ctx, config)` to parse results and deliver
  * - `errorLabel(key)` for human-readable error messages
  */
+/** Callback fired when a review session starts running. */
+export type OnRunStarted = (info: {
+  key: string;
+  sessionId: string;
+  parentSessionId: string;
+}) => void;
+
+/** Callback fired when a review session reaches a terminal state. */
+export type OnRunTerminal = (key: string) => void;
+
 export abstract class BaseOrchestrator<TContext, TResult> {
   private jobs = new Map<string, BaseJob<TContext, TResult>>();
   private sessionToKey = new Map<string, string>();
@@ -55,6 +65,8 @@ export abstract class BaseOrchestrator<TContext, TResult> {
   private activeCount = 0;
   private latestSessionId?: string;
   private ctx?: PluginInput;
+  private onRunStartedCb?: OnRunStarted;
+  private onRunTerminalCb?: OnRunTerminal;
 
   protected readonly tag: string;
 
@@ -64,6 +76,16 @@ export abstract class BaseOrchestrator<TContext, TResult> {
     tag: string,
   ) {
     this.tag = tag;
+  }
+
+  /** Register a callback fired when a review session starts. */
+  onRunStarted(cb: OnRunStarted): void {
+    this.onRunStartedCb = cb;
+  }
+
+  /** Register a callback fired when a review session completes or fails. */
+  onRunTerminal(cb: OnRunTerminal): void {
+    this.onRunTerminalCb = cb;
   }
 
   /** Derive a deduplication key from the enqueue context. */
@@ -191,6 +213,11 @@ export abstract class BaseOrchestrator<TContext, TResult> {
         const sessionId = await this.executor(job.context, targetSession);
         job.sessionId = sessionId;
         this.sessionToKey.set(sessionId, key);
+        this.onRunStartedCb?.({
+          key,
+          sessionId,
+          parentSessionId: targetSession,
+        });
         log(`[${this.tag}] review started: ${key} → ${sessionId}`);
       } catch (err) {
         this.activeCount--;
@@ -209,6 +236,7 @@ export abstract class BaseOrchestrator<TContext, TResult> {
         job.error = getErrorMessage(err);
         job.completedAt = new Date();
         this.jobs.delete(key);
+        this.onRunTerminalCb?.(key);
         warn(`[${this.tag}] review failed to start: ${key} — ${job.error}`);
 
         // Surface the error to the user in their originating session
@@ -270,8 +298,45 @@ export abstract class BaseOrchestrator<TContext, TResult> {
       this.activeCount--;
       // Prune terminal jobs to prevent unbounded growth
       this.jobs.delete(key);
+      this.onRunTerminalCb?.(key);
       this.processQueue();
     }
+  }
+
+  /**
+   * Re-attach an already running session to this orchestrator after restart.
+   * Returns false if the key is already tracked or parent session is missing.
+   */
+  registerRecoveredRun(
+    context: TContext,
+    parentSessionId: string,
+    sessionId: string,
+  ): boolean {
+    const key = this.extractKey(context);
+    if (
+      !parentSessionId ||
+      this.jobs.has(key) ||
+      this.sessionToKey.has(sessionId)
+    ) {
+      return false;
+    }
+
+    const now = new Date();
+    const job: BaseJob<TContext, TResult> = {
+      key,
+      context,
+      parentSessionId,
+      sessionId,
+      status: 'running',
+      enqueuedAt: now,
+      startedAt: now,
+    };
+
+    this.jobs.set(key, job);
+    this.sessionToKey.set(sessionId, key);
+    this.activeCount++;
+    log(`[${this.tag}] reattached recovered run: ${key} → ${sessionId}`);
+    return true;
   }
 
   /**

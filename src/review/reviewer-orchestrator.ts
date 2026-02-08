@@ -77,7 +77,12 @@ export class ReviewerOrchestrator extends BaseOrchestrator<
     }
 
     if (delivery.sessionMessage && job.parentSessionId && !result.clean) {
-      await deliverReviewerToSession(ctx, job.parentSessionId, report);
+      await deliverReviewerToSession(
+        ctx,
+        job.parentSessionId,
+        report,
+        delivery.noReply,
+      );
     }
 
     if (delivery.reportFile) {

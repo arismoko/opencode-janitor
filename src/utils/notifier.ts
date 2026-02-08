@@ -2,23 +2,27 @@ import type { PluginInput } from '@opencode-ai/plugin';
 import { getErrorMessage, warn } from './logger';
 
 /**
- * Injects a message into a session without triggering an LLM response.
+ * Injects a message into a session.
  *
- * Uses the synchronous `prompt()` API with `noReply: true` so the server
- * persists the message and returns a regular JSON response (no SSE streaming).
- * This gives us confirmation that the message was written to the session
- * history, unlike `promptAsync` which is fire-and-forget (204 No Content).
+ * When `noReply` is true (default for error notifications), uses `noReply: true`
+ * so the message appears without triggering an LLM response.
+ * When `noReply` is false (default for review output), the parent session
+ * receives the message and can reply — letting the user's agent act on findings.
+ *
+ * Uses the synchronous `prompt()` API so we get confirmation the message
+ * was written to session history, unlike `promptAsync` (fire-and-forget 204).
  */
 export async function injectMessage(
   ctx: PluginInput,
   sessionId: string,
   text: string,
+  noReply = true,
 ): Promise<void> {
   try {
     await ctx.client.session.prompt({
       path: { id: sessionId },
       body: {
-        noReply: true,
+        noReply,
         parts: [{ type: 'text' as const, text }],
       },
     });

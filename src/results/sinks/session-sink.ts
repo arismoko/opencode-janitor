@@ -6,25 +6,29 @@ import { injectMessage } from '../../utils/notifier';
 
 /**
  * Deliver a full markdown report into the current session.
- * Uses noReply: true so the report appears in the conversation
- * without triggering an LLM response.
+ *
+ * When `noReply` is false (default), the parent session's agent can
+ * act on the findings. Set `noReply: true` in config to suppress.
  */
 export async function deliverToSession(
   ctx: PluginInput,
   sessionId: string,
   report: string,
-  enrichment?: EnrichmentData,
+  opts?: { enrichment?: EnrichmentData; noReply?: boolean },
 ): Promise<void> {
   if (!sessionId) {
     warn('[session-sink] no session ID provided');
     return;
   }
 
-  const historySection = enrichment ? buildHistorySection(enrichment) : '';
+  const historySection = opts?.enrichment
+    ? buildHistorySection(opts.enrichment)
+    : '';
 
   await injectMessage(
     ctx,
     sessionId,
     `📋 **[Janitor Review Complete]**\n\n${report}${historySection}`,
+    opts?.noReply ?? false,
   );
 }
