@@ -1,4 +1,9 @@
-import { warn } from '../utils/logger';
+import { log, warn } from '../utils/logger';
+
+/** Escape a string for safe use inside single quotes in shell commands. */
+function shellEscape(s: string): string {
+  return s.replace(/'/g, "'\\''");
+}
 
 /** PR info retrieved from the gh CLI */
 export interface GhPrInfo {
@@ -25,7 +30,9 @@ export async function isGhAvailable(
 
 /**
  * Get the current PR associated with the checked-out branch via `gh pr view`.
- * Returns null if no PR exists, gh is unavailable, or any error occurs.
+ * Returns null for expected no-PR states (no PR for branch, not logged in,
+ * PR is closed/merged). Throws on unexpected/transient gh failures to
+ * preserve retry semantics in the caller.
  */
 export async function getCurrentPrFromGh(
   exec: (cmd: string) => Promise<string>,
@@ -40,20 +47,23 @@ export async function getCurrentPrFromGh(
     if (!branch || branch === 'HEAD') return null;
 
     const raw = await exec(
-      `GH_PROMPT_DISABLED=1 gh pr view '${branch}' --repo '${repo}' --json number,url,baseRefName,headRefName,headRefOid`,
+      `GH_PROMPT_DISABLED=1 gh pr view '${shellEscape(branch)}' --repo '${shellEscape(repo)}' --json number,url,baseRefName,headRefName,headRefOid,state`,
     );
 
     let parsed: Record<string, unknown>;
     try {
       parsed = JSON.parse(raw.trim());
     } catch {
-      warn('[gh-pr] failed to parse gh pr view JSON output');
+      log('[gh-pr] failed to parse gh pr view JSON output');
       return null;
     }
 
+    // Only track OPEN PRs — closed/merged PRs should not trigger reviews.
+    if (parsed.state !== 'OPEN') return null;
+
     const number = parsed.number;
     if (typeof number !== 'number' || !Number.isFinite(number)) {
-      warn('[gh-pr] missing or invalid PR number in gh output');
+      log('[gh-pr] missing or invalid PR number in gh output');
       return null;
     }
 
@@ -66,7 +76,7 @@ export async function getCurrentPrFromGh(
       typeof headRef !== 'string' ||
       typeof headSha !== 'string'
     ) {
-      warn('[gh-pr] missing ref fields in gh output');
+      log('[gh-pr] missing ref fields in gh output');
       return null;
     }
 
@@ -77,9 +87,13 @@ export async function getCurrentPrFromGh(
       headSha,
     };
   } catch (err) {
-    // gh not installed, not authenticated, no PR for branch, etc.
-    warn(`[gh-pr] getCurrentPrFromGh failed: ${err}`);
-    return null;
+    // Expected: no PR for this branch, not logged in, etc. — return null
+    // so the detector treats it as "no actionable state".
+    if (isExpectedNoPrError(err)) return null;
+    // Unexpected: transient network/gh failure — re-throw so
+    // SignalDetector.verify does NOT mark this key as processed,
+    // allowing retry on the next poll cycle.
+    throw err;
   }
 }
 
@@ -96,10 +110,10 @@ export async function postPrReviewWithGh(
     const repo = await resolveRepoSlug(exec);
     if (!repo) return false;
 
-    // Escape single quotes in body for shell safety
-    const escapedBody = body.replace(/'/g, "'\\''");
+    // Escape single quotes in body and repo for shell safety
+    const escapedBody = shellEscape(body);
     await exec(
-      `GH_PROMPT_DISABLED=1 gh pr review ${prNumber} --repo '${repo}' --comment --body '${escapedBody}'`,
+      `GH_PROMPT_DISABLED=1 gh pr review ${prNumber} --repo '${shellEscape(repo)}' --comment --body '${escapedBody}'`,
     );
     return true;
   } catch (err) {
@@ -131,4 +145,15 @@ async function resolveRepoSlug(
   } catch {
     return null;
   }
+}
+
+function isExpectedNoPrError(err: unknown): boolean {
+  const msg = String(err ?? '').toLowerCase();
+  return (
+    msg.includes('no pull requests found for branch') ||
+    msg.includes('could not resolve to a pull request') ||
+    msg.includes('not a git repository') ||
+    msg.includes('authentication required') ||
+    msg.includes('not logged into any github hosts')
+  );
 }

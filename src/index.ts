@@ -247,16 +247,15 @@ const TheJanitor: Plugin = async (ctx) => {
     config.autoReview.pollFallbackSec,
   );
 
-  let latestGhPr: Awaited<ReturnType<typeof getCurrentPrFromGh>> = null;
   let branchPushPending = false;
 
   const prDetector = anyPrReviews
     ? new PrDetector(
         async () => {
           if (ghAvailableAtStartup) {
-            latestGhPr = await getCurrentPrFromGh(exec);
-            if (!latestGhPr) return null;
-            return `pr:${latestGhPr.number}:${latestGhPr.headSha}`;
+            const ghPr = await getCurrentPrFromGh(exec);
+            if (!ghPr) return null;
+            return `pr:${ghPr.number}:${ghPr.headSha}`;
           }
 
           // No gh available — only react after an observed push command.
@@ -276,8 +275,33 @@ const TheJanitor: Plugin = async (ctx) => {
           let prContext: PrContext;
 
           if (key.startsWith('pr:')) {
-            const ghPr = latestGhPr ?? (await getCurrentPrFromGh(exec));
-            if (!ghPr) return;
+            // Parse the detected key to get the exact PR number and SHA
+            // that getCurrentKey resolved. The callback MUST use these
+            // values (or validate a re-fetch matches) to ensure verify()
+            // commits the correct key as processed.
+            const [, prNumStr, detectedSha] = key.split(':');
+            const detectedPrNum = Number(prNumStr);
+
+            // Re-fetch to get baseRef/headRef (not encoded in the key),
+            // but validate the re-fetch matches the detected state.
+            const ghPr = await getCurrentPrFromGh(exec);
+            if (!ghPr) {
+              // PR was open when getCurrentKey ran but is now gone.
+              // Throw so verify does NOT mark this key as processed —
+              // next poll's getCurrentKey returns null and skips naturally.
+              throw new Error(
+                `PR disappeared between detection and callback: ${key}`,
+              );
+            }
+
+            if (ghPr.number !== detectedPrNum || ghPr.headSha !== detectedSha) {
+              // PR state advanced between detection and re-fetch.
+              // Throw so verify doesn't commit the stale key — the new
+              // state will be picked up on the next poll cycle.
+              throw new Error(
+                `PR state changed between detection and callback: key=${key} but re-fetch got pr:${ghPr.number}:${ghPr.headSha}`,
+              );
+            }
 
             prContext = await getPrContext({
               baseRef: ghPr.baseRef,
