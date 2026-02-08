@@ -1,4 +1,4 @@
-import { warn } from '../utils/logger';
+import { log, warn } from '../utils/logger';
 
 /** PR info retrieved from the gh CLI */
 export interface GhPrInfo {
@@ -40,20 +40,23 @@ export async function getCurrentPrFromGh(
     if (!branch || branch === 'HEAD') return null;
 
     const raw = await exec(
-      `GH_PROMPT_DISABLED=1 gh pr view '${branch}' --repo '${repo}' --json number,url,baseRefName,headRefName,headRefOid`,
+      `GH_PROMPT_DISABLED=1 gh pr view '${branch}' --repo '${repo}' --json number,url,baseRefName,headRefName,headRefOid,state`,
     );
 
     let parsed: Record<string, unknown>;
     try {
       parsed = JSON.parse(raw.trim());
     } catch {
-      warn('[gh-pr] failed to parse gh pr view JSON output');
+      log('[gh-pr] failed to parse gh pr view JSON output');
       return null;
     }
 
+    // Only track OPEN PRs — closed/merged PRs should not trigger reviews.
+    if (parsed.state !== 'OPEN') return null;
+
     const number = parsed.number;
     if (typeof number !== 'number' || !Number.isFinite(number)) {
-      warn('[gh-pr] missing or invalid PR number in gh output');
+      log('[gh-pr] missing or invalid PR number in gh output');
       return null;
     }
 
@@ -66,7 +69,7 @@ export async function getCurrentPrFromGh(
       typeof headRef !== 'string' ||
       typeof headSha !== 'string'
     ) {
-      warn('[gh-pr] missing ref fields in gh output');
+      log('[gh-pr] missing ref fields in gh output');
       return null;
     }
 
@@ -78,7 +81,8 @@ export async function getCurrentPrFromGh(
     };
   } catch (err) {
     // gh not installed, not authenticated, no PR for branch, etc.
-    warn(`[gh-pr] getCurrentPrFromGh failed: ${err}`);
+    if (isExpectedNoPrError(err)) return null;
+    log(`[gh-pr] getCurrentPrFromGh unavailable: ${String(err ?? '')}`);
     return null;
   }
 }
@@ -131,4 +135,15 @@ async function resolveRepoSlug(
   } catch {
     return null;
   }
+}
+
+function isExpectedNoPrError(err: unknown): boolean {
+  const msg = String(err ?? '').toLowerCase();
+  return (
+    msg.includes('no pull requests found for branch') ||
+    msg.includes('could not resolve to a pull request') ||
+    msg.includes('not a git repository') ||
+    msg.includes('authentication required') ||
+    msg.includes('not logged into any github hosts')
+  );
 }

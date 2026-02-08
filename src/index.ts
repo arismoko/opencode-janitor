@@ -247,16 +247,15 @@ const TheJanitor: Plugin = async (ctx) => {
     config.autoReview.pollFallbackSec,
   );
 
-  let latestGhPr: Awaited<ReturnType<typeof getCurrentPrFromGh>> = null;
   let branchPushPending = false;
 
   const prDetector = anyPrReviews
     ? new PrDetector(
         async () => {
           if (ghAvailableAtStartup) {
-            latestGhPr = await getCurrentPrFromGh(exec);
-            if (!latestGhPr) return null;
-            return `pr:${latestGhPr.number}:${latestGhPr.headSha}`;
+            const ghPr = await getCurrentPrFromGh(exec);
+            if (!ghPr) return null;
+            return `pr:${ghPr.number}:${ghPr.headSha}`;
           }
 
           // No gh available — only react after an observed push command.
@@ -276,7 +275,10 @@ const TheJanitor: Plugin = async (ctx) => {
           let prContext: PrContext;
 
           if (key.startsWith('pr:')) {
-            const ghPr = latestGhPr ?? (await getCurrentPrFromGh(exec));
+            // Re-fetch PR info atomically — do NOT rely on shared state
+            // from getCurrentKey, which may have been overwritten by a
+            // concurrent poll cycle (race window if PR was closed/merged).
+            const ghPr = await getCurrentPrFromGh(exec);
             if (!ghPr) return;
 
             prContext = await getPrContext({
