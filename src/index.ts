@@ -103,11 +103,14 @@ const TheJanitor: Plugin = async (ctx) => {
 
     agent: { janitor: agent },
 
-    // Accelerator: detect git commit via tool hook
+    // Accelerator: detect git commit via tool hook.
+    // Gated on autoReview.onCommit — the accelerator is just a faster
+    // path into the same detection pipeline, so it must respect the toggle.
     'tool.execute.after': async (
       input: { tool: string; sessionID: string; callID: string },
       output: { title: string; output: string; metadata: any },
     ) => {
+      if (!config.autoReview.onCommit) return;
       if (input.tool !== 'Bash' && input.tool !== 'bash') return;
 
       // The command is in the output title for Bash tool calls
