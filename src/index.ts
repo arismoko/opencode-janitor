@@ -24,7 +24,12 @@ import { buildReviewPrompt } from './review/prompt-builder';
 import { createReviewerAgent } from './review/reviewer-agent';
 import { ReviewerOrchestrator } from './review/reviewer-orchestrator';
 import { buildReviewerPrompt } from './review/reviewer-prompt-builder';
-import { spawnJanitorReview, spawnReviewerReview } from './review/runner';
+import {
+  resumeReviewSession,
+  spawnJanitorReview,
+  spawnReviewerReview,
+} from './review/runner';
+import { ReviewRunStore } from './state/review-run-store';
 import { CommitStore } from './state/store';
 import { buildSuppressionsBlock } from './suppressions/prompt';
 import { SuppressionStore } from './suppressions/store';
@@ -60,6 +65,50 @@ type TriggerMode = 'commit' | 'pr' | 'both';
 
 function triggerMatches(trigger: TriggerMode, mode: 'commit' | 'pr'): boolean {
   return trigger === mode || trigger === 'both';
+}
+
+function buildRecoveredPrContext(key: string): PrContext {
+  if (key.startsWith('pr:')) {
+    const [, numStr, headSha] = key.split(':');
+    const number = Number(numStr);
+    return {
+      key,
+      headSha: headSha ?? '',
+      baseRef: '',
+      headRef: '',
+      number: Number.isFinite(number) ? number : undefined,
+      changedFiles: [],
+      patch: '',
+      patchTruncated: false,
+    };
+  }
+
+  if (key.startsWith('branch:')) {
+    const prefix = 'branch:';
+    const tail = key.slice(prefix.length);
+    const splitAt = tail.lastIndexOf(':');
+    const headRef = splitAt > 0 ? tail.slice(0, splitAt) : '';
+    const headSha = splitAt > 0 ? tail.slice(splitAt + 1) : '';
+    return {
+      key,
+      headSha,
+      baseRef: '',
+      headRef,
+      changedFiles: [],
+      patch: '',
+      patchTruncated: false,
+    };
+  }
+
+  return {
+    key,
+    headSha: '',
+    baseRef: '',
+    headRef: '',
+    changedFiles: [],
+    patch: '',
+    patchTruncated: false,
+  };
 }
 
 const TheJanitor: Plugin = async (ctx) => {
@@ -126,6 +175,7 @@ const TheJanitor: Plugin = async (ctx) => {
   }
 
   const store = new CommitStore(ctx.directory);
+  const runStore = new ReviewRunStore(ctx.directory);
   const suppressionStore = new SuppressionStore(ctx.directory, {
     maxEntries: config.suppressions?.maxEntries,
   });
@@ -185,6 +235,21 @@ const TheJanitor: Plugin = async (ctx) => {
     log(`persisted reviewed commit: ${sha}`);
   });
 
+  orchestrator.onRunStarted(({ key, sessionId, parentSessionId }) => {
+    runStore.track({
+      id: `janitor:${key}`,
+      orchestrator: 'janitor',
+      key,
+      sessionId,
+      parentSessionId,
+      startedAt: new Date().toISOString(),
+    });
+  });
+
+  orchestrator.onRunTerminal((key) => {
+    runStore.complete(`janitor:${key}`);
+  });
+
   // Give orchestrator access to the SDK client for error injection
   orchestrator.setContext(ctx);
 
@@ -209,6 +274,21 @@ const TheJanitor: Plugin = async (ctx) => {
     },
   );
   reviewerOrchestrator.setContext(ctx);
+
+  reviewerOrchestrator.onRunStarted(({ key, sessionId, parentSessionId }) => {
+    runStore.track({
+      id: `reviewer:${key}`,
+      orchestrator: 'reviewer',
+      key,
+      sessionId,
+      parentSessionId,
+      startedAt: new Date().toISOString(),
+    });
+  });
+
+  reviewerOrchestrator.onRunTerminal((key) => {
+    runStore.complete(`reviewer:${key}`);
+  });
 
   // Commit detector
   const detector = new CommitDetector(
@@ -357,6 +437,85 @@ const TheJanitor: Plugin = async (ctx) => {
       detector.markProcessed(sha);
     }
   }
+
+  // Crash recovery: only resume interrupted runs. Completed runs are ignored.
+  const RUN_TTL_MS = 24 * 60 * 60 * 1000;
+  const MAX_RESUME_ATTEMPTS = 1;
+  runStore.pruneStale(RUN_TTL_MS);
+
+  const recoverInterruptedRuns = async (): Promise<void> => {
+    const activeRuns = runStore.getActive();
+    if (activeRuns.length === 0) return;
+
+    let statusMap: Record<string, { type?: string }> = {};
+    try {
+      const statusResult = await ctx.client.session.status();
+      statusMap = (statusResult.data ?? {}) as Record<
+        string,
+        { type?: string }
+      >;
+    } catch (err) {
+      warn(`[recovery] failed to load session statuses: ${err}`);
+      return;
+    }
+
+    for (const run of activeRuns) {
+      const type = statusMap[run.sessionId]?.type;
+
+      // User preference: if already completed/idle, ignore on restart.
+      if (type !== 'busy' && type !== 'retry') {
+        runStore.complete(run.id);
+        continue;
+      }
+
+      if (run.resumeAttempts >= MAX_RESUME_ATTEMPTS) {
+        warn(`[recovery] exceeded resume attempts for ${run.id}, dropping`);
+        runStore.complete(run.id);
+        continue;
+      }
+
+      const attached =
+        run.orchestrator === 'janitor'
+          ? orchestrator.registerRecoveredRun(
+              run.key,
+              run.parentSessionId,
+              run.sessionId,
+            )
+          : reviewerOrchestrator.registerRecoveredRun(
+              buildRecoveredPrContext(run.key),
+              run.parentSessionId,
+              run.sessionId,
+            );
+
+      if (!attached) {
+        runStore.complete(run.id);
+        continue;
+      }
+
+      try {
+        await resumeReviewSession(ctx, {
+          sessionId: run.sessionId,
+          agent: run.orchestrator === 'janitor' ? 'janitor' : 'code-reviewer',
+          modelId:
+            run.orchestrator === 'janitor'
+              ? (config.agents.janitor.modelId ?? config.model.id)
+              : (config.agents.reviewer.modelId ?? config.model.id),
+        });
+        runStore.incrementResumeAttempts(run.id);
+        log(`[recovery] resumed ${run.id}`);
+      } catch (err) {
+        warn(`[recovery] failed to resume ${run.id}: ${err}`);
+        if (run.orchestrator === 'janitor') {
+          orchestrator.discardRecoveredRun(run.sessionId);
+        } else {
+          reviewerOrchestrator.discardRecoveredRun(run.sessionId);
+        }
+        runStore.complete(run.id);
+      }
+    }
+  };
+
+  await recoverInterruptedRuns();
 
   if (anyCommitReviews) {
     await detector.start(gitDir);
