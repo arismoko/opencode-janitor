@@ -4,7 +4,7 @@
  */
 
 /** Category of structural issue */
-export type FindingCategory = 'DRY' | 'DEAD' | 'YAGNI' | 'STRUCTURAL';
+export type FindingCategory = 'DRY' | 'DEAD' | 'STRUCTURAL';
 
 /** A single P0 finding from the janitor agent */
 export interface Finding {

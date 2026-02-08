@@ -9,7 +9,7 @@ const SuppressionSchema = z.object({
   lastSeenAt: z.string().datetime(),
   ttlDays: z.number().int().min(1),
   original: z.object({
-    category: z.enum(['DRY', 'DEAD', 'YAGNI', 'STRUCTURAL']),
+    category: z.enum(['DRY', 'DEAD', 'STRUCTURAL']),
     location: z.string(),
     evidence: z.string(),
     prescription: z.string(),

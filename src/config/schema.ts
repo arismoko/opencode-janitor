@@ -47,13 +47,11 @@ export const JanitorConfigSchema = z.object({
     .object({
       DRY: z.boolean().default(true),
       DEAD: z.boolean().default(true),
-      YAGNI: z.boolean().default(true),
       STRUCTURAL: z.boolean().default(true),
     })
     .default(() => ({
       DRY: true,
       DEAD: true,
-      YAGNI: true,
       STRUCTURAL: true,
     })),
 

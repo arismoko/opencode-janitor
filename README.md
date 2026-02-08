@@ -4,14 +4,13 @@ Automatic structural and comprehensive code reviews inside [OpenCode](https://gi
 
 ## What It Does
 
-When you commit, the janitor spawns an isolated background session and reviews your diff for structural issues across four categories:
+When you commit, the janitor spawns an isolated background session and reviews your diff for structural issues across three categories:
 
 | Category | What It Catches |
 |----------|----------------|
 | **DRY** | Functions with >60% structural similarity, copy-pasted types, repeated constants |
 | **DEAD** | Exported symbols with zero importers, unreachable branches, dead type chains |
-| **YAGNI** | Single-implementor interfaces, always-same generics, pass-through abstractions |
-| **STRUCTURAL** | Files >500 lines, circular dependencies, layer boundary violations |
+| **STRUCTURAL** | Responsibility drift, complexity accretion, coupling increase, shotgun surgery, needless indirection |
 
 Every finding includes a **location**, **evidence**, and an **exact prescription** (delete, extract, merge).
 
@@ -79,7 +78,6 @@ Both are optional. All fields have defaults. Example:
   "categories": {
     "DRY": true,
     "DEAD": true,
-    "YAGNI": true,
     "STRUCTURAL": true
   },
   "scope": {

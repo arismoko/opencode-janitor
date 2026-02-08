@@ -6,7 +6,7 @@
 
 This spec now operates inside a dual-agent runtime:
 
-- `janitor` remains structural-only (DRY/DEAD/YAGNI/STRUCTURAL)
+- `janitor` remains structural-only (DRY/DEAD/STRUCTURAL)
 - `code-reviewer` is a separate comprehensive reviewer for PR workflows
 - Each agent has an independent trigger mode: `commit | pr | both`
 - Defaults: janitor=`commit`, reviewer=`pr`
@@ -22,7 +22,7 @@ output contracts.
 
 **In scope**:
 
-- DRY, DEAD, YAGNI, STRUCTURAL categories
+- DRY, DEAD, STRUCTURAL categories
 - Diff-aware context + full repo exploration via tools
 - Async background execution — never blocks the user
 - Extensible module boundaries, no architectural debt
@@ -133,7 +133,7 @@ opencode-janitor/
 
 ### Decision: Single Janitor Agent
 
-One strong reasoning model with full explorer tools. Categories overlap heavily (DRY + YAGNI, DEAD + STRUCTURAL), and a single agent provides better global prioritization to enforce "P0 only."
+One strong reasoning model with full explorer tools. A single agent provides better global prioritization to enforce "P0 only."
 
 Future extension path: category-specific sub-agents if review quality demands it.
 
@@ -161,7 +161,7 @@ The Janitor agent prompt is composed of:
 2. **Category scope**: Only enabled categories (from config)
 3. **Severity policy**: P0 only — "if it's not worth fixing now, don't report it"
 4. **Anti-patterns reference**: Detailed detection heuristics per category
-5. **Review strategy**: Dependency graph → dead code → DRY → YAGNI → structural
+5. **Review strategy**: Dependency graph → dead code → DRY → structural boundaries
 6. **Commit context**: SHA, subject, changed files, diff (injected per-review)
 7. **Output contract**: Strict format per finding + `NO_P0_FINDINGS` sentinel
 8. **Hard cap**: Max N findings (default 10), sorted by impact
@@ -173,7 +173,7 @@ The Janitor agent prompt is composed of:
 export function createJanitorAgent(config: JanitorConfig): AgentDefinition {
   return {
     name: 'janitor',
-    description: 'Structural code health reviewer. Detects DRY violations, dead code, YAGNI, and structural issues.',
+    description: 'Structural code health reviewer. Detects DRY violations, dead code, and structural issues.',
     config: {
       model: config.model.id,
       temperature: 0.1,  // Deterministic structural analysis
@@ -297,7 +297,6 @@ export const JanitorConfigSchema = z.object({
   categories: z.object({
     DRY: z.boolean().default(true),
     DEAD: z.boolean().default(true),
-    YAGNI: z.boolean().default(true),
     STRUCTURAL: z.boolean().default(true),
   }).default({}),
 
@@ -450,16 +449,12 @@ Maximum findings: ${config.maxFindings}
 - Conditional branches that are statically unreachable
 - Parameters always passed the same value
 
-## YAGNI
-- Interfaces with exactly one implementor and no extension point
-- Generic type parameters always instantiated the same way
-- Abstraction layers that pass-through without transformation
-
 ## STRUCTURAL
-- Files >300 lines (probably doing too much)
-- Circular dependencies between modules
-- Imports that cross architectural layer boundaries
-- Modules with mixed responsibilities
+- Responsibility drift: module handles concerns that should be separate
+- Complexity accretion: function/module grows incrementally complex without restructuring
+- Coupling increase: tight coupling between modules that should be independent
+- Shotgun surgery: a single change requires edits in many unrelated files
+- Needless indirection: abstraction layers that pass-through without transformation
 
 # REVIEW STRATEGY
 1. Read the diff to understand what changed
@@ -467,8 +462,7 @@ Maximum findings: ${config.maxFindings}
 3. Build a mental dependency graph of affected modules
 4. Find leaves with zero importers → dead code candidates
 5. Find clusters with high similarity → DRY candidates
-6. Find single-use abstractions → YAGNI candidates
-7. Verify structural boundaries
+6. Verify structural boundaries
 
 # COMMIT CONTEXT
 SHA: ${commit.sha}
@@ -489,7 +483,7 @@ ${commit.patch}
 For each finding, output exactly:
 
 1. **Location**: file:line
-2. **Category**: DRY | DEAD | YAGNI | STRUCTURAL
+2. **Category**: DRY | DEAD | STRUCTURAL
 3. **Evidence**: Show the duplication, zero-reference count, etc.
 4. **Prescription**: Exact action — "delete", "extract to X", "merge with Y"
 
@@ -715,8 +709,7 @@ These are **not built in v1** but the architecture accommodates them without ref
     "code-health",
     "janitor",
     "dead-code",
-    "dry",
-    "yagni"
+    "dry"
   ],
   "files": [
     "dist",
@@ -756,7 +749,7 @@ These are **not built in v1** but the architecture accommodates them without ref
 | Auto-review on commit | `true` |
 | Debounce | 1200ms |
 | Poll fallback | 15s |
-| Categories | All 4 (DRY, DEAD, YAGNI, STRUCTURAL) |
+| Categories | All 3 (DRY, DEAD, STRUCTURAL) |
 | Max findings | 10 |
 | Diff max patch size | 200KB |
 | Diff max files | 50 |

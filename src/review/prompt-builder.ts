@@ -51,16 +51,25 @@ Maximum findings: ${config.maxFindings}
 - Conditional branches that are statically unreachable
 - Parameters always passed the same value
 
-## YAGNI
-- Interfaces with exactly one implementor and no extension point
-- Generic type parameters always instantiated the same way
-- Abstraction layers that pass-through without transformation
-
 ## STRUCTURAL
-- Files >500 lines (probably doing too much)
-- Circular dependencies between modules
-- Imports that cross architectural layer boundaries
-- Modules with mixed responsibilities
+Detect change-shape maintainability smells — issues that make future changes harder:
+- **Responsibility drift**: module handles concerns that should be separate (e.g. validation + persistence + notification in one file)
+- **Complexity accretion**: function/module grows incrementally complex without restructuring (deeply nested control flow, excessive branching)
+- **Coupling increase**: tight coupling between modules that should be independent (shared mutable state, circular imports, implementation leakage)
+- **Shotgun surgery**: a single logical change requires edits in many unrelated files
+- **Needless indirection**: abstraction layers that pass-through without transformation, single-implementor interfaces with no extension point, generics always instantiated the same way
+
+### STRUCTURAL evidence rules
+- Must cite **2+ independent signals** (e.g. responsibility drift AND complexity accretion, not just one)
+- Metric-only claims are NOT evidence: line count, parameter count, or file size alone never justify a finding
+- Before reporting, ask: "Why might this structure be valid?" — if the answer is plausible (tests, schemas, generated code, orchestrators, migrations), suppress the finding
+
+### Context allowlist (suppress metric-only STRUCTURAL findings for)
+- Test files and test helpers
+- Database migrations and schema definitions
+- Generated or scaffolded code
+- Configuration files and constants
+- Orchestrators and entry points that legitimately coordinate many concerns
 
 # REVIEW STRATEGY
 1. Read the diff to understand what changed
@@ -68,8 +77,7 @@ Maximum findings: ${config.maxFindings}
 3. Build a mental dependency graph of affected modules
 4. Find leaves with zero importers → dead code candidates
 5. Find clusters with high similarity → DRY candidates
-6. Find single-use abstractions → YAGNI candidates
-7. Verify structural boundaries
+6. Verify structural boundaries using the 5 smell categories above
 
 # COMMIT CONTEXT
 SHA: ${commit.sha}
@@ -90,10 +98,11 @@ ${config.suppressionsBlock ? `\n# PREVIOUSLY REVIEWED (may be stale — verify b
 For each finding, output exactly:
 
 1. **Location**: file:line
-2. **Category**: DRY | DEAD | YAGNI | STRUCTURAL
+2. **Category**: DRY | DEAD | STRUCTURAL
 3. **Evidence**: Show the duplication, zero-reference count, etc.
 4. **Prescription**: Exact action — "delete", "extract to X", "merge with Y"
 
+No finding is preferred over a weak finding. If you are not confident, do not report it.
 No praise. No context-setting. Findings only.
 
 If the codebase is clean: output exactly \`NO_P0_FINDINGS\`
