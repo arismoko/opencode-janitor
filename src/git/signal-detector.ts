@@ -22,7 +22,7 @@ export abstract class SignalDetector<
   protected processed = new Set<string>();
   protected pollTimer: ReturnType<typeof setInterval> | null = null;
   protected debounceTimer: ReturnType<typeof setTimeout> | null = null;
-  protected inflight: string | null = null;
+  protected inflight = new Set<string>();
   protected started = false;
 
   constructor(
@@ -98,14 +98,14 @@ export abstract class SignalDetector<
 
       // Re-entrancy guard: if onDetected is still running for this key
       // (e.g. slow context build + another poll fires), skip.
-      if (key === this.inflight) return;
-      this.inflight = key;
+      if (this.inflight.has(key)) return;
+      this.inflight.add(key);
 
       log(`[${this.label}] new state: ${key} via ${signal.source}`);
       try {
         await this.onDetected(key, signal);
       } finally {
-        this.inflight = null;
+        this.inflight.delete(key);
       }
 
       // Only commit state after successful callback — a transient failure

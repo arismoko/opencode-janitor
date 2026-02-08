@@ -1,4 +1,5 @@
 import type { JanitorConfig } from '../config/schema';
+import { REVIEWER_SEVERITY_GUIDE } from '../types';
 import type { AgentDefinition } from './janitor-agent';
 
 /**
@@ -31,10 +32,7 @@ Output schema (strict):
 If no issues found, output exactly: {"findings": []}
 
 Severity guide:
-- P0: Must fix before merge — correctness bugs, security holes, data loss risks
-- P1: Should fix before merge — performance regressions, architectural violations, missing error handling
-- P2: Fix soon — code quality, maintainability, minor edge cases
-- P3: Nice to have — style nits, minor improvements, documentation gaps
+${REVIEWER_SEVERITY_GUIDE.map((s) => `- ${s}`).join('\n')}
 
 Report ALL findings you discover, organized by severity. Be thorough.
 
@@ -58,6 +56,7 @@ export function createReviewerAgent(config: JanitorConfig): AgentDefinition {
       'Comprehensive code reviewer for PRs. Detects bugs, security vulnerabilities, performance issues, architecture problems, and docs/spec drift.',
     config: {
       model: config.agents.reviewer.modelId ?? config.model.id,
+      variant: config.agents.reviewer.variant,
       temperature: 0.1,
       prompt: buildReviewerPrompt(),
       mode: 'subagent',

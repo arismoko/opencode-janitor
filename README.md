@@ -67,12 +67,15 @@ Both are optional. All fields have defaults. Example:
   "agents": {
     "janitor": {
       "enabled": true,
-      "trigger": "commit"
+      "trigger": "commit",
+      "modelId": "anthropic/claude-sonnet-4-20250514",
+      "variant": "high"
     },
     "reviewer": {
       "enabled": true,
       "trigger": "pr",
-      "maxFindings": 8
+      "modelId": "openai/gpt-5.3-codex",
+      "variant": "medium"
     }
   },
   "categories": {
@@ -123,10 +126,12 @@ Both are optional. All fields have defaults. Example:
 
 | Setting | Default | Notes |
 |---------|---------|-------|
-| `model.id` | *(inherits from OpenCode)* | Override with `provider/model` format |
+| `model.id` | *(inherits from OpenCode)* | Fallback model for both agents if per-agent `modelId` is not set |
+| `agents.janitor.modelId` | *(inherits from `model.id`)* | Override model for the janitor agent (`provider/model` format) |
+| `agents.reviewer.modelId` | *(inherits from `model.id`)* | Override model for the reviewer agent (`provider/model` format) |
+| `agents.*.variant` | *(none)* | Model-specific config variant (e.g. reasoning effort for OpenAI, thinking budget for Anthropic) |
 | `agents.janitor.trigger` | `commit` | `commit`, `pr`, or `both` |
 | `agents.reviewer.trigger` | `pr` | `commit`, `pr`, or `both` |
-| `agents.reviewer.maxFindings` | `8` | Maximum parsed reviewer findings |
 | `queue.dropIntermediate` | `true` | During rapid commits, only review the latest |
 | `delivery.reportFile` | `true` | Writes reports to `.janitor/reports/<sha>.md` |
 | `delivery.reviewer.prComment` | `true` | Post reviewer report to PR via `gh pr review` when available |
@@ -181,10 +186,12 @@ Results are delivered through three sinks (all independently toggleable):
 ```
 src/
   index.ts                    # Plugin entry — wires all subsystems
+  types.ts                    # Shared types, category/severity constants
   config/
     schema.ts                 # Zod config schema with defaults
     loader.ts                 # XDG-compliant config loading
   git/
+    signal-detector.ts        # Generic SignalDetector base (verify, debounce, inflight guard)
     commit-detector.ts        # Hybrid fs.watch + poll + accelerator
     commit-resolver.ts        # Diff extraction, parent selection
     pr-detector.ts            # PR poll + tool-hook accelerator
@@ -192,6 +199,7 @@ src/
     gh-pr.ts                  # gh availability + PR metadata + PR comment delivery
     repo-locator.ts           # .git dir resolution
   review/
+    base-orchestrator.ts      # Generic queue/lifecycle base class
     orchestrator.ts           # Queue, concurrency, burst coalescing
     reviewer-orchestrator.ts  # Queue/lifecycle for comprehensive reviewer
     janitor-agent.ts          # Agent definition (model, tools, prompt)
@@ -204,6 +212,7 @@ src/
     reviewer-parser.ts        # Reviewer JSON extraction
     formatter.ts              # Markdown report rendering
     reviewer-formatter.ts     # Reviewer markdown rendering
+    format-helpers.ts         # Shared summarizeLocation/formatChangedFiles helpers
     sinks/                    # Toast, session, file delivery
   state/
     store.ts                  # Processed commit persistence
