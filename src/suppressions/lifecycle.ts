@@ -19,7 +19,6 @@ export function createSuppression(
     createdAt: now,
     lastSeenAt: now,
     ttlDays: opts?.ttlDays ?? 90,
-    needsRevalidation: false,
     original: {
       category: finding.category,
       location: finding.location,

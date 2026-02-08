@@ -151,7 +151,7 @@ export async function processReviewOutput(
 
   // Step 6: Auto-suppress persistent findings that exceed churn threshold
   if (suppressionsEnabled && enrichment) {
-    const churnThreshold = config.suppressions?.revalidationChurn ?? 0.6;
+    const churnThreshold = config.suppressions?.autoSuppressThreshold ?? 0.6;
     const ttlDays = config.suppressions?.ttlDays ?? 90;
 
     // churnThreshold=1 means "never auto-suppress" — skip entirely

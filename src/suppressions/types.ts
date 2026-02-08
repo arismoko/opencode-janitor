@@ -4,7 +4,7 @@ import type { FindingCategory } from '../types';
 export interface Suppression {
   /** High-precision key: category|suffix2|shapeHash|evidenceHash */
   exactKey: string;
-  /** Rename-tolerant key: category|shapeHash */
+  /** Rename-tolerant key: category|filename|shapeHash */
   scopedKey: string;
   /** Which tier was used to create this */
   tier: 'exact' | 'scoped';
@@ -16,8 +16,6 @@ export interface Suppression {
   lastSeenAt: string;
   /** TTL in days — expires after this many days without being seen */
   ttlDays: number;
-  /** If true, underlying code changed significantly — needs user revalidation */
-  needsRevalidation: boolean;
   /** Original finding data for display */
   original: {
     category: FindingCategory;

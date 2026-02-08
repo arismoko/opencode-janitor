@@ -3,7 +3,7 @@
  *
  * Produces two keys per finding:
  * - exactKey: high-precision (category + path suffix + shape + evidence hash)
- * - scopedKey: rename-tolerant (category + shape hash only)
+ * - scopedKey: rename-tolerant (category + filename + shape hash)
  *
  * Used by both suppression memory and review history.
  * Leaf module — zero internal dependencies.
@@ -28,8 +28,20 @@ export function fingerprint(finding: {
 
   return {
     exactKey: `${finding.category}|${suffix}|${shape}|${evidence}`,
-    scopedKey: `${finding.category}|${shape}`,
+    scopedKey: `${finding.category}|${basename(finding.location)}|${shape}`,
   };
+}
+
+/**
+ * Extract the filename (no directory, no line number) from a location string.
+ * e.g. "src/utils/helper.ts:42" → "helper.ts"
+ *
+ * Tolerates directory renames while still scoping to the same file.
+ */
+function basename(location: string): string {
+  const filePath = location.split(':')[0];
+  const segments = filePath.split('/');
+  return segments[segments.length - 1] ?? filePath;
 }
 
 /**

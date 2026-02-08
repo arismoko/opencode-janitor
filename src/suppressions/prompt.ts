@@ -12,9 +12,7 @@ export function buildSuppressionsBlock(
   suppressions: Suppression[],
   maxPromptBytes?: number,
 ): string {
-  const active = suppressions.filter(
-    (s) => !isExpired(s) && !s.needsRevalidation,
-  );
+  const active = suppressions.filter((s) => !isExpired(s));
 
   if (active.length === 0) return '';
 
@@ -33,8 +31,8 @@ export function buildSuppressionsBlock(
 
   for (const s of active) {
     const suffix = suffix2(s.original.location);
-    // Extract shape hash from scopedKey (format: "category|shapeHash")
-    const shape = s.scopedKey.split('|')[1] ?? '';
+    // Extract shape hash from scopedKey (format: "category|filename|shapeHash")
+    const shape = s.scopedKey.split('|')[2] ?? '';
     const reason = s.reason ?? s.original.prescription;
     const line = `${s.original.category}|${suffix}|${shape}|reason: ${reason}`;
     const lineBytes = Buffer.byteLength(line + '\n');

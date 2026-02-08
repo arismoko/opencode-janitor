@@ -106,14 +106,14 @@ export const JanitorConfigSchema = z.object({
       ttlDays: z.number().int().min(1).default(90),
       maxEntries: z.number().int().min(10).max(500).default(200),
       maxPromptBytes: z.number().int().min(256).max(4096).default(1536),
-      revalidationChurn: z.number().min(0).max(1).default(0.6),
+      autoSuppressThreshold: z.number().min(0).max(1).default(0.6),
     })
     .default(() => ({
       enabled: true,
       ttlDays: 90,
       maxEntries: 200,
       maxPromptBytes: 1536,
-      revalidationChurn: 0.6,
+      autoSuppressThreshold: 0.6,
     })),
 
   history: z
