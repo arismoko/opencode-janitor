@@ -8,7 +8,7 @@ export function formatReviewerReport(result: ReviewerResult): string {
 
   if (result.clean) {
     return [
-      `# Reviewer Report: ${shortId}`,
+      `### Reviewer Report: ${shortId}`,
       '',
       `**Findings**: None`,
       '',
@@ -17,7 +17,7 @@ export function formatReviewerReport(result: ReviewerResult): string {
   }
 
   const header = [
-    `# Reviewer Report: ${shortId}`,
+    `### Reviewer Report: ${shortId}`,
     '',
     `**Findings**: ${result.findings.length} issue${result.findings.length === 1 ? '' : 's'}`,
     '',

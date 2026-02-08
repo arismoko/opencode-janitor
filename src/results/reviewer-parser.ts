@@ -1,7 +1,7 @@
 import { log } from '../utils/logger';
 
 /** Allowed severity levels for reviewer findings */
-export type ReviewerSeverity = 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW';
+export type ReviewerSeverity = 'P0' | 'P1' | 'P2' | 'P3';
 
 /** Allowed domain categories for reviewer findings */
 export type ReviewerDomain =
@@ -29,12 +29,7 @@ export interface ReviewerResult {
   raw: string;
 }
 
-const VALID_SEVERITIES: ReviewerSeverity[] = [
-  'CRITICAL',
-  'HIGH',
-  'MEDIUM',
-  'LOW',
-];
+const VALID_SEVERITIES: ReviewerSeverity[] = ['P0', 'P1', 'P2', 'P3'];
 
 const VALID_DOMAINS: ReviewerDomain[] = [
   'BUG',

@@ -31,17 +31,15 @@ export const JanitorConfigSchema = z.object({
           enabled: z.boolean().default(true),
           trigger: TriggerModeSchema.default('pr'),
           modelId: z.string().optional(),
-          maxFindings: z.number().int().min(1).max(50).default(8),
         })
         .default(() => ({
           enabled: true,
           trigger: 'pr' as const,
-          maxFindings: 8,
         })),
     })
     .default(() => ({
       janitor: { enabled: true, trigger: 'commit' as const },
-      reviewer: { enabled: true, trigger: 'pr' as const, maxFindings: 8 },
+      reviewer: { enabled: true, trigger: 'pr' as const },
     })),
 
   categories: z
