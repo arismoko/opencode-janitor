@@ -1,5 +1,6 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
+import { atomicWriteSync } from '../utils/atomic-write';
 import { warn } from '../utils/logger';
 import { HistoryFileSchema } from './schema';
 import type { FindingLedgerEntry, HistoryFile, ReviewRecord } from './types';
@@ -93,7 +94,7 @@ export class HistoryStore {
       mkdirSync(dir, { recursive: true });
     }
 
-    writeFileSync(this.filePath, serialized, 'utf-8');
+    atomicWriteSync(this.filePath, serialized);
     this.rebuildLedger();
   }
 
@@ -111,6 +112,10 @@ export class HistoryStore {
       const seenKeys = new Set<string>();
 
       for (const f of review.findings) {
+        // Skip duplicate exactKeys within the same review to prevent
+        // a single review from inflating occurrences/streaks, which
+        // could trigger premature auto-suppression.
+        if (seenKeys.has(f.exactKey)) continue;
         seenKeys.add(f.exactKey);
 
         const existing = entries.get(f.exactKey);

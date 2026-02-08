@@ -209,7 +209,10 @@ const TheJanitor: Plugin = async (ctx) => {
       // Bootstrap session tracking from any tool call — covers the case
       // where the plugin loads into an already-existing session and never
       // receives a session.created event.
-      if (input.sessionID) {
+      // Guard: skip session IDs belonging to janitor child review sessions
+      // to prevent them from being promoted to latestSessionId, which would
+      // cause future reviews to nest under a review session.
+      if (input.sessionID && !orchestrator.isOwnSession(input.sessionID)) {
         orchestrator.sessionAvailable(input.sessionID);
       }
 

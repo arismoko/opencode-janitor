@@ -1,5 +1,6 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
+import { atomicWriteSync } from '../utils/atomic-write';
 import { warn } from '../utils/logger';
 import { isExpired } from './matcher';
 import { SuppressionsFileSchema } from './schema';
@@ -59,7 +60,7 @@ export class SuppressionStore {
       suppressions: this.suppressions,
     };
 
-    writeFileSync(this.filePath, JSON.stringify(data, null, 2) + '\n', 'utf-8');
+    atomicWriteSync(this.filePath, JSON.stringify(data, null, 2) + '\n');
   }
 
   /** Returns non-expired entries */

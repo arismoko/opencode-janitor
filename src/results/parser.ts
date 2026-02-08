@@ -18,9 +18,16 @@ const VALID_CATEGORIES: FindingCategory[] = [
  * 4. **Prescription**: ...
  */
 export function parseReviewOutput(raw: string, sha: string): ReviewResult {
-  // Check for clean codebase sentinel — match as standalone token,
-  // optionally wrapped in backticks, not as a substring of other text.
-  if (/(?:^|\s|`)NO_P0_FINDINGS(?:`|\s|$)/m.test(raw)) {
+  // Extract findings first so we never miss real findings when the sentinel
+  // appears in quoted/example text alongside actual issues.
+  const findings = extractFindings(raw);
+
+  // Only treat as clean if the sentinel is present AND no findings were parsed.
+  // This prevents the sentinel in quoted/example text from masking real findings.
+  if (
+    findings.length === 0 &&
+    /(?:^|\s|`)NO_P0_FINDINGS(?:`|\s|$)/m.test(raw)
+  ) {
     log('[parser] clean codebase — no P0 findings');
     return {
       sha,
@@ -31,8 +38,6 @@ export function parseReviewOutput(raw: string, sha: string): ReviewResult {
       raw,
     };
   }
-
-  const findings = extractFindings(raw);
 
   log(`[parser] extracted ${findings.length} findings`);
 

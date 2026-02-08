@@ -63,6 +63,15 @@ export class ReviewOrchestrator {
   }
 
   /**
+   * Check whether a session ID belongs to a janitor review session.
+   * Used to prevent child review sessions from being promoted to
+   * latestSessionId, which would cause future reviews to nest incorrectly.
+   */
+  isOwnSession(sessionId: string): boolean {
+    return this.sessionToSha.has(sessionId);
+  }
+
+  /**
    * Notify the orchestrator that a root session is now available.
    * Assigns the session to any pending jobs that lack one, then drains the queue.
    * Idempotent — repeated calls with the same ID are no-ops.
