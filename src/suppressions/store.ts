@@ -8,6 +8,35 @@ import type { Suppression, SuppressionsFile } from './types';
 
 const MAX_SUPPRESSIONS = 200;
 
+/** Rewrite a single key's `YAGNI|` prefix to `STRUCTURAL|`. */
+function migrateCategoryPrefix(key: unknown): string | undefined {
+  return typeof key === 'string'
+    ? key.replace(/^YAGNI\|/, 'STRUCTURAL|')
+    : undefined;
+}
+
+/**
+ * Migrate legacy YAGNI suppression entries to STRUCTURAL in-place.
+ * Rewrites `original.category`, `exactKey`, and `scopedKey` so migrated
+ * entries both pass schema validation and match new STRUCTURAL findings.
+ * Returns true if any entries were migrated.
+ */
+function migrateYagniEntries(parsed: Record<string, unknown>): boolean {
+  if (!Array.isArray(parsed?.suppressions)) return false;
+
+  let migrated = false;
+  for (const entry of parsed.suppressions) {
+    if (entry?.original?.category === 'YAGNI') {
+      entry.original.category = 'STRUCTURAL';
+      entry.exactKey = migrateCategoryPrefix(entry.exactKey) ?? entry.exactKey;
+      entry.scopedKey =
+        migrateCategoryPrefix(entry.scopedKey) ?? entry.scopedKey;
+      migrated = true;
+    }
+  }
+  return migrated;
+}
+
 /** Manages `.janitor/suppressions.json` persistence */
 export class SuppressionStore {
   private filePath: string;
@@ -38,27 +67,7 @@ export class SuppressionStore {
       // Must also rewrite exactKey/scopedKey — both are prefixed with the
       // category name (e.g. "YAGNI|utils/foo.ts:42|..."). Without this,
       // migrated entries would never match new STRUCTURAL findings.
-      let migrated = false;
-      if (Array.isArray(parsed?.suppressions)) {
-        for (const entry of parsed.suppressions) {
-          if (entry?.original?.category === 'YAGNI') {
-            entry.original.category = 'STRUCTURAL';
-            if (typeof entry.exactKey === 'string') {
-              entry.exactKey = entry.exactKey.replace(
-                /^YAGNI\|/,
-                'STRUCTURAL|',
-              );
-            }
-            if (typeof entry.scopedKey === 'string') {
-              entry.scopedKey = entry.scopedKey.replace(
-                /^YAGNI\|/,
-                'STRUCTURAL|',
-              );
-            }
-            migrated = true;
-          }
-        }
-      }
+      const migrated = migrateYagniEntries(parsed);
 
       const result = SuppressionsFileSchema.safeParse(parsed);
 
