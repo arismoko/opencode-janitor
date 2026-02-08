@@ -279,7 +279,16 @@ const TheJanitor: Plugin = async (ctx) => {
             // from getCurrentKey, which may have been overwritten by a
             // concurrent poll cycle (race window if PR was closed/merged).
             const ghPr = await getCurrentPrFromGh(exec);
-            if (!ghPr) return;
+            if (!ghPr) {
+              // PR was open when getCurrentKey ran but is now gone.
+              // Throw so SignalDetector.verify does NOT mark this key
+              // as processed — if it was a transient issue, next poll
+              // retries; if the PR was genuinely closed, getCurrentKey
+              // will return null and verify skips naturally.
+              throw new Error(
+                `PR disappeared between detection and callback: ${key}`,
+              );
+            }
 
             prContext = await getPrContext({
               baseRef: ghPr.baseRef,

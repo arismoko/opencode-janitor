@@ -1,5 +1,10 @@
 import { log, warn } from '../utils/logger';
 
+/** Escape a string for safe use inside single quotes in shell commands. */
+function shellEscape(s: string): string {
+  return s.replace(/'/g, "'\\''");
+}
+
 /** PR info retrieved from the gh CLI */
 export interface GhPrInfo {
   number: number;
@@ -40,7 +45,7 @@ export async function getCurrentPrFromGh(
     if (!branch || branch === 'HEAD') return null;
 
     const raw = await exec(
-      `GH_PROMPT_DISABLED=1 gh pr view '${branch}' --repo '${repo}' --json number,url,baseRefName,headRefName,headRefOid,state`,
+      `GH_PROMPT_DISABLED=1 gh pr view '${shellEscape(branch)}' --repo '${shellEscape(repo)}' --json number,url,baseRefName,headRefName,headRefOid,state`,
     );
 
     let parsed: Record<string, unknown>;
@@ -103,10 +108,10 @@ export async function postPrReviewWithGh(
     const repo = await resolveRepoSlug(exec);
     if (!repo) return false;
 
-    // Escape single quotes in body for shell safety
-    const escapedBody = body.replace(/'/g, "'\\''");
+    // Escape single quotes in body and repo for shell safety
+    const escapedBody = shellEscape(body);
     await exec(
-      `GH_PROMPT_DISABLED=1 gh pr review ${prNumber} --repo '${repo}' --comment --body '${escapedBody}'`,
+      `GH_PROMPT_DISABLED=1 gh pr review ${prNumber} --repo '${shellEscape(repo)}' --comment --body '${escapedBody}'`,
     );
     return true;
   } catch (err) {
