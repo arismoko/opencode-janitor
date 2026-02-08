@@ -99,6 +99,36 @@ export const JanitorConfigSchema = z.object({
       concurrency: 1,
       dropIntermediate: true,
     })),
+
+  suppressions: z
+    .object({
+      enabled: z.boolean().default(true),
+      ttlDays: z.number().int().min(1).default(90),
+      maxEntries: z.number().int().min(10).max(500).default(200),
+      maxPromptBytes: z.number().int().min(256).max(4096).default(1536),
+      revalidationChurn: z.number().min(0).max(1).default(0.6),
+    })
+    .default(() => ({
+      enabled: true,
+      ttlDays: 90,
+      maxEntries: 200,
+      maxPromptBytes: 1536,
+      revalidationChurn: 0.6,
+    })),
+
+  history: z
+    .object({
+      enabled: z.boolean().default(true),
+      maxReviews: z.number().int().min(5).max(200).default(50),
+      maxBytes: z.number().int().min(100_000).default(2_097_152),
+      trendWindow: z.number().int().min(2).max(50).default(10),
+    })
+    .default(() => ({
+      enabled: true,
+      maxReviews: 50,
+      maxBytes: 2_097_152,
+      trendWindow: 10,
+    })),
 });
 
 export type JanitorConfig = z.infer<typeof JanitorConfigSchema>;

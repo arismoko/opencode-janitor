@@ -1,10 +1,13 @@
 import type { PluginInput } from '@opencode-ai/plugin';
 import type { JanitorConfig } from '../config/schema';
+import type { EnrichmentData } from '../history/enrichment';
+import type { HistoryStore } from '../history/store';
 import { formatReport } from '../results/formatter';
-import { parseReviewOutput } from '../results/parser';
+import { processReviewOutput } from '../results/pipeline';
 import { deliverToFile } from '../results/sinks/file-sink';
 import { deliverToSession } from '../results/sinks/session-sink';
 import { deliverToast } from '../results/sinks/toast-sink';
+import type { SuppressionStore } from '../suppressions/store';
 import type { ReviewJob, ReviewResult } from '../types';
 import { log, warn } from '../utils/logger';
 import { notifyError } from '../utils/notifier';
@@ -41,6 +44,8 @@ export class ReviewOrchestrator {
   /** Most recently observed root session, used to assign to new/pending jobs. */
   private latestSessionId?: string;
   private ctx?: PluginInput;
+  private suppressionStore?: SuppressionStore;
+  private historyStore?: HistoryStore;
 
   constructor(
     private config: JanitorConfig,
@@ -55,6 +60,15 @@ export class ReviewOrchestrator {
   /** Set the plugin context for error notification injection. */
   setContext(ctx: PluginInput): void {
     this.ctx = ctx;
+  }
+
+  /** Set memory stores for suppression + history pipeline processing. */
+  setStores(
+    suppressionStore: SuppressionStore,
+    historyStore: HistoryStore,
+  ): void {
+    this.suppressionStore = suppressionStore;
+    this.historyStore = historyStore;
   }
 
   /**
@@ -216,7 +230,26 @@ export class ReviewOrchestrator {
       }
 
       const rawOutput = assistantTexts.join('\n\n');
-      const result = parseReviewOutput(rawOutput, sha);
+
+      // Process through the full pipeline (parse → suppress → annotate → record)
+      let result: ReviewResult;
+      let enrichment: EnrichmentData | undefined;
+      let suppressedCount = 0;
+
+      if (this.suppressionStore && this.historyStore) {
+        const pipelineResult = await processReviewOutput(rawOutput, sha, {
+          suppressionStore: this.suppressionStore,
+          historyStore: this.historyStore,
+          config,
+        });
+        result = pipelineResult.result;
+        enrichment = pipelineResult.enrichment;
+        suppressedCount = pipelineResult.suppressedCount;
+      } else {
+        // Fallback: parse-only when stores aren't available
+        const { parseReviewOutput } = await import('../results/parser');
+        result = parseReviewOutput(rawOutput, sha);
+      }
 
       job.status = 'completed';
       job.completedAt = new Date();
@@ -226,7 +259,14 @@ export class ReviewOrchestrator {
       this.onReviewCompleted?.(sha);
 
       // Deliver results via configured sinks
-      await this.deliverResults(result, job.parentSessionId, ctx, config);
+      await this.deliverResults(
+        result,
+        job.parentSessionId,
+        ctx,
+        config,
+        enrichment,
+        suppressedCount,
+      );
     } catch (err) {
       job.status = 'failed';
       job.completedAt = new Date();
@@ -259,15 +299,17 @@ export class ReviewOrchestrator {
     parentSessionId: string | undefined,
     ctx: PluginInput,
     config: JanitorConfig,
+    enrichment?: EnrichmentData,
+    suppressedCount?: number,
   ): Promise<void> {
-    const report = formatReport(result);
+    const report = formatReport(result, enrichment, suppressedCount);
 
     if (config.delivery.toast) {
-      await deliverToast(ctx, result);
+      await deliverToast(ctx, result, enrichment);
     }
 
     if (config.delivery.sessionMessage && parentSessionId) {
-      await deliverToSession(ctx, parentSessionId, report);
+      await deliverToSession(ctx, parentSessionId, report, enrichment);
     }
 
     if (config.delivery.reportFile) {
@@ -276,6 +318,7 @@ export class ReviewOrchestrator {
         report,
         config.delivery.reportDir,
         ctx.directory,
+        enrichment,
       );
     }
   }

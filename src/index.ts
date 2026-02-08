@@ -9,11 +9,14 @@ import { loadConfig } from './config/loader';
 import { CommitDetector } from './git/commit-detector';
 import { getCommitContext } from './git/commit-resolver';
 import { resolveGitDir } from './git/repo-locator';
+import { HistoryStore } from './history/store';
 import { createJanitorAgent } from './review/janitor-agent';
 import { ReviewOrchestrator } from './review/orchestrator';
 import { buildReviewPrompt } from './review/prompt-builder';
 import { spawnJanitorReview } from './review/runner';
 import { CommitStore } from './state/store';
+import { buildSuppressionsBlock } from './suppressions/prompt';
+import { SuppressionStore } from './suppressions/store';
 import { log, warn } from './utils/logger';
 
 /** Plugin return shape — typed locally since the SDK Plugin type doesn't
@@ -79,6 +82,11 @@ const TheJanitor: Plugin = async (ctx) => {
 
   const agent = createJanitorAgent(config);
   const store = new CommitStore(ctx.directory);
+  const suppressionStore = new SuppressionStore(ctx.directory);
+  const historyStore = new HistoryStore(ctx.directory, {
+    maxReviews: config.history?.maxReviews,
+    maxBytes: config.history?.maxBytes,
+  });
 
   // Seed detector with previously processed SHAs
   const previouslyProcessed = store.getProcessed();
@@ -98,6 +106,9 @@ const TheJanitor: Plugin = async (ctx) => {
         );
       }
 
+      const suppressionsBlock = config.suppressions?.enabled
+        ? buildSuppressionsBlock(suppressionStore.getActive())
+        : '';
       const prompt = buildReviewPrompt(commit, {
         categories: Object.entries(config.categories)
           .filter(([, v]) => v)
@@ -105,6 +116,7 @@ const TheJanitor: Plugin = async (ctx) => {
         maxFindings: config.model.maxFindings,
         scopeInclude: config.scope.include,
         scopeExclude: config.scope.exclude,
+        suppressionsBlock,
       });
 
       const sessionId = await spawnJanitorReview(ctx, {
@@ -124,6 +136,7 @@ const TheJanitor: Plugin = async (ctx) => {
 
   // Give orchestrator access to the SDK client for error injection
   orchestrator.setContext(ctx);
+  orchestrator.setStores(suppressionStore, historyStore);
 
   // Commit detector
   const detector = new CommitDetector(
