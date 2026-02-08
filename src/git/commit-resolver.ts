@@ -2,6 +2,10 @@ import type { JanitorConfig } from '../config/schema';
 import type { ChangedFile, CommitContext } from '../types';
 import { truncatePatch } from '../utils/limits';
 import { log, warn } from '../utils/logger';
+import {
+  getWorkspaceChangedFiles as getWorkspaceChangedFilesShared,
+  getWorkspacePatch as getWorkspacePatchShared,
+} from '../utils/workspace-git';
 
 /** Empty tree hash for diffing initial commits */
 const EMPTY_TREE = '4b825dc642cb6eb9a060e54bf8d69288fbee4904';
@@ -32,6 +36,32 @@ export async function getCommitContext(
     sha: fullSha,
     subject,
     parents,
+    changedFiles,
+    patch: patch.content,
+    patchTruncated: patch.truncated,
+  };
+}
+
+/**
+ * Extract context from the live workspace (tracked staged+unstaged + untracked).
+ */
+export async function getWorkspaceCommitContext(
+  config: JanitorConfig,
+  exec: (cmd: string) => Promise<string>,
+): Promise<CommitContext> {
+  const headSha = (await exec('git rev-parse HEAD')).trim();
+  const branch = (await exec('git rev-parse --abbrev-ref HEAD')).trim();
+  const changedFiles = await getWorkspaceChangedFilesShared(exec);
+  const patch = await getWorkspacePatchShared(
+    config,
+    exec,
+    '[commit-resolver]',
+  );
+
+  return {
+    sha: headSha,
+    subject: `workspace ${branch || 'HEAD'}`,
+    parents: [],
     changedFiles,
     patch: patch.content,
     patchTruncated: patch.truncated,

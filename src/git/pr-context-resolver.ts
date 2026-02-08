@@ -1,12 +1,11 @@
 import type { JanitorConfig } from '../config/schema';
+import type { ChangedFile } from '../types';
 import { truncatePatch } from '../utils/limits';
 import { log, warn } from '../utils/logger';
-
-/** Changed file entry from git diff */
-export interface PrChangedFile {
-  status: string;
-  path: string;
-}
+import {
+  getWorkspaceChangedFiles as getWorkspaceChangedFilesShared,
+  getWorkspacePatch as getWorkspacePatchShared,
+} from '../utils/workspace-git';
 
 /** Full PR context for building review prompts */
 export interface PrContext {
@@ -15,7 +14,7 @@ export interface PrContext {
   baseRef: string;
   headRef: string;
   number?: number;
-  changedFiles: PrChangedFile[];
+  changedFiles: ChangedFile[];
   patch: string;
   patchTruncated: boolean;
 }
@@ -77,13 +76,42 @@ export async function getPrContext(opts: GetPrContextOpts): Promise<PrContext> {
 }
 
 /**
+ * Extract review context from live workspace state.
+ */
+export async function getWorkspacePrContext(
+  config: JanitorConfig,
+  exec: (cmd: string) => Promise<string>,
+): Promise<PrContext | null> {
+  const headRef = (await exec('git rev-parse --abbrev-ref HEAD')).trim();
+  const headSha = (await exec('git rev-parse HEAD')).trim();
+  if (!headRef || headRef === 'HEAD' || !headSha) return null;
+
+  const changedFiles = await getWorkspaceChangedFilesShared(exec);
+  const patch = await getWorkspacePatchShared(
+    config,
+    exec,
+    '[pr-context-resolver]',
+  );
+
+  return {
+    key: `workspace:${headRef}:${headSha}`,
+    headSha,
+    baseRef: config.pr.baseBranch,
+    headRef,
+    changedFiles,
+    patch: patch.content,
+    patchTruncated: patch.truncated,
+  };
+}
+
+/**
  * Get changed files between merge base and head.
  */
 async function getChangedFiles(
   mergeBase: string,
   headRef: string,
   exec: (cmd: string) => Promise<string>,
-): Promise<PrChangedFile[]> {
+): Promise<ChangedFile[]> {
   try {
     const raw = await exec(`git diff --name-status ${mergeBase}..${headRef}`);
     return raw

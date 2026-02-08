@@ -9,6 +9,7 @@ import { deliverToSession } from '../results/sinks/session-sink';
 import { deliverToast } from '../results/sinks/toast-sink';
 import type { SuppressionStore } from '../suppressions/store';
 import type { ReviewResult } from '../types';
+import { extractWorkspaceHeadFromKey } from '../utils/review-key';
 import { type BaseJob, BaseOrchestrator } from './base-orchestrator';
 
 type ReviewExecutor = (sha: string) => Promise<string>;
@@ -54,9 +55,10 @@ export class ReviewOrchestrator extends BaseOrchestrator<string, ReviewResult> {
     config: JanitorConfig,
   ): Promise<void> {
     const rawOutput = await this.extractAssistantOutput(sessionId, ctx);
+    const sha = extractWorkspaceHeadFromKey(job.key);
 
     // Process through the full pipeline (parse -> suppress -> annotate -> record)
-    const pipelineResult = await processReviewOutput(rawOutput, job.key, {
+    const pipelineResult = await processReviewOutput(rawOutput, sha, {
       suppressionStore: this.suppressionStore,
       historyStore: this.historyStore,
       config,
@@ -68,9 +70,6 @@ export class ReviewOrchestrator extends BaseOrchestrator<string, ReviewResult> {
     job.completedAt = new Date();
     job.result = result;
 
-    // Persist the SHA as processed only after successful completion
-    this.onReviewCompleted?.(job.key);
-
     // Deliver results via configured sinks
     await this.deliverResults(
       result,
@@ -80,6 +79,9 @@ export class ReviewOrchestrator extends BaseOrchestrator<string, ReviewResult> {
       enrichment,
       suppressedCount,
     );
+
+    // Persist the SHA only after successful extraction + delivery
+    this.onReviewCompleted?.(job.key);
   }
 
   /**

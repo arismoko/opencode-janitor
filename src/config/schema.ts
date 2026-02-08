@@ -2,6 +2,21 @@ import { z } from 'zod';
 
 const TriggerModeSchema = z.enum(['commit', 'pr', 'both']);
 
+type TriggerMode = z.infer<typeof TriggerModeSchema>;
+
+const AgentRuntimeSchema = (defaultTrigger: TriggerMode) =>
+  z.object({
+    enabled: z.boolean().default(true),
+    trigger: TriggerModeSchema.default(defaultTrigger),
+    modelId: z.string().optional(),
+    variant: z.string().optional(),
+  });
+
+const defaultAgentRuntime = (trigger: TriggerMode) => ({
+  enabled: true,
+  trigger,
+});
+
 export const JanitorConfigSchema = z.object({
   enabled: z.boolean().default(true),
 
@@ -19,29 +34,16 @@ export const JanitorConfigSchema = z.object({
 
   agents: z
     .object({
-      janitor: z
-        .object({
-          enabled: z.boolean().default(true),
-          trigger: TriggerModeSchema.default('commit'),
-          modelId: z.string().optional(),
-          variant: z.string().optional(),
-        })
-        .default(() => ({ enabled: true, trigger: 'commit' as const })),
-      reviewer: z
-        .object({
-          enabled: z.boolean().default(true),
-          trigger: TriggerModeSchema.default('pr'),
-          modelId: z.string().optional(),
-          variant: z.string().optional(),
-        })
-        .default(() => ({
-          enabled: true,
-          trigger: 'pr' as const,
-        })),
+      janitor: AgentRuntimeSchema('commit').default(() =>
+        defaultAgentRuntime('commit'),
+      ),
+      reviewer: AgentRuntimeSchema('pr').default(() =>
+        defaultAgentRuntime('pr'),
+      ),
     })
     .default(() => ({
-      janitor: { enabled: true, trigger: 'commit' as const },
-      reviewer: { enabled: true, trigger: 'pr' as const },
+      janitor: defaultAgentRuntime('commit'),
+      reviewer: defaultAgentRuntime('pr'),
     })),
 
   categories: z
