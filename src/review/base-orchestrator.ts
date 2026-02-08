@@ -97,6 +97,11 @@ export abstract class BaseOrchestrator<TContext, TResult> {
     return this.sessionToKey.has(sessionId);
   }
 
+  /** Whether a root session has been assigned for enqueue backfilling. */
+  hasRootSession(): boolean {
+    return Boolean(this.latestSessionId);
+  }
+
   /**
    * Notify the orchestrator that a root session is now available.
    * Assigns the session to any pending jobs that lack one, then drains the queue.

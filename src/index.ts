@@ -380,11 +380,21 @@ const TheJanitor: Plugin = async (ctx) => {
       // where the plugin loads into an already-existing session and never
       // receives a session.created event.
       if (input.sessionID) {
-        if (!orchestrator.isOwnSession(input.sessionID)) {
-          orchestrator.sessionAvailable(input.sessionID);
-        }
-        if (!reviewerOrchestrator.isOwnSession(input.sessionID)) {
-          reviewerOrchestrator.sessionAvailable(input.sessionID);
+        const janitorOwnsSession = orchestrator.isOwnSession(input.sessionID);
+        const reviewerOwnsSession = reviewerOrchestrator.isOwnSession(
+          input.sessionID,
+        );
+
+        // Never promote child review sessions as roots.
+        if (!janitorOwnsSession && !reviewerOwnsSession) {
+          // Bootstrap only when root tracking is missing; normal root rotation
+          // is handled by session.created events.
+          if (!orchestrator.hasRootSession()) {
+            orchestrator.sessionAvailable(input.sessionID);
+          }
+          if (!reviewerOrchestrator.hasRootSession()) {
+            reviewerOrchestrator.sessionAvailable(input.sessionID);
+          }
         }
       }
 
