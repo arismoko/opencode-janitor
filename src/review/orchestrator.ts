@@ -9,7 +9,6 @@ import { deliverToSession } from '../results/sinks/session-sink';
 import { deliverToast } from '../results/sinks/toast-sink';
 import type { SuppressionStore } from '../suppressions/store';
 import type { ReviewResult } from '../types';
-import { log } from '../utils/logger';
 import { type BaseJob, BaseOrchestrator } from './base-orchestrator';
 
 type ReviewExecutor = (sha: string, parentSessionId: string) => Promise<string>;

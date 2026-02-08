@@ -4,13 +4,10 @@ import { getErrorMessage, warn } from './logger';
 /**
  * Injects a message into a session.
  *
- * When `noReply` is true (default for error notifications), uses `noReply: true`
- * so the message appears without triggering an LLM response.
- * When `noReply` is false (default for review output), the parent session
- * receives the message and can reply — letting the user's agent act on findings.
- *
- * Uses the synchronous `prompt()` API so we get confirmation the message
- * was written to session history, unlike `promptAsync` (fire-and-forget 204).
+ * Always uses `promptAsync` to avoid blocking plugin hooks or the UI —
+ * even `noReply: true` inserts can stall on network/server with sync `prompt()`.
+ * The `noReply` flag controls only whether the assistant generates a reply,
+ * not the transport mode.
  */
 export async function injectMessage(
   ctx: PluginInput,
@@ -19,12 +16,13 @@ export async function injectMessage(
   noReply = true,
 ): Promise<void> {
   try {
-    await ctx.client.session.prompt({
+    await ctx.client.session.promptAsync({
       path: { id: sessionId },
       body: {
         noReply,
         parts: [{ type: 'text' as const, text }],
       },
+      query: { directory: ctx.directory },
     });
   } catch {
     warn(`[notifier] failed to inject message into session ${sessionId}`);
