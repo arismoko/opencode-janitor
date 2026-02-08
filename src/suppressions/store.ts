@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { atomicWriteSync } from '../utils/atomic-write';
-import { warn } from '../utils/logger';
+import { log, warn } from '../utils/logger';
 import { isExpired } from './matcher';
 import { SuppressionsFileSchema } from './schema';
 import type { Suppression, SuppressionsFile } from './types';
@@ -29,6 +29,21 @@ export class SuppressionStore {
     try {
       const raw = readFileSync(this.filePath, 'utf-8');
       const parsed = JSON.parse(raw);
+
+      // Migrate legacy YAGNI suppressions → STRUCTURAL before validation.
+      // YAGNI was merged into STRUCTURAL; without this, any pre-existing
+      // YAGNI entries would fail schema validation and cause load() to
+      // discard the entire suppressions file.
+      let migrated = false;
+      if (Array.isArray(parsed?.suppressions)) {
+        for (const entry of parsed.suppressions) {
+          if (entry?.original?.category === 'YAGNI') {
+            entry.original.category = 'STRUCTURAL';
+            migrated = true;
+          }
+        }
+      }
+
       const result = SuppressionsFileSchema.safeParse(parsed);
 
       if (!result.success) {
@@ -40,6 +55,11 @@ export class SuppressionStore {
       }
 
       this.suppressions = result.data.suppressions;
+
+      if (migrated) {
+        log('[suppressions] migrated legacy YAGNI entries → STRUCTURAL');
+        this.save();
+      }
     } catch (err) {
       warn('Failed to read suppressions file', {
         path: this.filePath,
