@@ -1,5 +1,5 @@
-import type { CommitContext, ChangedFile } from '../types';
 import type { JanitorConfig } from '../config/schema';
+import type { ChangedFile, CommitContext } from '../types';
 import { truncatePatch } from '../utils/limits';
 import { log, warn } from '../utils/logger';
 
@@ -16,9 +16,7 @@ export async function getCommitContext(
   exec: (cmd: string) => Promise<string>,
 ): Promise<CommitContext> {
   // Get commit metadata
-  const metaRaw = await exec(
-    `git log -1 --format='%H%n%P%n%s' ${sha}`,
-  );
+  const metaRaw = await exec(`git log -1 --format='%H%n%P%n%s' ${sha}`);
   const metaLines = metaRaw.trim().split('\n');
   const fullSha = metaLines[0] || sha;
   const parents = (metaLines[1] || '').split(' ').filter(Boolean);
@@ -78,9 +76,7 @@ async function getPatch(
 ): Promise<{ content: string; truncated: boolean }> {
   try {
     const diffBase = getDiffBase(sha, parents);
-    const raw = await exec(
-      `git diff --no-color ${diffBase}`,
-    );
+    const raw = await exec(`git diff --no-color ${diffBase}`);
 
     const result = truncatePatch(raw, {
       maxPatchBytes: config.diff.maxPatchBytes,

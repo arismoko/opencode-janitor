@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { JanitorConfigSchema, type JanitorConfig } from './schema';
 import { log } from '../utils/logger';
+import { type JanitorConfig, JanitorConfigSchema } from './schema';
 
 const CONFIG_FILENAME = 'janitor.json';
 

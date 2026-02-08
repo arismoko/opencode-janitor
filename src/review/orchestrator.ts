@@ -1,11 +1,11 @@
 import type { PluginInput } from '@opencode-ai/plugin';
 import type { JanitorConfig } from '../config/schema';
-import type { ReviewJob, ReviewResult } from '../types';
-import { parseReviewOutput } from '../results/parser';
 import { formatReport } from '../results/formatter';
-import { deliverToast } from '../results/sinks/toast-sink';
-import { deliverToSession } from '../results/sinks/session-sink';
+import { parseReviewOutput } from '../results/parser';
 import { deliverToFile } from '../results/sinks/file-sink';
+import { deliverToSession } from '../results/sinks/session-sink';
+import { deliverToast } from '../results/sinks/toast-sink';
+import type { ReviewJob, ReviewResult } from '../types';
 import { log, warn } from '../utils/logger';
 
 type ReviewExecutor = (sha: string) => Promise<string | null>;
@@ -184,7 +184,12 @@ export class ReviewOrchestrator {
     }
 
     if (config.delivery.reportFile) {
-      await deliverToFile(result, report, config.delivery.reportDir, ctx.directory);
+      await deliverToFile(
+        result,
+        report,
+        config.delivery.reportDir,
+        ctx.directory,
+      );
     }
   }
 }

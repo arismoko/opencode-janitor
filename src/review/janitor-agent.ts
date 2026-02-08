@@ -45,9 +45,7 @@ If no issues found: output exactly NO_P0_FINDINGS`;
 /**
  * Create the janitor agent definition.
  */
-export function createJanitorAgent(
-  config: JanitorConfig,
-): AgentDefinition {
+export function createJanitorAgent(config: JanitorConfig): AgentDefinition {
   return {
     name: 'janitor',
     description:

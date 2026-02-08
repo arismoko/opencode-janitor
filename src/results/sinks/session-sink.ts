@@ -15,15 +15,15 @@ export async function deliverToSession(
     const sessionList = sessions.data ?? [];
 
     // Find the most recent root session (no parentID)
-    const rootSession = (sessionList as Array<{
-      id: string;
-      parentID?: string;
-      createdAt?: string;
-    }>)
+    const rootSession = (
+      sessionList as Array<{
+        id: string;
+        parentID?: string;
+        createdAt?: string;
+      }>
+    )
       .filter((s) => !s.parentID)
-      .sort((a, b) =>
-        (b.createdAt ?? '').localeCompare(a.createdAt ?? ''),
-      )[0];
+      .sort((a, b) => (b.createdAt ?? '').localeCompare(a.createdAt ?? ''))[0];
 
     if (!rootSession?.id) {
       warn('[session-sink] no root session found');

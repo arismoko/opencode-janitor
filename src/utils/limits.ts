@@ -64,7 +64,9 @@ function truncateHunks(section: string, maxHunks: number): string {
     if (line.startsWith('@@ ')) {
       hunkCount++;
       if (hunkCount > maxHunks) {
-        result.push(`... (${countHunks(section) - maxHunks} more hunks truncated)`);
+        result.push(
+          `... (${countHunks(section) - maxHunks} more hunks truncated)`,
+        );
         break;
       }
     }
@@ -81,8 +83,7 @@ function estimateChurn(section: string): number {
   return section
     .split('\n')
     .filter((l) => l.startsWith('+') || l.startsWith('-'))
-    .filter((l) => !l.startsWith('+++') && !l.startsWith('---'))
-    .length;
+    .filter((l) => !l.startsWith('+++') && !l.startsWith('---')).length;
 }
 
 /**
