@@ -23,6 +23,7 @@ export const JanitorConfigSchema = z.object({
         .object({
           enabled: z.boolean().default(true),
           trigger: TriggerModeSchema.default('commit'),
+          modelId: z.string().optional(),
         })
         .default(() => ({ enabled: true, trigger: 'commit' as const })),
       reviewer: z

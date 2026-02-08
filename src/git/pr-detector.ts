@@ -24,6 +24,7 @@ export class PrDetector {
   private processed = new Set<string>();
   private pollTimer: ReturnType<typeof setInterval> | null = null;
   private debounceTimer: ReturnType<typeof setTimeout> | null = null;
+  private inflight: string | null = null;
   private started = false;
 
   constructor(
@@ -82,6 +83,14 @@ export class PrDetector {
   /**
    * Verify current PR key and trigger callback if new state.
    * This is the single source of truth — all signals funnel here.
+   *
+   * State transitions (`lastSeenKey`, `processed`) are committed ONLY
+   * after the callback succeeds. If `onNewState` throws (transient git/gh
+   * failure), the same key will be retried on the next poll instead of
+   * being silently swallowed.
+   *
+   * Re-entrancy guard (`inflight`) prevents duplicate callbacks when a
+   * slow `onNewState` overlaps with the next poll/tool-hook signal.
    */
   private async verify(signal: PrSignal): Promise<void> {
     try {
@@ -89,15 +98,31 @@ export class PrDetector {
       if (!key) return;
 
       if (key === this.lastSeenKey) return;
-      this.lastSeenKey = key;
 
       if (this.processed.has(key)) {
+        // Advance lastSeenKey to suppress future redundant logs,
+        // but don't re-trigger the callback.
+        this.lastSeenKey = key;
         log(`[pr-detector] already processed: ${key}`);
         return;
       }
 
+      // Re-entrancy guard: if onNewState is still running for this key
+      // (e.g. slow PR context build + another poll fires), skip.
+      if (key === this.inflight) return;
+      this.inflight = key;
+
       log(`[pr-detector] new state: ${key} via ${signal.source}`);
-      await this.onNewState(key, signal);
+      try {
+        await this.onNewState(key, signal);
+      } finally {
+        this.inflight = null;
+      }
+
+      // Only commit state after successful callback — a transient failure
+      // (network, git, gh CLI) leaves lastSeenKey unchanged so the next
+      // poll retries the same key.
+      this.lastSeenKey = key;
       this.processed.add(key);
       this.evictProcessed();
     } catch (err) {

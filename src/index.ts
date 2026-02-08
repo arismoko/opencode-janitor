@@ -248,7 +248,7 @@ const TheJanitor: Plugin = async (ctx) => {
     config.autoReview.pollFallbackSec,
   );
 
-  let latestGhPr = await getCurrentPrFromGh(exec);
+  let latestGhPr: Awaited<ReturnType<typeof getCurrentPrFromGh>> = null;
   let branchPushPending = false;
 
   const prDetector = anyPrReviews

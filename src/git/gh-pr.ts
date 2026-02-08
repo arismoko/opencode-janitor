@@ -34,8 +34,13 @@ export async function getCurrentPrFromGh(
     const repo = await resolveRepoSlug(exec);
     if (!repo) return null;
 
+    // Must pass the current branch when using --repo, otherwise gh errors
+    // with "argument required when using the --repo flag".
+    const branch = (await exec('git rev-parse --abbrev-ref HEAD')).trim();
+    if (!branch || branch === 'HEAD') return null;
+
     const raw = await exec(
-      `GH_PROMPT_DISABLED=1 gh pr view --repo '${repo}' --json number,url,baseRefName,headRefName,headRefOid`,
+      `GH_PROMPT_DISABLED=1 gh pr view '${branch}' --repo '${repo}' --json number,url,baseRefName,headRefName,headRefOid`,
     );
 
     let parsed: Record<string, unknown>;
@@ -71,8 +76,9 @@ export async function getCurrentPrFromGh(
       headRef,
       headSha,
     };
-  } catch {
+  } catch (err) {
     // gh not installed, not authenticated, no PR for branch, etc.
+    warn(`[gh-pr] getCurrentPrFromGh failed: ${err}`);
     return null;
   }
 }

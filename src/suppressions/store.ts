@@ -8,6 +8,35 @@ import type { Suppression, SuppressionsFile } from './types';
 
 const MAX_SUPPRESSIONS = 200;
 
+/** Rewrite a single key's `YAGNI|` prefix to `STRUCTURAL|`. */
+function migrateCategoryPrefix(key: unknown): string | undefined {
+  return typeof key === 'string'
+    ? key.replace(/^YAGNI\|/, 'STRUCTURAL|')
+    : undefined;
+}
+
+/**
+ * Migrate legacy YAGNI suppression entries to STRUCTURAL in-place.
+ * Rewrites `original.category`, `exactKey`, and `scopedKey` so migrated
+ * entries both pass schema validation and match new STRUCTURAL findings.
+ * Returns true if any entries were migrated.
+ */
+function migrateYagniEntries(parsed: Record<string, unknown>): boolean {
+  if (!Array.isArray(parsed?.suppressions)) return false;
+
+  let migrated = false;
+  for (const entry of parsed.suppressions) {
+    if (entry?.original?.category === 'YAGNI') {
+      entry.original.category = 'STRUCTURAL';
+      entry.exactKey = migrateCategoryPrefix(entry.exactKey) ?? entry.exactKey;
+      entry.scopedKey =
+        migrateCategoryPrefix(entry.scopedKey) ?? entry.scopedKey;
+      migrated = true;
+    }
+  }
+  return migrated;
+}
+
 /** Manages `.janitor/suppressions.json` persistence */
 export class SuppressionStore {
   private filePath: string;
@@ -34,15 +63,11 @@ export class SuppressionStore {
       // YAGNI was merged into STRUCTURAL; without this, any pre-existing
       // YAGNI entries would fail schema validation and cause load() to
       // discard the entire suppressions file.
-      let migrated = false;
-      if (Array.isArray(parsed?.suppressions)) {
-        for (const entry of parsed.suppressions) {
-          if (entry?.original?.category === 'YAGNI') {
-            entry.original.category = 'STRUCTURAL';
-            migrated = true;
-          }
-        }
-      }
+      //
+      // Must also rewrite exactKey/scopedKey — both are prefixed with the
+      // category name (e.g. "YAGNI|utils/foo.ts:42|..."). Without this,
+      // migrated entries would never match new STRUCTURAL findings.
+      const migrated = migrateYagniEntries(parsed);
 
       const result = SuppressionsFileSchema.safeParse(parsed);
 
@@ -58,7 +83,15 @@ export class SuppressionStore {
 
       if (migrated) {
         log('[suppressions] migrated legacy YAGNI entries → STRUCTURAL');
-        this.save();
+        // Best-effort persist — don't let a write failure (read-only FS,
+        // disk full) discard the successfully parsed in-memory suppressions.
+        try {
+          this.save();
+        } catch (saveErr) {
+          warn('[suppressions] migration save failed, will retry next load', {
+            error: saveErr instanceof Error ? saveErr.message : String(saveErr),
+          });
+        }
       }
     } catch (err) {
       warn('Failed to read suppressions file', {
