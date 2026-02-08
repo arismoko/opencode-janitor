@@ -339,20 +339,6 @@ export abstract class BaseOrchestrator<TContext, TResult> {
     return true;
   }
 
-  /** Remove a recovered run registration if resume fails. */
-  discardRecoveredRun(sessionId: string): void {
-    const key = this.sessionToKey.get(sessionId);
-    if (!key) return;
-
-    this.sessionToKey.delete(sessionId);
-    const job = this.jobs.get(key);
-    if (job && job.status === 'running') {
-      this.jobs.delete(key);
-      this.activeCount = Math.max(0, this.activeCount - 1);
-      this.onRunTerminalCb?.(key);
-    }
-  }
-
   /**
    * Extract assistant text output from a completed review session.
    * Shared utility for subclasses to use in their `onJobCompleted`.
