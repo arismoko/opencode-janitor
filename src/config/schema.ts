@@ -107,14 +107,14 @@ export const JanitorConfigSchema = z.object({
     .object({
       toast: z.boolean().default(true),
       sessionMessage: z.boolean().default(true),
-      noReply: z.boolean().default(false),
+      noReply: z.boolean().default(true),
       reportFile: z.boolean().default(true),
       reportDir: z.string().default('.janitor/reports'),
       reviewer: z
         .object({
           toast: z.boolean().default(true),
           sessionMessage: z.boolean().default(true),
-          noReply: z.boolean().default(false),
+          noReply: z.boolean().default(true),
           reportFile: z.boolean().default(true),
           reportDir: z.string().default('.janitor/reviewer-reports'),
           prComment: z.boolean().default(true),
@@ -122,7 +122,7 @@ export const JanitorConfigSchema = z.object({
         .default(() => ({
           toast: true,
           sessionMessage: true,
-          noReply: false,
+          noReply: true,
           reportFile: true,
           reportDir: '.janitor/reviewer-reports',
           prComment: true,
@@ -131,13 +131,13 @@ export const JanitorConfigSchema = z.object({
     .default(() => ({
       toast: true,
       sessionMessage: true,
-      noReply: false,
+      noReply: true,
       reportFile: true,
       reportDir: '.janitor/reports',
       reviewer: {
         toast: true,
         sessionMessage: true,
-        noReply: false,
+        noReply: true,
         reportFile: true,
         reportDir: '.janitor/reviewer-reports',
         prComment: true,

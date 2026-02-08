@@ -40,27 +40,56 @@ export function parseReviewerOutput(raw: string, id: string): ReviewerResult {
 
 /**
  * Try to extract a JSON object from raw text.
- * Handles both bare JSON and fenced code blocks.
+ * Handles fenced code blocks, bare JSON, and multiple JSON objects
+ * (e.g. from resumed sessions that produced output twice).
  */
 function extractJSON(raw: string): Record<string, unknown> | null {
   // Try fenced code block first: ```json ... ``` or ``` ... ```
-  const fenced = raw.match(/```(?:json)?\s*\n?([\s\S]*?)\n?\s*```/);
-  if (fenced) {
+  // Use greedy match to find the LAST fenced block (most likely the final output)
+  const fencedMatches = [
+    ...raw.matchAll(/```(?:json)?\s*\n?([\s\S]*?)\n?\s*```/g),
+  ];
+  for (let i = fencedMatches.length - 1; i >= 0; i--) {
     try {
-      return JSON.parse(fenced[1].trim());
+      const parsed = JSON.parse(fencedMatches[i][1].trim());
+      if (
+        parsed &&
+        typeof parsed === 'object' &&
+        Array.isArray(parsed.findings)
+      ) {
+        return parsed;
+      }
     } catch {
-      // Fall through to bare JSON attempt
+      // Try next match
     }
   }
 
-  // Try bare JSON — find the first { ... } block
-  const braceStart = raw.indexOf('{');
-  const braceEnd = raw.lastIndexOf('}');
-  if (braceStart !== -1 && braceEnd > braceStart) {
-    try {
-      return JSON.parse(raw.slice(braceStart, braceEnd + 1));
-    } catch {
-      // Invalid JSON
+  // Try bare JSON — find matching brace pairs from right to left.
+  // Scanning from the end avoids the first-{-to-last-} corruption when
+  // multiple JSON objects exist (e.g. from double resume output).
+  let depth = 0;
+  let end = -1;
+  for (let i = raw.length - 1; i >= 0; i--) {
+    if (raw[i] === '}') {
+      if (depth === 0) end = i;
+      depth++;
+    } else if (raw[i] === '{') {
+      depth--;
+      if (depth === 0 && end !== -1) {
+        try {
+          const parsed = JSON.parse(raw.slice(i, end + 1));
+          if (
+            parsed &&
+            typeof parsed === 'object' &&
+            Array.isArray(parsed.findings)
+          ) {
+            return parsed;
+          }
+        } catch {
+          // Not valid JSON at this position, keep scanning
+        }
+        end = -1;
+      }
     }
   }
 

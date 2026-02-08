@@ -2,13 +2,15 @@
  * Crash recovery — resume interrupted review sessions after restart.
  *
  * Reads the active-runs journal, checks each session's status via the
- * OpenCode SDK, and either reattaches or resumes depending on state.
+ * OpenCode SDK, and either finalizes or resumes depending on state.
  *
  * Decision matrix:
  *   busy/retry  → reattach only (wait for idle event)
- *   idle + attempts < MAX → reattach + send resume prompt
- *   idle + attempts >= MAX → reattach only (log warning)
+ *   idle + has output → reattach + immediately finalize via handleCompletion
+ *   idle + no output + attempts < MAX → reattach + send resume prompt
+ *   idle + no output + attempts >= MAX → reattach + finalize (best-effort)
  *   missing/undefined → session gone, remove from journal
+ *   status fetch failed → conservatively reattach all runs
  */
 
 import type { PluginInput } from '@opencode-ai/plugin';
@@ -24,6 +26,7 @@ const RUN_TTL_MS = 24 * 60 * 60 * 1000;
 const MAX_RESUME_ATTEMPTS = 1;
 const STATUS_TIMEOUT_MS = 3_000;
 const RESUME_TIMEOUT_MS = 5_000;
+const MESSAGES_TIMEOUT_MS = 3_000;
 
 /**
  * Reconstruct a minimal PrContext from a persisted key string.
@@ -137,7 +140,10 @@ export async function recoverInterruptedRuns(
   const activeRuns = runStore.getActive();
   if (activeRuns.length === 0) return;
 
-  let statusMap: Record<string, { type?: string }> = {};
+  // Try to load session statuses. On failure, conservatively reattach all
+  // runs so sessionToKey mappings are restored — idle events arriving later
+  // will still be matched and processed.
+  let statusMap: Record<string, { type?: string }> | null = null;
   try {
     const statusResult = await withTimeout(
       ctx.client.session.status(),
@@ -146,11 +152,28 @@ export async function recoverInterruptedRuns(
     );
     statusMap = (statusResult.data ?? {}) as Record<string, { type?: string }>;
   } catch (err) {
-    warn(`[recovery] failed to load session statuses: ${err}`);
-    return;
+    warn(
+      `[recovery] failed to load session statuses: ${err} — reattaching all runs conservatively`,
+    );
   }
 
   for (const run of activeRuns) {
+    // When status fetch failed, we don't know session state. Conservatively
+    // reattach so handleCompletion can match idle events that arrive later.
+    if (statusMap === null) {
+      const attached = reattachRun(
+        run,
+        janitorOrchestrator,
+        reviewerOrchestrator,
+      );
+      if (!attached) {
+        runStore.complete(run.id);
+      } else {
+        log(`[recovery] conservatively reattached ${run.id} (status unknown)`);
+      }
+      continue;
+    }
+
     const type = statusMap[run.sessionId]?.type;
 
     // Session gone — clean up journal entry
@@ -159,9 +182,6 @@ export async function recoverInterruptedRuns(
       continue;
     }
 
-    // Completed/idle sessions that aren't busy/retry are already delivered
-    // (user preference: ignore on restart). But idle sessions may also be
-    // interrupted mid-generation — we handle that below.
     const isActive = type === 'busy' || type === 'retry';
     const isIdle = type === 'idle';
 
@@ -171,9 +191,7 @@ export async function recoverInterruptedRuns(
       continue;
     }
 
-    // Always reattach regardless of resume attempt count.
-    // This ensures idle events are captured even if we've exhausted
-    // resume prompts.
+    // Always reattach first — this restores sessionToKey so idle events are matched.
     const attached = reattachRun(
       run,
       janitorOrchestrator,
@@ -192,12 +210,25 @@ export async function recoverInterruptedRuns(
       continue;
     }
 
-    // For idle sessions: the session was interrupted and is now idle.
-    // Only send a resume prompt if we haven't exhausted attempts.
+    // For idle sessions: check if the session already has usable output.
+    // If it does, finalize immediately via handleCompletion — avoids the
+    // double-JSON corruption risk of blindly sending a resume prompt.
+    const hasOutput = await sessionHasAssistantOutput(ctx, run.sessionId);
+
+    if (hasOutput) {
+      log(`[recovery] ${run.id} idle with existing output — finalizing`);
+      await finalizeRecoveredRun(run, deps);
+      continue;
+    }
+
+    // No usable output. If we haven't exhausted resume attempts, try
+    // resuming so the model can produce findings.
     if (run.resumeAttempts >= MAX_RESUME_ATTEMPTS) {
+      // Exhausted — finalize with whatever's there (likely empty/clean).
       warn(
-        `[recovery] ${run.id} idle but resume attempts exhausted — reattached without resume`,
+        `[recovery] ${run.id} idle, no output, resume attempts exhausted — finalizing`,
       );
+      await finalizeRecoveredRun(run, deps);
       continue;
     }
 
@@ -217,14 +248,66 @@ export async function recoverInterruptedRuns(
         `resume ${run.id}`,
       );
       runStore.incrementResumeAttempts(run.id);
-      log(`[recovery] resumed idle session ${run.id}`);
+      log(`[recovery] resumed idle session ${run.id} (no prior output)`);
     } catch (err) {
-      // P1 FIX: Do NOT discard on resume failure. The session may still
-      // be running (transient network error on promptAsync). Keep it
-      // attached so idle events can still be matched.
       warn(`[recovery] failed to resume ${run.id}: ${err} — keeping attached`);
       runStore.incrementResumeAttempts(run.id);
     }
+  }
+}
+
+/**
+ * Check whether a session has any assistant text output.
+ * Used to decide if an idle recovered session should be finalized
+ * (has output) or resumed (no output yet).
+ */
+async function sessionHasAssistantOutput(
+  ctx: PluginInput,
+  sessionId: string,
+): Promise<boolean> {
+  try {
+    const result = await withTimeout(
+      ctx.client.session.messages({ path: { id: sessionId } }),
+      MESSAGES_TIMEOUT_MS,
+      `messages ${sessionId}`,
+    );
+    const messages = (result.data ?? []) as Array<{
+      info?: { role: string };
+      parts?: Array<{ type: string; text?: string }>;
+    }>;
+
+    for (const msg of messages) {
+      if (msg.info?.role !== 'assistant') continue;
+      for (const part of msg.parts ?? []) {
+        if (part.type === 'text' && part.text?.trim()) {
+          return true;
+        }
+      }
+    }
+    return false;
+  } catch (err) {
+    warn(`[recovery] failed to read messages for ${sessionId}: ${err}`);
+    // Can't determine — assume no output, let resume or finalize handle it
+    return false;
+  }
+}
+
+/**
+ * Finalize a recovered run by calling handleCompletion on its orchestrator.
+ * This extracts results, delivers them, and cleans up tracking state.
+ */
+async function finalizeRecoveredRun(
+  run: ActiveRun,
+  deps: RecoveryDeps,
+): Promise<void> {
+  const { ctx, config, janitorOrchestrator, reviewerOrchestrator } = deps;
+  const orchestrator =
+    run.orchestrator === 'janitor' ? janitorOrchestrator : reviewerOrchestrator;
+
+  try {
+    await orchestrator.handleCompletion(run.sessionId, ctx, config);
+  } catch (err) {
+    warn(`[recovery] handleCompletion failed for ${run.id}: ${err}`);
   }
 }
 
