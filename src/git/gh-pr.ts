@@ -80,10 +80,13 @@ export async function getCurrentPrFromGh(
       headSha,
     };
   } catch (err) {
-    // gh not installed, not authenticated, no PR for branch, etc.
+    // Expected: no PR for this branch, not logged in, etc. — return null
+    // so the detector treats it as "no actionable state".
     if (isExpectedNoPrError(err)) return null;
-    log(`[gh-pr] getCurrentPrFromGh unavailable: ${String(err ?? '')}`);
-    return null;
+    // Unexpected: transient network/gh failure — re-throw so
+    // SignalDetector.verify does NOT mark this key as processed,
+    // allowing retry on the next poll cycle.
+    throw err;
   }
 }
 
