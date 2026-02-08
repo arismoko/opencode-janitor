@@ -20,6 +20,44 @@ export const REVIEWER_SEVERITY_GUIDE = [
   'P3: Nice to have — style nits, minor improvements, documentation gaps',
 ] as const;
 
+/** Allowed severity levels for reviewer findings (derived from REVIEWER_SEVERITY_GUIDE) */
+export const REVIEWER_SEVERITIES = REVIEWER_SEVERITY_GUIDE.map(
+  (s) => s.split(':')[0] as 'P0' | 'P1' | 'P2' | 'P3',
+);
+
+/** Severity level type for reviewer findings */
+export type ReviewerSeverity = 'P0' | 'P1' | 'P2' | 'P3';
+
+/** Allowed domain categories for reviewer findings */
+export const REVIEWER_DOMAINS = [
+  'BUG',
+  'SECURITY',
+  'PERFORMANCE',
+  'ARCHITECTURE',
+  'DOCS',
+  'SPEC',
+] as const;
+
+/** Domain category type for reviewer findings */
+export type ReviewerDomain = (typeof REVIEWER_DOMAINS)[number];
+
+/** A single finding from the code reviewer agent */
+export interface ReviewerFinding {
+  location: string;
+  severity: ReviewerSeverity;
+  domain: ReviewerDomain;
+  evidence: string;
+  prescription: string;
+}
+
+/** Parsed reviewer result */
+export interface ReviewerResult {
+  id: string;
+  findings: ReviewerFinding[];
+  clean: boolean;
+  raw: string;
+}
+
 /** A single P0 finding from the janitor agent */
 export interface Finding {
   location: string;

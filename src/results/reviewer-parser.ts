@@ -1,44 +1,12 @@
+import {
+  REVIEWER_DOMAINS,
+  REVIEWER_SEVERITIES,
+  type ReviewerDomain,
+  type ReviewerFinding,
+  type ReviewerResult,
+  type ReviewerSeverity,
+} from '../types';
 import { log } from '../utils/logger';
-
-/** Allowed severity levels for reviewer findings */
-export type ReviewerSeverity = 'P0' | 'P1' | 'P2' | 'P3';
-
-/** Allowed domain categories for reviewer findings */
-export type ReviewerDomain =
-  | 'BUG'
-  | 'SECURITY'
-  | 'PERFORMANCE'
-  | 'ARCHITECTURE'
-  | 'DOCS'
-  | 'SPEC';
-
-/** A single finding from the code reviewer agent */
-export interface ReviewerFinding {
-  location: string;
-  severity: ReviewerSeverity;
-  domain: ReviewerDomain;
-  evidence: string;
-  prescription: string;
-}
-
-/** Parsed reviewer result */
-export interface ReviewerResult {
-  id: string;
-  findings: ReviewerFinding[];
-  clean: boolean;
-  raw: string;
-}
-
-const VALID_SEVERITIES: ReviewerSeverity[] = ['P0', 'P1', 'P2', 'P3'];
-
-const VALID_DOMAINS: ReviewerDomain[] = [
-  'BUG',
-  'SECURITY',
-  'PERFORMANCE',
-  'ARCHITECTURE',
-  'DOCS',
-  'SPEC',
-];
 
 /**
  * Parse raw assistant text into a structured ReviewerResult.
@@ -113,8 +81,8 @@ function isValidFinding(f: unknown): f is Record<string, unknown> {
 
   const severity = obj.severity.toUpperCase();
   const domain = obj.domain.toUpperCase();
-  if (!VALID_SEVERITIES.includes(severity as ReviewerSeverity)) return false;
-  if (!VALID_DOMAINS.includes(domain as ReviewerDomain)) return false;
+  if (!REVIEWER_SEVERITIES.includes(severity as ReviewerSeverity)) return false;
+  if (!REVIEWER_DOMAINS.includes(domain as ReviewerDomain)) return false;
 
   return true;
 }

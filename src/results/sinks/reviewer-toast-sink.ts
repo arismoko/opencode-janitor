@@ -1,6 +1,6 @@
 import type { PluginInput } from '@opencode-ai/plugin';
+import type { ReviewerResult } from '../../types';
 import { warn } from '../../utils/logger';
-import type { ReviewerResult } from '../reviewer-parser';
 
 /**
  * Deliver a summary toast notification for a reviewer result.

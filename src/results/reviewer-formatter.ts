@@ -1,5 +1,5 @@
+import type { ReviewerResult } from '../types';
 import { summarizeLocation } from './format-helpers';
-import type { ReviewerResult } from './reviewer-parser';
 
 /**
  * Format a ReviewerResult as a markdown report.

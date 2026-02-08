@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import { log, warn } from '../utils/logger';
+import { getErrorMessage, log, warn } from '../utils/logger';
 import { type JanitorConfig, JanitorConfigSchema } from './schema';
 
 /**
@@ -29,7 +29,7 @@ function loadJsonFile(
     return json as Record<string, unknown>;
   } catch (err) {
     warn(
-      `[config] failed to parse ${label} at ${filePath}: ${err instanceof Error ? err.message : err}`,
+      `[config] failed to parse ${label} at ${filePath}: ${getErrorMessage(err)}`,
     );
     return null;
   }
