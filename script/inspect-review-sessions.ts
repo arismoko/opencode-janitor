@@ -14,15 +14,12 @@ type SessionRow = {
   };
 };
 
-type SessionStatus =
-  | { type: 'idle' }
-  | { type: 'busy' }
-  | { type: 'retry'; attempt: number; message: string; next: number };
-
 const JANITOR_PREFIX = '[janitor-run]';
 const REVIEWER_CODE_REVIEW_TITLE = '[reviewer-run] Code Review';
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
 const ARTIFACTS_DIR = join(SCRIPT_DIR, 'artifacts');
+
+const RECENT_THRESHOLD_MS = 30_000;
 
 // ── CLI helpers ──
 
@@ -40,27 +37,16 @@ function hasFlag(flag: string): boolean {
 
 // ── Formatting ──
 
-const STATUS_BADGE: Record<string, string> = {
-  idle: '○ idle',
-  busy: '● busy',
-  retry: '⟳ retry',
-};
-
-function fmtStatus(status?: SessionStatus): string {
-  if (!status) return '· done';
-  const badge = STATUS_BADGE[status.type] ?? status.type;
-  if (status.type === 'retry') return `${badge}(${status.attempt})`;
-  return badge;
-}
-
 function fmtAge(ts?: number): string {
   if (!ts) return '-';
   const delta = Date.now() - ts;
-  if (delta < 0) return 'just now';
+  if (delta < 0) return '⏳ now';
   const secs = Math.floor(delta / 1_000);
-  if (secs < 60) return `${secs}s ago`;
+  const recent = delta < RECENT_THRESHOLD_MS;
+  const prefix = recent ? '⏳ ' : '';
+  if (secs < 60) return `${prefix}${secs}s ago`;
   const mins = Math.floor(secs / 60);
-  if (mins < 60) return `${mins}m ago`;
+  if (mins < 60) return `${prefix}${mins}m ago`;
   const hrs = Math.floor(mins / 60);
   if (hrs < 24) return `${hrs}h ago`;
   const days = Math.floor(hrs / 24);
@@ -78,9 +64,9 @@ function shouldShowSession(title?: string): boolean {
   );
 }
 
-function printTable(
-  rows: { id: string; status: string; age: string; title: string }[],
-): void {
+type Row = { id: string; age: string; title: string };
+
+function printTable(rows: Row[]): void {
   if (rows.length === 0) {
     console.log('  (no sessions)');
     return;
@@ -88,19 +74,16 @@ function printTable(
 
   const colW = {
     id: Math.max(2, ...rows.map((r) => r.id.length)),
-    status: Math.max(6, ...rows.map((r) => r.status.length)),
     age: Math.max(3, ...rows.map((r) => r.age.length)),
   };
 
-  const header = `  ${pad('ID', colW.id)}  ${pad('STATUS', colW.status)}  ${pad('AGE', colW.age)}  TITLE`;
-  const rule = `  ${'─'.repeat(colW.id)}  ${'─'.repeat(colW.status)}  ${'─'.repeat(colW.age)}  ${'─'.repeat(20)}`;
+  const header = `  ${pad('ID', colW.id)}  ${pad('AGE', colW.age)}  TITLE`;
+  const rule = `  ${'─'.repeat(colW.id)}  ${'─'.repeat(colW.age)}  ${'─'.repeat(20)}`;
 
   console.log(header);
   console.log(rule);
   for (const r of rows) {
-    console.log(
-      `  ${pad(r.id, colW.id)}  ${pad(r.status, colW.status)}  ${pad(r.age, colW.age)}  ${r.title}`,
-    );
+    console.log(`  ${pad(r.id, colW.id)}  ${pad(r.age, colW.age)}  ${r.title}`);
   }
 }
 
@@ -133,45 +116,22 @@ async function main(): Promise<void> {
       return;
     }
 
-    // Fetch sessions and status in parallel
-    const [listResult, statusResult] = await Promise.all([
-      client.session.list(),
-      client.session.status(),
-    ]);
-
-    const sessions = ((listResult as { data?: unknown[] }).data ??
+    const result = await client.session.list();
+    const sessions = ((result as { data?: unknown[] }).data ??
       []) as SessionRow[];
-    const statusMap = ((statusResult as { data?: unknown }).data ??
-      {}) as Record<string, SessionStatus>;
 
     const filtered = showAll
       ? sessions
       : sessions.filter((s) => shouldShowSession(s.title));
 
     // Split into janitor vs reviewer groups
-    const janitorRows: {
-      id: string;
-      status: string;
-      age: string;
-      title: string;
-    }[] = [];
-    const reviewerRows: {
-      id: string;
-      status: string;
-      age: string;
-      title: string;
-    }[] = [];
-    const otherRows: {
-      id: string;
-      status: string;
-      age: string;
-      title: string;
-    }[] = [];
+    const janitorRows: Row[] = [];
+    const reviewerRows: Row[] = [];
+    const otherRows: Row[] = [];
 
     for (const s of filtered) {
-      const row = {
+      const row: Row = {
         id: s.id,
-        status: fmtStatus(statusMap[s.id]),
         age: fmtAge(s.time?.updated),
         title: s.title ?? '(untitled)',
       };
