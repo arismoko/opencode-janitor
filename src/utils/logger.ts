@@ -76,7 +76,6 @@ function append(line: string): void {
 }
 
 export function log(message: string, data?: Record<string, unknown>): void {
-  if (!DEBUG) return;
   const suffix = data ? ` ${JSON.stringify(data)}` : '';
   append(`${PREFIX} ${message}${suffix}`);
 }

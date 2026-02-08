@@ -21,12 +21,10 @@ import { HistoryStore } from './history/store';
 import { createJanitorAgent } from './review/janitor-agent';
 import { ReviewOrchestrator } from './review/orchestrator';
 import { buildReviewPrompt } from './review/prompt-builder';
-import { bindRunTracking, recoverInterruptedRuns } from './review/recovery';
 import { createReviewerAgent } from './review/reviewer-agent';
 import { ReviewerOrchestrator } from './review/reviewer-orchestrator';
 import { buildReviewerPrompt } from './review/reviewer-prompt-builder';
 import { spawnJanitorReview, spawnReviewerReview } from './review/runner';
-import { ReviewRunStore } from './state/review-run-store';
 import { CommitStore } from './state/store';
 import { buildSuppressionsBlock } from './suppressions/prompt';
 import { SuppressionStore } from './suppressions/store';
@@ -128,7 +126,6 @@ const TheJanitor: Plugin = async (ctx) => {
   }
 
   const store = new CommitStore(ctx.directory);
-  const runStore = new ReviewRunStore(ctx.directory);
   const suppressionStore = new SuppressionStore(ctx.directory, {
     maxEntries: config.suppressions?.maxEntries,
   });
@@ -143,7 +140,7 @@ const TheJanitor: Plugin = async (ctx) => {
   // Orchestrator handles queuing and review lifecycle
   const orchestrator = new ReviewOrchestrator(
     config,
-    async (sha, parentSessionId) => {
+    async (sha) => {
       const commit = await getCommitContext(sha, config, exec);
 
       // Hollow review guard: reject commits with no meaningful diff content.
@@ -172,7 +169,6 @@ const TheJanitor: Plugin = async (ctx) => {
       });
 
       const sessionId = await spawnJanitorReview(ctx, {
-        parentSessionId,
         prompt,
         config,
       });
@@ -188,21 +184,18 @@ const TheJanitor: Plugin = async (ctx) => {
     log(`persisted reviewed commit: ${sha}`);
   });
 
-  bindRunTracking(orchestrator, 'janitor', runStore);
-
   // Give orchestrator access to the SDK client for error injection
   orchestrator.setContext(ctx);
 
   const reviewerOrchestrator = new ReviewerOrchestrator(
     config,
-    async (prContext, parentSessionId) => {
+    async (prContext) => {
       const prompt = buildReviewerPrompt(prContext, {
         scopeInclude: config.scope.include,
         scopeExclude: config.scope.exclude,
       });
 
       const sessionId = await spawnReviewerReview(ctx, {
-        parentSessionId,
         prompt,
         config,
       });
@@ -214,8 +207,6 @@ const TheJanitor: Plugin = async (ctx) => {
     },
   );
   reviewerOrchestrator.setContext(ctx);
-
-  bindRunTracking(reviewerOrchestrator, 'reviewer', runStore);
 
   // Commit detector
   const detector = new CommitDetector(
@@ -365,14 +356,6 @@ const TheJanitor: Plugin = async (ctx) => {
     }
   }
 
-  await recoverInterruptedRuns({
-    ctx,
-    config,
-    runStore,
-    janitorOrchestrator: orchestrator,
-    reviewerOrchestrator,
-  });
-
   if (anyCommitReviews) {
     await detector.start(gitDir);
   }
@@ -426,7 +409,7 @@ const TheJanitor: Plugin = async (ctx) => {
           input.sessionID,
         );
 
-        // Never promote child review sessions as roots.
+        // Never promote janitor/reviewer run sessions as delivery roots.
         if (!janitorOwnsSession && !reviewerOwnsSession) {
           // Bootstrap only when root tracking is missing; normal root rotation
           // is handled by session.created events.

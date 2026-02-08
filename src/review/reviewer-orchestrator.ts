@@ -9,10 +9,7 @@ import { deliverReviewerToast } from '../results/sinks/reviewer-toast-sink';
 import { log } from '../utils/logger';
 import { type BaseJob, BaseOrchestrator } from './base-orchestrator';
 
-type ReviewerExecutor = (
-  context: PrContext,
-  parentSessionId: string,
-) => Promise<string>;
+type ReviewerExecutor = (context: PrContext) => Promise<string>;
 
 type GhPostReview = (prNumber: number, body: string) => Promise<boolean>;
 
@@ -76,10 +73,10 @@ export class ReviewerOrchestrator extends BaseOrchestrator<
       await deliverReviewerToast(ctx, result);
     }
 
-    if (delivery.sessionMessage && job.parentSessionId && !result.clean) {
+    if (delivery.sessionMessage && job.deliverySessionId && !result.clean) {
       await deliverReviewerToSession(
         ctx,
-        job.parentSessionId,
+        job.deliverySessionId,
         report,
         delivery.noReply,
       );

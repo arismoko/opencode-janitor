@@ -11,7 +11,7 @@ import type { SuppressionStore } from '../suppressions/store';
 import type { ReviewResult } from '../types';
 import { type BaseJob, BaseOrchestrator } from './base-orchestrator';
 
-type ReviewExecutor = (sha: string, parentSessionId: string) => Promise<string>;
+type ReviewExecutor = (sha: string) => Promise<string>;
 
 /**
  * Janitor review orchestrator for commit-level structural reviews.
@@ -74,7 +74,7 @@ export class ReviewOrchestrator extends BaseOrchestrator<string, ReviewResult> {
     // Deliver results via configured sinks
     await this.deliverResults(
       result,
-      job.parentSessionId,
+      job.deliverySessionId,
       ctx,
       config,
       enrichment,
@@ -87,7 +87,7 @@ export class ReviewOrchestrator extends BaseOrchestrator<string, ReviewResult> {
    */
   private async deliverResults(
     result: ReviewResult,
-    parentSessionId: string | undefined,
+    deliverySessionId: string | undefined,
     ctx: PluginInput,
     config: JanitorConfig,
     enrichment?: EnrichmentData,
@@ -99,8 +99,8 @@ export class ReviewOrchestrator extends BaseOrchestrator<string, ReviewResult> {
       await deliverToast(ctx, result, enrichment);
     }
 
-    if (config.delivery.sessionMessage && parentSessionId && !result.clean) {
-      await deliverToSession(ctx, parentSessionId, report, {
+    if (config.delivery.sessionMessage && deliverySessionId && !result.clean) {
+      await deliverToSession(ctx, deliverySessionId, report, {
         enrichment,
         noReply: config.delivery.noReply,
       });
