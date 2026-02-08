@@ -1,8 +1,26 @@
 /**
  * Lightweight logger for the janitor plugin.
- * All messages are prefixed with [janitor] for easy filtering.
+ *
+ * All output goes to a temp file — never to stderr/stdout, which breaks
+ * OpenCode's TUI rendering. This matches the idiomatic pattern used by
+ * oh-my-opencode-slim and other OpenCode plugins.
+ *
+ * Log file: /tmp/opencode-janitor.log (capped at ~5 MB, single rotation).
  */
 
+import {
+  appendFileSync,
+  renameSync,
+  statSync,
+  truncateSync,
+  unlinkSync,
+} from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
+const LOG_FILE = join(tmpdir(), 'opencode-janitor.log');
+const LOG_FILE_PREV = `${LOG_FILE}.1`;
+const MAX_LOG_BYTES = 5 * 1024 * 1024; // 5 MB
 const PREFIX = '[janitor]';
 const DEBUG = process.env.JANITOR_DEBUG === '1';
 
@@ -14,24 +32,61 @@ export function getErrorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
-export function log(message: string, data?: Record<string, unknown>): void {
-  if (!DEBUG) return;
-  if (data) {
-    console.error(`${PREFIX} ${message}`, JSON.stringify(data));
-  } else {
-    console.error(`${PREFIX} ${message}`);
+/** Tracks writes so we don't stat the file on every single append. */
+let writesSinceCheck = 0;
+const CHECK_EVERY = 50;
+
+function rotateIfNeeded(): void {
+  try {
+    const { size } = statSync(LOG_FILE);
+    if (size >= MAX_LOG_BYTES) {
+      try {
+        // Remove old backup first to avoid rename failure on some platforms
+        try {
+          unlinkSync(LOG_FILE_PREV);
+        } catch {
+          // No previous backup — fine
+        }
+        renameSync(LOG_FILE, LOG_FILE_PREV);
+      } catch {
+        // Rename failed — truncate in place as fallback
+        try {
+          truncateSync(LOG_FILE, 0);
+        } catch {
+          // Nothing left to try — next append creates fresh
+        }
+      }
+    }
+  } catch {
+    // File doesn't exist yet — nothing to rotate.
   }
 }
 
-export function warn(message: string, data?: Record<string, unknown>): void {
-  if (data) {
-    console.error(`${PREFIX} WARN: ${message}`, JSON.stringify(data));
-  } else {
-    console.error(`${PREFIX} WARN: ${message}`);
+function append(line: string): void {
+  try {
+    if (++writesSinceCheck >= CHECK_EVERY) {
+      writesSinceCheck = 0;
+      rotateIfNeeded();
+    }
+    const ts = new Date().toISOString();
+    appendFileSync(LOG_FILE, `[${ts}] ${line}\n`);
+  } catch {
+    // Silently ignore logging errors
   }
+}
+
+export function log(message: string, data?: Record<string, unknown>): void {
+  if (!DEBUG) return;
+  const suffix = data ? ` ${JSON.stringify(data)}` : '';
+  append(`${PREFIX} ${message}${suffix}`);
+}
+
+export function warn(message: string, data?: Record<string, unknown>): void {
+  const suffix = data ? ` ${JSON.stringify(data)}` : '';
+  append(`${PREFIX} WARN: ${message}${suffix}`);
 }
 
 export function error(message: string, err?: unknown): void {
   const errMsg = err != null ? getErrorMessage(err) : '';
-  console.error(`${PREFIX} ERROR: ${message}${errMsg ? ` — ${errMsg}` : ''}`);
+  append(`${PREFIX} ERROR: ${message}${errMsg ? ` — ${errMsg}` : ''}`);
 }
