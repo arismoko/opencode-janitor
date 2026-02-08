@@ -5,6 +5,7 @@ export interface PromptConfig {
   maxFindings: number;
   scopeInclude: string[];
   scopeExclude: string[];
+  suppressionsBlock?: string;
 }
 
 /**
@@ -56,7 +57,7 @@ Maximum findings: ${config.maxFindings}
 - Abstraction layers that pass-through without transformation
 
 ## STRUCTURAL
-- Files >300 lines (probably doing too much)
+- Files >500 lines (probably doing too much)
 - Circular dependencies between modules
 - Imports that cross architectural layer boundaries
 - Modules with mixed responsibilities
@@ -84,7 +85,7 @@ ${commit.patchTruncated ? '(Patch was truncated. Use your tools to inspect files
 \`\`\`diff
 ${commit.patch}
 \`\`\`
-
+${config.suppressionsBlock ? `\n# PREVIOUSLY REVIEWED (may be stale — verify before skipping)\n${config.suppressionsBlock}\n` : ''}
 # OUTPUT FORMAT
 For each finding, output exactly:
 

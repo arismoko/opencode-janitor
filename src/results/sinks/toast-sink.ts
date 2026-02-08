@@ -1,4 +1,6 @@
 import type { PluginInput } from '@opencode-ai/plugin';
+import type { EnrichmentData } from '../../history/enrichment';
+import { enrichToastMessage } from '../../history/enrichment';
 import type { ReviewResult } from '../../types';
 import { warn } from '../../utils/logger';
 
@@ -8,6 +10,7 @@ import { warn } from '../../utils/logger';
 export async function deliverToast(
   ctx: PluginInput,
   result: ReviewResult,
+  enrichment?: EnrichmentData,
 ): Promise<void> {
   const shortSha = result.sha.slice(0, 7);
 
@@ -20,6 +23,10 @@ export async function deliverToast(
       ...new Set(result.findings.map((f) => f.category)),
     ].join(', ');
     message = `Janitor: ${count} P0 finding${count === 1 ? '' : 's'} in ${shortSha} (${categories})`;
+  }
+
+  if (enrichment) {
+    message = enrichToastMessage(message, enrichment);
   }
 
   try {

@@ -1,10 +1,13 @@
 import type { PluginInput } from '@opencode-ai/plugin';
 import type { JanitorConfig } from '../config/schema';
+import type { EnrichmentData } from '../history/enrichment';
+import type { HistoryStore } from '../history/store';
 import { formatReport } from '../results/formatter';
-import { parseReviewOutput } from '../results/parser';
+import { processReviewOutput } from '../results/pipeline';
 import { deliverToFile } from '../results/sinks/file-sink';
 import { deliverToSession } from '../results/sinks/session-sink';
 import { deliverToast } from '../results/sinks/toast-sink';
+import type { SuppressionStore } from '../suppressions/store';
 import type { ReviewJob, ReviewResult } from '../types';
 import { log, warn } from '../utils/logger';
 import { notifyError } from '../utils/notifier';
@@ -45,6 +48,8 @@ export class ReviewOrchestrator {
   constructor(
     private config: JanitorConfig,
     private executor: ReviewExecutor,
+    private readonly suppressionStore: SuppressionStore,
+    private readonly historyStore: HistoryStore,
   ) {}
 
   /** Register a callback invoked when a review completes successfully. */
@@ -55,6 +60,15 @@ export class ReviewOrchestrator {
   /** Set the plugin context for error notification injection. */
   setContext(ctx: PluginInput): void {
     this.ctx = ctx;
+  }
+
+  /**
+   * Check whether a session ID belongs to a janitor review session.
+   * Used to prevent child review sessions from being promoted to
+   * latestSessionId, which would cause future reviews to nest incorrectly.
+   */
+  isOwnSession(sessionId: string): boolean {
+    return this.sessionToSha.has(sessionId);
   }
 
   /**
@@ -193,6 +207,11 @@ export class ReviewOrchestrator {
     const job = this.jobs.get(sha);
     if (!job || job.status !== 'running') return;
 
+    // Atomically transition to prevent duplicate idle events from double-processing.
+    // JS is single-threaded but the method is async — a second call arriving between
+    // awaits would see 'running' without this guard.
+    job.status = 'completed';
+
     log(`[orchestrator] review completed: ${sha}`);
 
     try {
@@ -216,9 +235,17 @@ export class ReviewOrchestrator {
       }
 
       const rawOutput = assistantTexts.join('\n\n');
-      const result = parseReviewOutput(rawOutput, sha);
 
-      job.status = 'completed';
+      // Process through the full pipeline (parse → suppress → annotate → record)
+      const pipelineResult = await processReviewOutput(rawOutput, sha, {
+        suppressionStore: this.suppressionStore,
+        historyStore: this.historyStore,
+        config,
+      });
+      const result = pipelineResult.result;
+      const enrichment = pipelineResult.enrichment;
+      const suppressedCount = pipelineResult.suppressedCount;
+
       job.completedAt = new Date();
       job.result = result;
 
@@ -226,7 +253,14 @@ export class ReviewOrchestrator {
       this.onReviewCompleted?.(sha);
 
       // Deliver results via configured sinks
-      await this.deliverResults(result, job.parentSessionId, ctx, config);
+      await this.deliverResults(
+        result,
+        job.parentSessionId,
+        ctx,
+        config,
+        enrichment,
+        suppressedCount,
+      );
     } catch (err) {
       job.status = 'failed';
       job.completedAt = new Date();
@@ -259,15 +293,17 @@ export class ReviewOrchestrator {
     parentSessionId: string | undefined,
     ctx: PluginInput,
     config: JanitorConfig,
+    enrichment?: EnrichmentData,
+    suppressedCount?: number,
   ): Promise<void> {
-    const report = formatReport(result);
+    const report = formatReport(result, enrichment, suppressedCount);
 
     if (config.delivery.toast) {
-      await deliverToast(ctx, result);
+      await deliverToast(ctx, result, enrichment);
     }
 
     if (config.delivery.sessionMessage && parentSessionId) {
-      await deliverToSession(ctx, parentSessionId, report);
+      await deliverToSession(ctx, parentSessionId, report, enrichment);
     }
 
     if (config.delivery.reportFile) {
@@ -276,6 +312,7 @@ export class ReviewOrchestrator {
         report,
         config.delivery.reportDir,
         ctx.directory,
+        enrichment,
       );
     }
   }

@@ -9,11 +9,14 @@ import { loadConfig } from './config/loader';
 import { CommitDetector } from './git/commit-detector';
 import { getCommitContext } from './git/commit-resolver';
 import { resolveGitDir } from './git/repo-locator';
+import { HistoryStore } from './history/store';
 import { createJanitorAgent } from './review/janitor-agent';
 import { ReviewOrchestrator } from './review/orchestrator';
 import { buildReviewPrompt } from './review/prompt-builder';
 import { spawnJanitorReview } from './review/runner';
 import { CommitStore } from './state/store';
+import { buildSuppressionsBlock } from './suppressions/prompt';
+import { SuppressionStore } from './suppressions/store';
 import { log, warn } from './utils/logger';
 
 /** Plugin return shape — typed locally since the SDK Plugin type doesn't
@@ -79,6 +82,13 @@ const TheJanitor: Plugin = async (ctx) => {
 
   const agent = createJanitorAgent(config);
   const store = new CommitStore(ctx.directory);
+  const suppressionStore = new SuppressionStore(ctx.directory, {
+    maxEntries: config.suppressions?.maxEntries,
+  });
+  const historyStore = new HistoryStore(ctx.directory, {
+    maxReviews: config.history?.maxReviews,
+    maxBytes: config.history?.maxBytes,
+  });
 
   // Seed detector with previously processed SHAs
   const previouslyProcessed = store.getProcessed();
@@ -98,6 +108,12 @@ const TheJanitor: Plugin = async (ctx) => {
         );
       }
 
+      const suppressionsBlock = config.suppressions?.enabled
+        ? buildSuppressionsBlock(
+            suppressionStore.getActive(),
+            config.suppressions?.maxPromptBytes,
+          )
+        : '';
       const prompt = buildReviewPrompt(commit, {
         categories: Object.entries(config.categories)
           .filter(([, v]) => v)
@@ -105,6 +121,7 @@ const TheJanitor: Plugin = async (ctx) => {
         maxFindings: config.model.maxFindings,
         scopeInclude: config.scope.include,
         scopeExclude: config.scope.exclude,
+        suppressionsBlock,
       });
 
       const sessionId = await spawnJanitorReview(ctx, {
@@ -114,6 +131,8 @@ const TheJanitor: Plugin = async (ctx) => {
       });
       return sessionId;
     },
+    suppressionStore,
+    historyStore,
   );
 
   // Persist SHA only after review completes successfully
@@ -190,7 +209,10 @@ const TheJanitor: Plugin = async (ctx) => {
       // Bootstrap session tracking from any tool call — covers the case
       // where the plugin loads into an already-existing session and never
       // receives a session.created event.
-      if (input.sessionID) {
+      // Guard: skip session IDs belonging to janitor child review sessions
+      // to prevent them from being promoted to latestSessionId, which would
+      // cause future reviews to nest under a review session.
+      if (input.sessionID && !orchestrator.isOwnSession(input.sessionID)) {
         orchestrator.sessionAvailable(input.sessionID);
       }
 

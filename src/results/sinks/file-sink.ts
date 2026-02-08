@@ -6,6 +6,8 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { join, resolve, sep } from 'node:path';
+import type { EnrichmentData } from '../../history/enrichment';
+import { buildHistorySection } from '../../history/enrichment';
 import type { ReviewResult } from '../../types';
 import { log, warn } from '../../utils/logger';
 
@@ -19,6 +21,7 @@ export async function deliverToFile(
   report: string,
   reportDir: string,
   workspaceDir: string,
+  enrichment?: EnrichmentData,
 ): Promise<void> {
   try {
     const absDir = resolve(workspaceDir, reportDir);
@@ -40,7 +43,9 @@ export async function deliverToFile(
     const shortSha = result.sha.slice(0, 7);
     const filename = `${shortSha}.md`;
     const filepath = join(absDir, filename);
-    writeFileSync(filepath, report, 'utf-8');
+    const historySection = enrichment ? buildHistorySection(enrichment) : '';
+    const fullReport = report + historySection;
+    writeFileSync(filepath, fullReport, 'utf-8');
     log(`[file-sink] wrote report: ${filepath}`);
 
     // Update latest.md symlink

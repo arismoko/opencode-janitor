@@ -1,5 +1,6 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
+import { atomicWriteSync } from '../utils/atomic-write';
 import { evictOldest, MAX_PROCESSED } from '../utils/eviction';
 import { log, warn } from '../utils/logger';
 
@@ -93,7 +94,7 @@ export class CommitStore {
         lastHead: this.lastHead ?? undefined,
       };
 
-      writeFileSync(this.statePath, JSON.stringify(data, null, 2), 'utf-8');
+      atomicWriteSync(this.statePath, JSON.stringify(data, null, 2));
     } catch {
       warn('[store] failed to persist state');
     }

@@ -1,9 +1,14 @@
+import type { EnrichmentData } from '../history/enrichment';
 import type { ReviewResult } from '../types';
 
 /**
  * Format a ReviewResult as a markdown report.
  */
-export function formatReport(result: ReviewResult): string {
+export function formatReport(
+  result: ReviewResult,
+  enrichment?: EnrichmentData,
+  suppressedCount?: number,
+): string {
   const shortSha = result.sha.slice(0, 7);
   const dateStr = result.date.toISOString();
 
@@ -25,6 +30,9 @@ export function formatReport(result: ReviewResult): string {
     `**Commit**: ${shortSha}${result.subject ? ` — "${result.subject}"` : ''}`,
     `**Date**: ${dateStr}`,
     `**Findings**: ${result.findings.length} P0 issue${result.findings.length === 1 ? '' : 's'}`,
+    ...(suppressedCount
+      ? [`**Suppressed**: ${suppressedCount} previously reviewed`]
+      : []),
     '',
     '---',
   ];
