@@ -2,3 +2,4 @@ node_modules/
 dist/
 .janitor/
 *.tgz
+git-journal.md
