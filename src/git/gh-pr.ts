@@ -30,7 +30,9 @@ export async function isGhAvailable(
 
 /**
  * Get the current PR associated with the checked-out branch via `gh pr view`.
- * Returns null if no PR exists, gh is unavailable, or any error occurs.
+ * Returns null for expected no-PR states (no PR for branch, not logged in,
+ * PR is closed/merged). Throws on unexpected/transient gh failures to
+ * preserve retry semantics in the caller.
  */
 export async function getCurrentPrFromGh(
   exec: (cmd: string) => Promise<string>,

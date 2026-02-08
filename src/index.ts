@@ -275,18 +275,31 @@ const TheJanitor: Plugin = async (ctx) => {
           let prContext: PrContext;
 
           if (key.startsWith('pr:')) {
-            // Re-fetch PR info atomically — do NOT rely on shared state
-            // from getCurrentKey, which may have been overwritten by a
-            // concurrent poll cycle (race window if PR was closed/merged).
+            // Parse the detected key to get the exact PR number and SHA
+            // that getCurrentKey resolved. The callback MUST use these
+            // values (or validate a re-fetch matches) to ensure verify()
+            // commits the correct key as processed.
+            const [, prNumStr, detectedSha] = key.split(':');
+            const detectedPrNum = Number(prNumStr);
+
+            // Re-fetch to get baseRef/headRef (not encoded in the key),
+            // but validate the re-fetch matches the detected state.
             const ghPr = await getCurrentPrFromGh(exec);
             if (!ghPr) {
               // PR was open when getCurrentKey ran but is now gone.
-              // Throw so SignalDetector.verify does NOT mark this key
-              // as processed — if it was a transient issue, next poll
-              // retries; if the PR was genuinely closed, getCurrentKey
-              // will return null and verify skips naturally.
+              // Throw so verify does NOT mark this key as processed —
+              // next poll's getCurrentKey returns null and skips naturally.
               throw new Error(
                 `PR disappeared between detection and callback: ${key}`,
+              );
+            }
+
+            if (ghPr.number !== detectedPrNum || ghPr.headSha !== detectedSha) {
+              // PR state advanced between detection and re-fetch.
+              // Throw so verify doesn't commit the stale key — the new
+              // state will be picked up on the next poll cycle.
+              throw new Error(
+                `PR state changed between detection and callback: key=${key} but re-fetch got pr:${ghPr.number}:${ghPr.headSha}`,
               );
             }
 
