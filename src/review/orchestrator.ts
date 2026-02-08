@@ -8,7 +8,19 @@ import { deliverToast } from '../results/sinks/toast-sink';
 import type { ReviewJob, ReviewResult } from '../types';
 import { log, warn } from '../utils/logger';
 
-type ReviewExecutor = (sha: string) => Promise<string | null>;
+/**
+ * Thrown by the executor when no root session is available to host the review.
+ * The orchestrator catches this specifically and keeps the job pending for retry
+ * rather than marking it as permanently failed.
+ */
+export class NoSessionError extends Error {
+  constructor() {
+    super('No root session available');
+    this.name = 'NoSessionError';
+  }
+}
+
+type ReviewExecutor = (sha: string) => Promise<string>;
 
 /**
  * Review orchestrator managing the queue and lifecycle of reviews.
@@ -17,17 +29,33 @@ type ReviewExecutor = (sha: string) => Promise<string | null>;
  * - Serial execution (concurrency=1 default)
  * - Burst coalescing: keeps oldest running + latest pending
  * - Running reviews are never cancelled
+ * - Jobs waiting for a session are re-queued, not dropped
  */
 export class ReviewOrchestrator {
   private jobs = new Map<string, ReviewJob>();
   private sessionToSha = new Map<string, string>();
   private queue: string[] = [];
   private activeCount = 0;
+  private onReviewCompleted?: (sha: string) => void;
 
   constructor(
     private config: JanitorConfig,
     private executor: ReviewExecutor,
   ) {}
+
+  /** Register a callback invoked when a review completes successfully. */
+  onCompleted(callback: (sha: string) => void): void {
+    this.onReviewCompleted = callback;
+  }
+
+  /**
+   * Notify the orchestrator that a root session is now available.
+   * Re-drains any pending jobs that were blocked on session availability.
+   */
+  sessionAvailable(): void {
+    log('[orchestrator] root session available, draining queue');
+    this.processQueue();
+  }
 
   /**
    * Enqueue a commit for review.
@@ -84,21 +112,25 @@ export class ReviewOrchestrator {
 
       try {
         const sessionId = await this.executor(sha);
-        if (sessionId) {
-          job.sessionId = sessionId;
-          this.sessionToSha.set(sessionId, sha);
-          log(`[orchestrator] review started: ${sha} → ${sessionId}`);
-        } else {
-          job.status = 'failed';
-          job.error = 'No parent session available';
-          this.activeCount--;
-          this.processQueue();
-        }
+        job.sessionId = sessionId;
+        this.sessionToSha.set(sessionId, sha);
+        log(`[orchestrator] review started: ${sha} → ${sessionId}`);
       } catch (err) {
+        this.activeCount--;
+
+        if (err instanceof NoSessionError) {
+          // No session yet — put the job back at the front of the queue
+          // so it's retried when sessionAvailable() is called.
+          job.status = 'pending';
+          job.startedAt = undefined;
+          this.queue.unshift(sha);
+          log(`[orchestrator] no session, re-queued: ${sha}`);
+          return; // Don't process more — we'll retry when a session appears
+        }
+
         job.status = 'failed';
         job.error = err instanceof Error ? err.message : String(err);
         job.completedAt = new Date();
-        this.activeCount--;
         warn(`[orchestrator] review failed to start: ${sha} — ${job.error}`);
         this.processQueue();
       }
@@ -148,6 +180,9 @@ export class ReviewOrchestrator {
       job.status = 'completed';
       job.completedAt = new Date();
       job.result = result;
+
+      // Persist the SHA as processed only after successful completion
+      this.onReviewCompleted?.(sha);
 
       // Deliver results via configured sinks
       await this.deliverResults(result, job.sessionId, ctx, config);

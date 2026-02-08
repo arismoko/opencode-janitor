@@ -10,11 +10,11 @@ import { CommitDetector } from './git/commit-detector';
 import { getCommitContext } from './git/commit-resolver';
 import { resolveGitDir } from './git/repo-locator';
 import { createJanitorAgent } from './review/janitor-agent';
-import { ReviewOrchestrator } from './review/orchestrator';
+import { NoSessionError, ReviewOrchestrator } from './review/orchestrator';
 import { buildReviewPrompt } from './review/prompt-builder';
 import { spawnJanitorReview } from './review/runner';
 import { CommitStore } from './state/store';
-import { log, warn } from './utils/logger';
+import { log } from './utils/logger';
 
 const TheJanitor: Plugin = async (ctx) => {
   const config = loadConfig(ctx.directory);
@@ -54,18 +54,22 @@ const TheJanitor: Plugin = async (ctx) => {
       scopeExclude: config.scope.exclude,
     });
 
-    if (currentSessionId) {
-      const sessionId = await spawnJanitorReview(ctx, {
-        parentSessionId: currentSessionId,
-        prompt,
-        config,
-      });
-      store.add(sha);
-      return sessionId;
+    if (!currentSessionId) {
+      throw new NoSessionError();
     }
 
-    warn('no root session available, skipping review');
-    return null;
+    const sessionId = await spawnJanitorReview(ctx, {
+      parentSessionId: currentSessionId,
+      prompt,
+      config,
+    });
+    return sessionId;
+  });
+
+  // Persist SHA only after review completes successfully
+  orchestrator.onCompleted((sha) => {
+    store.add(sha);
+    log(`persisted reviewed commit: ${sha}`);
   });
 
   // Commit detector
@@ -128,6 +132,7 @@ const TheJanitor: Plugin = async (ctx) => {
         if (info?.id && !info?.parentID) {
           currentSessionId = info.id;
           log(`tracking root session: ${info.id}`);
+          orchestrator.sessionAvailable();
         }
       }
 
