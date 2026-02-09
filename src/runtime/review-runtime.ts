@@ -119,18 +119,12 @@ export async function bootstrapRuntime(
     svc.runtime.disposed = true;
     detector.stop();
     prDetector?.stop();
-    janitorQueue.shutdown();
-    hunterQueue.shutdown();
-    inspectorQueue.shutdown();
-    scribeQueue.shutdown();
-    janitorQueue.clearPending();
-    hunterQueue.clearPending();
-    inspectorQueue.clearPending();
-    scribeQueue.clearPending();
-    await janitorQueue.abortRunning(ctx);
-    await hunterQueue.abortRunning(ctx);
-    await inspectorQueue.abortRunning(ctx);
-    await scribeQueue.abortRunning(ctx);
+    const allQueues = [janitorQueue, hunterQueue, inspectorQueue, scribeQueue];
+    for (const q of allQueues) {
+      q.shutdown();
+      q.clearPending();
+    }
+    await Promise.all(allQueues.map((q) => q.abortRunning(ctx)));
     log('plugin runtime stopped: detectors halted');
   };
 

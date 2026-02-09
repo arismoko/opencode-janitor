@@ -16,9 +16,60 @@ import {
   getWorkspacePrContext,
   type PrContext,
 } from '../git/pr-context-resolver';
+import type { ReviewRunQueue } from '../review/review-run-queue';
 import type { CommandHookContext } from '../runtime/context';
+import type { AgentControl } from '../runtime/runtime-types';
 import { injectMessage } from '../utils/notifier';
 import { workspaceKey } from '../utils/review-key';
+
+// ---------------------------------------------------------------------------
+// Agent name literal — used by shared helpers
+// ---------------------------------------------------------------------------
+
+type AgentName = 'janitor' | 'hunter' | 'inspector' | 'scribe';
+
+/** Map agent name → AgentControl pause key. */
+const pauseKey: Record<AgentName, keyof AgentControl> = {
+  janitor: 'pausedJanitor',
+  hunter: 'pausedHunter',
+  inspector: 'pausedInspector',
+  scribe: 'pausedScribe',
+};
+
+// ---------------------------------------------------------------------------
+// Agent queue / control descriptor — passed to shared helpers
+// ---------------------------------------------------------------------------
+
+interface AgentRef {
+  name: AgentName;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  queue: ReviewRunQueue<any, any>;
+}
+
+// ---------------------------------------------------------------------------
+// Shared helpers for stop / resume / status
+// ---------------------------------------------------------------------------
+
+/** Render a single-agent status line (used in both overview and per-agent). */
+function renderAgentStatusLine(
+  control: AgentControl,
+  { name, queue }: AgentRef,
+): string {
+  const jobs = queue.getJobsSnapshot();
+  const running = jobs.filter((j) => j.status === 'running');
+  const pending = jobs.filter((j) => j.status === 'pending');
+  const paused = control[pauseKey[name]];
+  return `**${name}** ${paused ? '⏸ paused' : '▶ active'} — running=${running.length}, pending=${pending.length}`;
+}
+
+/** Render detailed single-agent status (includes running job keys). */
+function renderDetailedStatus(control: AgentControl, ref: AgentRef): string {
+  const jobs = ref.queue.getJobsSnapshot();
+  const running = jobs.filter((j) => j.status === 'running');
+  const line = `📋 **[${ref.name}]** ${renderAgentStatusLine(control, ref).replace(`**${ref.name}** `, '')}`;
+  if (!running.length) return line;
+  return `${line}\nrunning: ${running.map((j) => `${j.key} (${j.sessionId ?? 'starting'})`).join(', ')}`;
+}
 
 /**
  * Create the command.execute.before hook handler.
@@ -30,6 +81,15 @@ export function createCommandHook(
   _output: { parts: Part[] },
 ) => Promise<void> {
   const agentCommands = new Set(['janitor', 'hunter', 'inspector', 'scribe']);
+
+  // Reusable agent refs
+  const agents: Record<AgentName, AgentRef> = {
+    janitor: { name: 'janitor', queue: rc.janitorQueue },
+    hunter: { name: 'hunter', queue: rc.hunterQueue },
+    inspector: { name: 'inspector', queue: rc.inspectorQueue },
+    scribe: { name: 'scribe', queue: rc.scribeQueue },
+  };
+  const allAgentRefs = Object.values(agents);
 
   return async (hookInput, _output) => {
     if (rc.runtime.disposed) return;
@@ -56,28 +116,29 @@ export function createCommandHook(
         scribe: rc.control.pausedScribe,
       });
 
-    // Cross-agent status renderer (shown by /janitor status as plugin overview)
-    const renderAllStatus = () => {
-      const janitorJobs = rc.janitorQueue.getJobsSnapshot();
-      const hunterJobs = rc.hunterQueue.getJobsSnapshot();
-      const inspectorJobs = rc.inspectorQueue.getJobsSnapshot();
-      const scribeJobs = rc.scribeQueue.getJobsSnapshot();
-      const jRunning = janitorJobs.filter((j) => j.status === 'running');
-      const jPending = janitorJobs.filter((j) => j.status === 'pending');
-      const hRunning = hunterJobs.filter((j) => j.status === 'running');
-      const hPending = hunterJobs.filter((j) => j.status === 'pending');
-      const iRunning = inspectorJobs.filter((j) => j.status === 'running');
-      const iPending = inspectorJobs.filter((j) => j.status === 'pending');
-      const sRunning = scribeJobs.filter((j) => j.status === 'running');
-      const sPending = scribeJobs.filter((j) => j.status === 'pending');
-
-      return [
-        `**janitor** ${rc.control.pausedJanitor ? '⏸ paused' : '▶ active'} — running=${jRunning.length}, pending=${jPending.length}`,
-        `**hunter** ${rc.control.pausedHunter ? '⏸ paused' : '▶ active'} — running=${hRunning.length}, pending=${hPending.length}`,
-        `**inspector** ${rc.control.pausedInspector ? '⏸ paused' : '▶ active'} — running=${iRunning.length}, pending=${iPending.length}`,
-        `**scribe** ${rc.control.pausedScribe ? '⏸ paused' : '▶ active'} — running=${sRunning.length}, pending=${sPending.length}`,
-      ].join('\n');
+    /** Shared stop handler. */
+    const handleStop = async (ref: AgentRef) => {
+      rc.control[pauseKey[ref.name]] = true;
+      persistPaused();
+      const dropped = ref.queue.clearPending();
+      const aborted = await ref.queue.abortRunning(rc.ctx);
+      await respond(
+        `🛑 **[${ref.name}]** stopped. dropped=${dropped}, aborted=${aborted}`,
+      );
     };
+
+    /** Shared resume handler. */
+    const handleResume = async (ref: AgentRef) => {
+      rc.control[pauseKey[ref.name]] = false;
+      persistPaused();
+      await respond(`▶️ **[${ref.name}]** resumed`);
+    };
+
+    // Cross-agent status renderer (shown by /janitor status as plugin overview)
+    const renderAllStatus = () =>
+      allAgentRefs
+        .map((ref) => renderAgentStatusLine(rc.control, ref))
+        .join('\n');
 
     // --- /janitor ---
     if (hookInput.command === 'janitor') {
@@ -107,17 +168,9 @@ export function createCommandHook(
         rc.janitorQueue.enqueue(runKey, hookInput.sessionID);
         await respond(`🧼 **[janitor]** review queued: ${runKey}`);
       } else if (action === 'stop') {
-        rc.control.pausedJanitor = true;
-        persistPaused();
-        const dropped = rc.janitorQueue.clearPending();
-        const aborted = await rc.janitorQueue.abortRunning(rc.ctx);
-        await respond(
-          `🛑 **[janitor]** stopped. dropped=${dropped}, aborted=${aborted}`,
-        );
+        await handleStop(agents.janitor);
       } else if (action === 'resume') {
-        rc.control.pausedJanitor = false;
-        persistPaused();
-        await respond(`▶️ **[janitor]** resumed`);
+        await handleResume(agents.janitor);
       } else {
         await respond(usage);
       }
@@ -130,15 +183,7 @@ export function createCommandHook(
       const usage = 'Usage: /hunter run [pr#] | status | stop | resume';
 
       if (action === 'status') {
-        const hunterJobs = rc.hunterQueue.getJobsSnapshot();
-        const running = hunterJobs.filter((j) => j.status === 'running');
-        const pending = hunterJobs.filter((j) => j.status === 'pending');
-        await respond(
-          `📋 **[hunter]** ${rc.control.pausedHunter ? '⏸ paused' : '▶ active'} — running=${running.length}, pending=${pending.length}` +
-            (running.length
-              ? `\nrunning: ${running.map((j) => `${j.key} (${j.sessionId ?? 'starting'})`).join(', ')}`
-              : ''),
-        );
+        await respond(renderDetailedStatus(rc.control, agents.hunter));
       } else if (action === 'run') {
         let prContext: PrContext | null = null;
         const prArg = args[1];
@@ -202,17 +247,9 @@ export function createCommandHook(
         rc.hunterQueue.enqueue(prContext, hookInput.sessionID);
         await respond(`🔍 **[hunter]** review queued: ${prContext.key}`);
       } else if (action === 'stop') {
-        rc.control.pausedHunter = true;
-        persistPaused();
-        const dropped = rc.hunterQueue.clearPending();
-        const aborted = await rc.hunterQueue.abortRunning(rc.ctx);
-        await respond(
-          `🛑 **[hunter]** stopped. dropped=${dropped}, aborted=${aborted}`,
-        );
+        await handleStop(agents.hunter);
       } else if (action === 'resume') {
-        rc.control.pausedHunter = false;
-        persistPaused();
-        await respond(`▶️ **[hunter]** resumed`);
+        await handleResume(agents.hunter);
       } else {
         await respond(usage);
       }
@@ -225,15 +262,7 @@ export function createCommandHook(
       const usage = 'Usage: /inspector run | status | stop | resume';
 
       if (action === 'status') {
-        const inspectorJobs = rc.inspectorQueue.getJobsSnapshot();
-        const running = inspectorJobs.filter((j) => j.status === 'running');
-        const pending = inspectorJobs.filter((j) => j.status === 'pending');
-        await respond(
-          `📋 **[inspector]** ${rc.control.pausedInspector ? '⏸ paused' : '▶ active'} — running=${running.length}, pending=${pending.length}` +
-            (running.length
-              ? `\nrunning: ${running.map((j) => `${j.key} (${j.sessionId ?? 'starting'})`).join(', ')}`
-              : ''),
-        );
+        await respond(renderDetailedStatus(rc.control, agents.inspector));
       } else if (action === 'run') {
         const runKey = `inspector:${Date.now()}`;
         rc.inspectorQueue.enqueue(runKey, hookInput.sessionID);
@@ -241,17 +270,9 @@ export function createCommandHook(
           `🔎 **[inspector]** repo-wide analysis queued: ${runKey}`,
         );
       } else if (action === 'stop') {
-        rc.control.pausedInspector = true;
-        persistPaused();
-        const dropped = rc.inspectorQueue.clearPending();
-        const aborted = await rc.inspectorQueue.abortRunning(rc.ctx);
-        await respond(
-          `🛑 **[inspector]** stopped. dropped=${dropped}, aborted=${aborted}`,
-        );
+        await handleStop(agents.inspector);
       } else if (action === 'resume') {
-        rc.control.pausedInspector = false;
-        persistPaused();
-        await respond(`▶️ **[inspector]** resumed`);
+        await handleResume(agents.inspector);
       } else {
         await respond(usage);
       }
@@ -264,31 +285,15 @@ export function createCommandHook(
       const usage = 'Usage: /scribe run | status | stop | resume';
 
       if (action === 'status') {
-        const scribeJobs = rc.scribeQueue.getJobsSnapshot();
-        const running = scribeJobs.filter((j) => j.status === 'running');
-        const pending = scribeJobs.filter((j) => j.status === 'pending');
-        await respond(
-          `📋 **[scribe]** ${rc.control.pausedScribe ? '⏸ paused' : '▶ active'} — running=${running.length}, pending=${pending.length}` +
-            (running.length
-              ? `\nrunning: ${running.map((j) => `${j.key} (${j.sessionId ?? 'starting'})`).join(', ')}`
-              : ''),
-        );
+        await respond(renderDetailedStatus(rc.control, agents.scribe));
       } else if (action === 'run') {
         const runKey = `scribe:${Date.now()}`;
         rc.scribeQueue.enqueue(runKey, hookInput.sessionID);
         await respond(`📝 **[scribe]** documentation audit queued: ${runKey}`);
       } else if (action === 'stop') {
-        rc.control.pausedScribe = true;
-        persistPaused();
-        const dropped = rc.scribeQueue.clearPending();
-        const aborted = await rc.scribeQueue.abortRunning(rc.ctx);
-        await respond(
-          `🛑 **[scribe]** stopped. dropped=${dropped}, aborted=${aborted}`,
-        );
+        await handleStop(agents.scribe);
       } else if (action === 'resume') {
-        rc.control.pausedScribe = false;
-        persistPaused();
-        await respond(`▶️ **[scribe]** resumed`);
+        await handleResume(agents.scribe);
       } else {
         await respond(usage);
       }
