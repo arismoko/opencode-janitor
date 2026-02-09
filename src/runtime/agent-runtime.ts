@@ -81,7 +81,7 @@ export function createAgentQueues(
   janitorQueue.setContext(ctx);
 
   // Hunter
-  const hunterSpec = registry.get<PrContext>('bug-hunter');
+  const hunterSpec = registry.get<PrContext>('hunter');
   const hunterStrategy = new HunterStrategy(
     async (prNumber: number, body: string) => {
       if (!(await isGhAvailable(exec))) return false;

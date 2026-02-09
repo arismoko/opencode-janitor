@@ -54,7 +54,7 @@ export function registerAgents(
     opencodeConfig.agent = agentRegistry;
 
     log(
-      "registered agents 'janitor' and 'bug-hunter'; commands /janitor, /hunter, /inspector, /scribe",
+      "registered agents 'janitor' and 'hunter'; commands /janitor, /hunter, /inspector, /scribe",
     );
   };
 }

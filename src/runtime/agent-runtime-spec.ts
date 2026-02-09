@@ -21,7 +21,7 @@ import type { Exec } from './runtime-types';
  * building and SpawnReviewOpts for session spawning.
  */
 export interface AgentRuntimeSpec<TContext> {
-  /** Agent name registered in the config hook (e.g. 'janitor', 'bug-hunter') */
+  /** Agent name registered in the config hook (e.g. 'janitor', 'hunter') */
   readonly agent: string;
   /** Queue tag for logging (e.g. 'janitor', 'hunter') */
   readonly queueTag: string;
