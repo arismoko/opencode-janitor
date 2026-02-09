@@ -15,7 +15,7 @@ import type {
   AgentRuntimeSpec,
   PreparedContext,
 } from '../../runtime/agent-runtime-spec';
-import type { Exec } from '../../runtime/context';
+import type { Exec } from '../../runtime/runtime-types';
 import { buildSuppressionsBlock } from '../../suppressions/prompt';
 import type { SuppressionStore } from '../../suppressions/store';
 import type { ReviewResult } from '../../types';

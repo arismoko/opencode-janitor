@@ -14,8 +14,8 @@ import { SuppressionStore } from '../suppressions/store';
 import { atomicWriteSync } from '../utils/atomic-write';
 import { log, warn } from '../utils/logger';
 import { ensureStateDir, resolveStateDir } from '../utils/state-dir';
-import type { AgentControl, RuntimeFlag } from './context';
-import { createExec, type Exec } from './context';
+import { createExec } from './context';
+import type { AgentControl, Exec, RuntimeFlag } from './runtime-types';
 
 type TriggerMode = 'commit' | 'pr' | 'both' | 'never';
 

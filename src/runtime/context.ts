@@ -1,9 +1,10 @@
 /**
- * Shared runtime context passed to hooks and runtime modules.
+ * Shared runtime context — composition boundary + consumer projections.
  *
- * Bundles the plugin input, exec bridge, mutable control state, and all
- * long-lived services so hook modules receive a single typed dependency
- * instead of loosely coupled closure variables.
+ * This module composes the context slices into RuntimeContext and defines
+ * narrow Pick-based projections for each hook module. Primitive types
+ * (Exec, AgentControl, RuntimeFlag) live in runtime-types.ts to avoid
+ * circular imports between slices and this parent module.
  */
 
 import type { PluginInput } from '@opencode-ai/plugin';
@@ -11,23 +12,7 @@ import type { ConfigContext } from './context/config-context';
 import type { GitContext } from './context/git-context';
 import type { QueueContext } from './context/queue-context';
 import type { SessionContext } from './context/session-context';
-
-// Re-export slices for convenience
-export type { ConfigContext, GitContext, QueueContext, SessionContext };
-
-/** Shell exec bridge — runs a command and returns stdout. */
-export type Exec = (cmd: string) => Promise<string>;
-
-/** Mutable pause/resume state for agents. */
-export interface AgentControl {
-  pausedJanitor: boolean;
-  pausedHunter: boolean;
-}
-
-/** Runtime lifecycle flag. */
-export interface RuntimeFlag {
-  disposed: boolean;
-}
+import type { Exec } from './runtime-types';
 
 /**
  * Full runtime context — composition boundary.

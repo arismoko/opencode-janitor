@@ -11,7 +11,7 @@ import type { PluginInput } from '@opencode-ai/plugin';
 import type { JanitorConfig } from '../config/schema';
 import type { ReviewContext } from '../review/prompt-builder';
 import type { SpawnReviewOpts } from '../review/runner';
-import type { Exec } from './context';
+import type { Exec } from './runtime-types';
 
 /**
  * Per-agent runtime spec.

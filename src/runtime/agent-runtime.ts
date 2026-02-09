@@ -23,7 +23,7 @@ import {
   createSpecExecutor,
 } from './agent-runtime-spec';
 import type { BootstrapServices } from './bootstrap';
-import type { Exec } from './context';
+import type { Exec } from './runtime-types';
 
 export interface AgentQueues {
   janitorQueue: ReviewRunQueue<string, ReviewResult>;

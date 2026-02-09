@@ -4,7 +4,7 @@
 
 import type { CommitDetector } from '../../git/commit-detector';
 import type { PrDetector } from '../../git/pr-detector';
-import type { Exec } from '../context';
+import type { Exec } from '../runtime-types';
 
 export interface GitContext {
   exec: Exec;

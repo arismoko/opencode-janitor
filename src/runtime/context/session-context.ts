@@ -5,7 +5,7 @@
 import type { HistoryStore } from '../../history/store';
 import type { RuntimeStateStore } from '../../state/store';
 import type { SuppressionStore } from '../../suppressions/store';
-import type { AgentControl, RuntimeFlag } from '../context';
+import type { AgentControl, RuntimeFlag } from '../runtime-types';
 
 export interface SessionContext {
   stateDir: string;
