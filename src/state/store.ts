@@ -16,10 +16,10 @@ interface StateData {
 }
 
 /**
- * In-memory store for tracking processed commits.
+ * Runtime state store for tracking processed reviews, PR keys, and agent control flags.
  * Optionally persists to `.janitor/state.json` for cross-session deduplication.
  */
-export class CommitStore {
+export class RuntimeStateStore {
   private processed = new Set<string>();
   private processedPrKeys = new Set<string>();
   private processedHunterHeads = new Set<string>();

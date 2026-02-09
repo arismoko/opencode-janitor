@@ -2,6 +2,7 @@ import type { JanitorConfig } from '../config/schema';
 import type { ChangedFile } from '../types';
 import { truncatePatch } from '../utils/limits';
 import { log, warn } from '../utils/logger';
+import { branchKey, prKey, workspaceKey } from '../utils/review-key';
 import {
   getWorkspaceChangedFiles as getWorkspaceChangedFilesShared,
   getWorkspacePatch as getWorkspacePatchShared,
@@ -60,8 +61,8 @@ export async function getPrContext(opts: GetPrContextOpts): Promise<PrContext> {
 
   // Build key
   const key = opts.number
-    ? `pr:${opts.number}:${headSha}`
-    : `branch:${headRef}:${headSha}`;
+    ? prKey(opts.number, headSha)
+    : branchKey(headRef, headSha);
 
   return {
     key,
@@ -94,7 +95,7 @@ export async function getWorkspacePrContext(
   );
 
   return {
-    key: `workspace:${headRef}:${headSha}`,
+    key: workspaceKey(headRef, headSha),
     headSha,
     baseRef: config.pr.baseBranch,
     headRef,

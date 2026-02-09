@@ -34,13 +34,20 @@ import { ReviewRunQueue } from './review/review-run-queue';
 import { spawnReview } from './review/runner';
 import { HunterStrategy } from './review/strategies/hunter-strategy';
 import { JanitorStrategy } from './review/strategies/janitor-strategy';
-import { CommitStore } from './state/store';
+import { RuntimeStateStore } from './state/store';
 import { buildSuppressionsBlock } from './suppressions/prompt';
 import { SuppressionStore } from './suppressions/store';
 import { atomicWriteSync } from './utils/atomic-write';
 import { appendEvent } from './utils/event-log';
 import { log, warn } from './utils/logger';
 import { injectMessage } from './utils/notifier';
+import {
+  branchKey,
+  commitKey,
+  extractHeadSha,
+  prKey,
+  workspaceKey,
+} from './utils/review-key';
 import { ensureStateDir, resolveStateDir } from './utils/state-dir';
 
 /** Plugin return shape — typed locally since the SDK Plugin type doesn't
@@ -79,21 +86,6 @@ type TriggerMode = 'commit' | 'pr' | 'both' | 'never';
 function triggerMatches(trigger: TriggerMode, mode: 'commit' | 'pr'): boolean {
   if (trigger === 'never') return false;
   return trigger === mode || trigger === 'both';
-}
-
-function extractHunterHeadFromKey(key: string): string | null {
-  if (key.startsWith('commit:')) {
-    return key.slice('commit:'.length);
-  }
-  if (key.startsWith('pr:')) {
-    const parts = key.split(':');
-    return parts.length >= 3 ? parts[2] : null;
-  }
-  if (key.startsWith('branch:')) {
-    const parts = key.split(':');
-    return parts.length >= 3 ? parts[2] : null;
-  }
-  return null;
 }
 
 const TheJanitor: Plugin = async (ctx) => {
@@ -164,7 +156,7 @@ const TheJanitor: Plugin = async (ctx) => {
     );
   }
 
-  const store = new CommitStore(ctx.directory);
+  const store = new RuntimeStateStore(ctx.directory);
   const runtime = { disposed: false };
 
   // XDG state directory for session event logs
@@ -344,7 +336,7 @@ const TheJanitor: Plugin = async (ctx) => {
   hunterOrchestrator.onCompleted((key: string) => {
     if (key.startsWith('workspace:')) return;
     store.addPrKey(key);
-    const headSha = extractHunterHeadFromKey(key);
+    const headSha = extractHeadSha(key);
     if (headSha) {
       store.addProcessedHunterHead(headSha);
     }
@@ -360,7 +352,7 @@ const TheJanitor: Plugin = async (ctx) => {
       ) {
         return false;
       }
-      return extractHunterHeadFromKey(job.key) === headSha;
+      return extractHeadSha(job.key) === headSha;
     });
   };
 
@@ -407,7 +399,7 @@ const TheJanitor: Plugin = async (ctx) => {
           warn(`[hunter] skipping empty commit context: ${sha.slice(0, 8)}`);
         } else {
           hunterOrchestrator.enqueue({
-            key: `commit:${sha}`,
+            key: commitKey(sha),
             headSha: sha,
             baseRef: commit.parents[0] ?? config.pr.baseBranch,
             headRef: sha,
@@ -430,7 +422,7 @@ const TheJanitor: Plugin = async (ctx) => {
           if (ghAvailableAtStartup) {
             const ghPr = await getCurrentPrFromGh(exec);
             if (!ghPr) return null;
-            return `pr:${ghPr.number}:${ghPr.headSha}`;
+            return prKey(ghPr.number, ghPr.headSha);
           }
 
           // No gh available — only react after an observed push command.
@@ -442,7 +434,7 @@ const TheJanitor: Plugin = async (ctx) => {
           const headSha = (await exec('git rev-parse HEAD')).trim();
           if (!headSha) return null;
 
-          return `branch:${branch}:${headSha}`;
+          return branchKey(branch, headSha);
         },
         async (key, signal) => {
           if (runtime.disposed) return;
@@ -743,7 +735,7 @@ const TheJanitor: Plugin = async (ctx) => {
           );
           handled();
         }
-        const runKey = `workspace:${branch}:${headSha}`;
+        const runKey = workspaceKey(branch, headSha);
         orchestrator.enqueue(runKey, hookInput.sessionID);
         await respond(`🧼 **[Janitor Control]** clean queued: ${runKey}`);
         handled();
