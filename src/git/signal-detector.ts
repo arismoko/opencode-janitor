@@ -73,9 +73,8 @@ export abstract class SignalDetector<
    * Verify current key and trigger callback if new state.
    * This is the single source of truth — all signals funnel here.
    *
-   * The key is marked as processed regardless of callback outcome —
-   * no auto-retry of the same key. Users can manually trigger reruns
-   * via `/janitor clean` or `/janitor review`.
+   * The key is marked as processed only after `onDetected` succeeds —
+   * transient failures allow automatic retry on the next signal.
    *
    * Re-entrancy guard (`inflight`) prevents duplicate callbacks when a
    * slow `onDetected` overlaps with the next poll/tool-hook signal.
@@ -102,14 +101,12 @@ export abstract class SignalDetector<
 
       log(`[${this.label}] new state: ${key} via ${signal.source}`);
 
-      // Commit state BEFORE callback — key is marked processed regardless
-      // of callback outcome. No auto-retry of same key.
       this.lastSeenKey = key;
-      this.processed.add(key);
-      this.evictProcessed();
 
       try {
         await this.onDetected(key, signal);
+        this.processed.add(key);
+        this.evictProcessed();
       } finally {
         this.inflight.delete(key);
       }
