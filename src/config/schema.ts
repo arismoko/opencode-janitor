@@ -1,20 +1,25 @@
 import { z } from 'zod';
 
-const TriggerModeSchema = z.enum(['commit', 'pr', 'both', 'never']);
+const TriggerModeSchema = z.enum(['commit', 'pr', 'both', 'manual', 'never']);
 
 type TriggerMode = z.infer<typeof TriggerModeSchema>;
 
-const AgentRuntimeSchema = (defaultTrigger: TriggerMode) =>
+const AgentRuntimeSchema = (
+  defaultTrigger: TriggerMode,
+  defaultMaxFindings = 10,
+) =>
   z.object({
     enabled: z.boolean().default(true),
     trigger: TriggerModeSchema.default(defaultTrigger),
     modelId: z.string().optional(),
     variant: z.string().optional(),
+    maxFindings: z.number().int().min(1).max(50).default(defaultMaxFindings),
   });
 
-const defaultAgentRuntime = (trigger: TriggerMode) => ({
+const defaultAgentRuntime = (trigger: TriggerMode, maxFindings = 10) => ({
   enabled: true,
   trigger,
+  maxFindings,
 });
 
 export const JanitorConfigSchema = z.object({
@@ -36,10 +41,18 @@ export const JanitorConfigSchema = z.object({
         defaultAgentRuntime('commit'),
       ),
       hunter: AgentRuntimeSchema('pr').default(() => defaultAgentRuntime('pr')),
+      inspector: AgentRuntimeSchema('manual').default(() =>
+        defaultAgentRuntime('manual'),
+      ),
+      scribe: AgentRuntimeSchema('manual').default(() =>
+        defaultAgentRuntime('manual'),
+      ),
     })
     .default(() => ({
       janitor: defaultAgentRuntime('commit'),
       hunter: defaultAgentRuntime('pr'),
+      inspector: defaultAgentRuntime('manual'),
+      scribe: defaultAgentRuntime('manual'),
     })),
 
   categories: z
@@ -85,9 +98,8 @@ export const JanitorConfigSchema = z.object({
   model: z
     .object({
       id: z.string().optional(),
-      maxFindings: z.number().int().min(1).max(50).default(10),
     })
-    .default(() => ({ maxFindings: 10 })),
+    .default(() => ({})),
 
   diff: z
     .object({

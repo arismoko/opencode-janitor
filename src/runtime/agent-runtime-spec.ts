@@ -25,6 +25,8 @@ export interface AgentRuntimeSpec<TContext> {
   readonly agent: string;
   /** Queue tag for logging (e.g. 'janitor', 'hunter') */
   readonly queueTag: string;
+  /** Config key under agents.* for per-agent settings (maxFindings, trigger, model) */
+  readonly configKey: keyof JanitorConfig['agents'];
   /** Resolve the model ID for this agent from config */
   resolveModelId(config: JanitorConfig): string | undefined;
   /**
@@ -117,7 +119,7 @@ export function createSpecExecutor<TContext>(
     const prepared = await spec.prepareReviewContext(context, config, exec);
 
     const prompt = deps.buildPrompt(prepared.reviewContext, {
-      maxFindings: config.model.maxFindings,
+      maxFindings: config.agents[spec.configKey].maxFindings,
       scopeInclude: config.scope.include,
       scopeExclude: config.scope.exclude,
       suppressionsBlock: prepared.suppressionsBlock,

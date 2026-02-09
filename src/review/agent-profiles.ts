@@ -24,7 +24,7 @@ export interface AgentProfile {
   /** Zod output schema for JSON schema injection */
   outputSchema: z.ZodType;
   /** Config key under agents.* for model/variant/trigger resolution */
-  configKey: 'janitor' | 'hunter';
+  configKey: keyof JanitorConfig['agents'];
 }
 
 // ---------------------------------------------------------------------------

@@ -17,7 +17,7 @@ import { ensureStateDir, resolveStateDir } from '../utils/state-dir';
 import { createExec } from './context';
 import type { AgentControl, Exec, RuntimeFlag } from './runtime-types';
 
-type TriggerMode = 'commit' | 'pr' | 'both' | 'never';
+type TriggerMode = 'commit' | 'pr' | 'both' | 'manual' | 'never';
 
 function triggerMatches(trigger: TriggerMode, mode: 'commit' | 'pr'): boolean {
   if (trigger === 'never') return false;

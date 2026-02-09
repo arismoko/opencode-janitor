@@ -38,6 +38,7 @@ export class JanitorStrategy implements ReviewStrategy<string, ReviewResult> {
     return {
       agent: 'janitor',
       queueTag: 'janitor',
+      configKey: 'janitor',
       resolveModelId: (config) =>
         config.agents.janitor.modelId ?? config.model.id,
 

@@ -30,6 +30,7 @@ export class HunterStrategy implements ReviewStrategy<PrContext, HunterResult> {
     return {
       agent: 'bug-hunter',
       queueTag: 'hunter',
+      configKey: 'hunter',
       resolveModelId: (config) =>
         config.agents.hunter.modelId ?? config.model.id,
 
