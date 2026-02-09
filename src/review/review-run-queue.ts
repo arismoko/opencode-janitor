@@ -1,13 +1,16 @@
 import type { PluginInput } from '@opencode-ai/plugin';
+import type { Message, Part } from '@opencode-ai/sdk';
 import type { JanitorConfig } from '../config/schema';
+import type { SessionOwnershipDispatcher } from '../runtime/session-ownership-dispatcher';
 import { getErrorMessage, log, warn } from '../utils/logger';
 import { notifyError } from '../utils/notifier';
+import { extractHeadSha } from '../utils/review-key';
 
-/** Shared job lifecycle fields used by both orchestrator variants. */
+/** Shared job lifecycle fields used by both review strategies. */
 export interface BaseJob<TContext, TResult> {
   key: string;
   context: TContext;
-  deliverySessionId?: string;
+  parentSessionId?: string;
   sessionId?: string;
   status:
     | 'pending'
@@ -24,10 +27,32 @@ export interface BaseJob<TContext, TResult> {
   error?: string;
 }
 
-type Executor<TContext> = (context: TContext) => Promise<string>;
+/** Strategy interface — agent-specific logic injected into ReviewRunQueue. */
+export interface ReviewStrategy<TContext, TResult> {
+  /** Derive dedup key from context */
+  extractKey(context: TContext): string;
+  /** Human-readable label for error messages */
+  errorLabel(key: string): string;
+  /** Called when a review session completes — parse results, deliver outputs */
+  onJobCompleted(
+    job: BaseJob<TContext, TResult>,
+    sessionId: string,
+    ctx: PluginInput,
+    config: JanitorConfig,
+    extractAssistantOutput: (
+      sessionId: string,
+      ctx: PluginInput,
+    ) => Promise<string>,
+  ): Promise<void>;
+}
+
+type Executor<TContext> = (
+  context: TContext,
+  parentSessionId?: string,
+) => Promise<string>;
 
 /**
- * Generic review orchestrator managing the queue and lifecycle of review jobs.
+ * Concrete review queue managing the lifecycle of review jobs.
  *
  * Policies:
  * - Serial execution (concurrency=1 default)
@@ -35,49 +60,43 @@ type Executor<TContext> = (context: TContext) => Promise<string>;
  * - Running reviews can be explicitly cancelled by user command
  * - Review execution never blocks on user root sessions
  *
- * Subclasses provide:
- * - `extractKey(context)` to derive the dedup key from enqueue context
- * - `onCompleted(job, sessionId, ctx, config)` to parse results and deliver
- * - `errorLabel(key)` for human-readable error messages
+ * Agent-specific logic (key extraction, result parsing, delivery) is
+ * delegated to a {@link ReviewStrategy} passed at construction.
  */
-export abstract class BaseOrchestrator<TContext, TResult> {
+export class ReviewRunQueue<TContext, TResult> {
   private jobs = new Map<string, BaseJob<TContext, TResult>>();
   private sessionToKey = new Map<string, string>();
   private queue: string[] = [];
   private activeCount = 0;
   private halted = false;
   private ctx?: PluginInput;
+  private dispatcher?: SessionOwnershipDispatcher;
+  private completedCallback?: (key: string) => void;
 
-  protected readonly tag: string;
+  private readonly tag: string;
 
   constructor(
-    protected readonly config: JanitorConfig,
+    private readonly config: JanitorConfig,
     private readonly executor: Executor<TContext>,
+    private readonly strategy: ReviewStrategy<TContext, TResult>,
     tag: string,
   ) {
     this.tag = tag;
   }
 
-  /** Derive a deduplication key from the enqueue context. */
-  protected abstract extractKey(context: TContext): string;
-
-  /**
-   * Called when a review session completes. Subclasses should extract messages,
-   * parse results, persist state, and deliver outputs.
-   */
-  protected abstract onJobCompleted(
-    job: BaseJob<TContext, TResult>,
-    sessionId: string,
-    ctx: PluginInput,
-    config: JanitorConfig,
-  ): Promise<void>;
-
-  /** Human-readable label for error messages (e.g. "commit `abc12345`"). */
-  protected abstract errorLabel(key: string): string;
+  /** Register a callback invoked after each successful job completion. */
+  onCompleted(callback: (key: string) => void): void {
+    this.completedCallback = callback;
+  }
 
   /** Set the plugin context for error notification injection. */
   setContext(ctx: PluginInput): void {
     this.ctx = ctx;
+  }
+
+  /** Set the session ownership dispatcher for targeted event routing. */
+  setDispatcher(dispatcher: SessionOwnershipDispatcher): void {
+    this.dispatcher = dispatcher;
   }
 
   /** Snapshot current jobs for command/status views. */
@@ -87,7 +106,7 @@ export abstract class BaseOrchestrator<TContext, TResult> {
       | 'key'
       | 'status'
       | 'sessionId'
-      | 'deliverySessionId'
+      | 'parentSessionId'
       | 'enqueuedAt'
       | 'startedAt'
     >
@@ -96,10 +115,25 @@ export abstract class BaseOrchestrator<TContext, TResult> {
       key: job.key,
       status: job.status,
       sessionId: job.sessionId,
-      deliverySessionId: job.deliverySessionId,
+      parentSessionId: job.parentSessionId,
       enqueuedAt: job.enqueuedAt,
       startedAt: job.startedAt,
     }));
+  }
+
+  /** Check if any active job targets the given head SHA. */
+  hasHeadInFlight(headSha: string): boolean {
+    for (const job of this.jobs.values()) {
+      if (
+        job.status !== 'pending' &&
+        job.status !== 'starting' &&
+        job.status !== 'running'
+      ) {
+        continue;
+      }
+      if (extractHeadSha(job.key) === headSha) return true;
+    }
+    return false;
   }
 
   /** Drop all pending jobs from the queue. Running jobs are untouched. */
@@ -116,7 +150,7 @@ export abstract class BaseOrchestrator<TContext, TResult> {
     return dropped;
   }
 
-  /** Abort all currently running sessions owned by this orchestrator. */
+  /** Abort all currently running sessions owned by this queue. */
   async abortRunning(ctx: PluginInput): Promise<number> {
     let aborted = 0;
     for (const job of [...this.jobs.values()]) {
@@ -134,6 +168,7 @@ export abstract class BaseOrchestrator<TContext, TResult> {
         job.status = 'cancelled';
         job.completedAt = new Date();
         this.sessionToKey.delete(job.sessionId);
+        this.dispatcher?.release(job.sessionId);
         this.jobs.delete(job.key);
         this.activeCount = Math.max(0, this.activeCount - 1);
         aborted++;
@@ -151,13 +186,13 @@ export abstract class BaseOrchestrator<TContext, TResult> {
    * Enqueue a context for review.
    * Applies burst coalescing if dropIntermediate is enabled.
    */
-  enqueue(context: TContext, deliverySessionId?: string): void {
+  enqueue(context: TContext, parentSessionId?: string): void {
     if (this.halted) {
       log(`[${this.tag}] enqueue ignored while halted`);
       return;
     }
 
-    const key = this.extractKey(context);
+    const key = this.strategy.extractKey(context);
 
     // Already processing this key
     if (this.jobs.has(key)) {
@@ -168,7 +203,7 @@ export abstract class BaseOrchestrator<TContext, TResult> {
     const job: BaseJob<TContext, TResult> = {
       key,
       context,
-      deliverySessionId,
+      parentSessionId,
       status: 'pending',
       enqueuedAt: new Date(),
     };
@@ -211,7 +246,7 @@ export abstract class BaseOrchestrator<TContext, TResult> {
       job.startedAt = new Date();
 
       try {
-        const sessionId = await this.executor(job.context);
+        const sessionId = await this.executor(job.context, job.parentSessionId);
 
         if (job.cancelRequested) {
           if (this.ctx) {
@@ -236,6 +271,7 @@ export abstract class BaseOrchestrator<TContext, TResult> {
         job.status = 'running';
         job.sessionId = sessionId;
         this.sessionToKey.set(sessionId, key);
+        this.dispatcher?.register(sessionId, this);
         log(`[${this.tag}] review started: ${key} → ${sessionId}`);
       } catch (err) {
         this.activeCount--;
@@ -247,11 +283,11 @@ export abstract class BaseOrchestrator<TContext, TResult> {
         warn(`[${this.tag}] review failed to start: ${key} — ${job.error}`);
 
         // Surface the error to the user in their originating session
-        if (this.ctx && job.deliverySessionId) {
+        if (this.ctx && job.parentSessionId) {
           notifyError(
             this.ctx,
-            job.deliverySessionId,
-            `Review failed for ${this.errorLabel(key)}`,
+            job.parentSessionId,
+            `Review failed for ${this.strategy.errorLabel(key)}`,
             err,
           ).catch(() => {}); // fire-and-forget
         }
@@ -268,7 +304,7 @@ export abstract class BaseOrchestrator<TContext, TResult> {
 
   /**
    * Handle session completion event.
-   * Delegates to subclass `onJobCompleted` for result extraction and delivery.
+   * Delegates to strategy `onJobCompleted` for result extraction and delivery.
    */
   async handleCompletion(
     sessionId: string,
@@ -289,10 +325,14 @@ export abstract class BaseOrchestrator<TContext, TResult> {
     log(`[${this.tag}] review completed: ${key}`);
 
     try {
-      if (!job.deliverySessionId) {
-        job.deliverySessionId = await this.resolveLatestRootSessionId(ctx);
-      }
-      await this.onJobCompleted(job, sessionId, ctx, config);
+      await this.strategy.onJobCompleted(
+        job,
+        sessionId,
+        ctx,
+        config,
+        this.extractAssistantOutput.bind(this),
+      );
+      this.completedCallback?.(key);
     } catch (err) {
       job.status = 'failed';
       job.completedAt = new Date();
@@ -300,16 +340,17 @@ export abstract class BaseOrchestrator<TContext, TResult> {
       warn(`[${this.tag}] result extraction failed: ${key} — ${job.error}`);
 
       // Surface extraction failure to the user in their originating session
-      if (this.ctx && job.deliverySessionId) {
+      if (this.ctx && job.parentSessionId) {
         notifyError(
           this.ctx,
-          job.deliverySessionId,
-          `Failed to extract review results for ${this.errorLabel(key)}`,
+          job.parentSessionId,
+          `Failed to extract review results for ${this.strategy.errorLabel(key)}`,
           err,
         ).catch(() => {}); // fire-and-forget
       }
     } finally {
       this.sessionToKey.delete(sessionId);
+      this.dispatcher?.release(sessionId);
       this.activeCount--;
       // Prune terminal jobs to prevent unbounded growth
       this.jobs.delete(key);
@@ -318,10 +359,35 @@ export abstract class BaseOrchestrator<TContext, TResult> {
   }
 
   /**
-   * Extract assistant text output from a completed review session.
-   * Shared utility for subclasses to use in their `onJobCompleted`.
+   * Handle session failure event.
+   * Releases the job so the queue is unblocked.
    */
-  protected async extractAssistantOutput(
+  handleFailure(sessionId: string, error: string): void {
+    const key = this.sessionToKey.get(sessionId);
+    if (!key) return; // Not our session
+
+    const job = this.jobs.get(key);
+    if (!job || (job.status !== 'running' && job.status !== 'starting')) return;
+
+    job.status = 'failed';
+    job.error = error;
+    job.completedAt = new Date();
+
+    this.sessionToKey.delete(sessionId);
+    this.dispatcher?.release(sessionId);
+    this.jobs.delete(job.key);
+    this.activeCount = Math.max(0, this.activeCount - 1);
+    this.processQueue();
+
+    warn(`[${this.tag}] session failed: ${key} — ${error}`);
+  }
+
+  /**
+   * Extract assistant text output from a completed review session.
+   * Passed as a callback to strategies so they can call it without coupling
+   * to the queue internals.
+   */
+  private async extractAssistantOutput(
     sessionId: string,
     ctx: PluginInput,
   ): Promise<string> {
@@ -330,14 +396,14 @@ export abstract class BaseOrchestrator<TContext, TResult> {
       query: { directory: ctx.directory },
     });
     const messages = (messagesResult.data ?? []) as Array<{
-      info?: { role: string };
-      parts?: Array<{ type: string; text?: string }>;
+      info: Message;
+      parts: Part[];
     }>;
 
     const assistantTexts: string[] = [];
     for (const msg of messages) {
-      if (msg.info?.role !== 'assistant') continue;
-      for (const part of msg.parts ?? []) {
+      if (msg.info.role !== 'assistant') continue;
+      for (const part of msg.parts) {
         if (part.type === 'text' && part.text) {
           assistantTexts.push(part.text);
         }
@@ -345,35 +411,5 @@ export abstract class BaseOrchestrator<TContext, TResult> {
     }
 
     return assistantTexts.join('\n\n');
-  }
-
-  private async resolveLatestRootSessionId(
-    ctx: PluginInput,
-  ): Promise<string | undefined> {
-    try {
-      const result = await ctx.client.session.list({
-        query: {
-          directory: ctx.directory,
-        },
-      });
-      const sessions = ((result as { data?: unknown[] }).data ?? []) as Array<{
-        id?: string;
-        title?: string;
-        parentID?: string;
-        time?: { updated?: number };
-      }>;
-      const root = sessions
-        .filter(
-          (session) =>
-            session.id &&
-            !session.parentID &&
-            !session.title?.startsWith('[janitor-run] ') &&
-            !session.title?.startsWith('[reviewer-run] '),
-        )
-        .sort((a, b) => (b.time?.updated ?? 0) - (a.time?.updated ?? 0))[0];
-      return root?.id;
-    } catch {
-      return undefined;
-    }
   }
 }

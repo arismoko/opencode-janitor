@@ -4,3 +4,6 @@ dist/
 .references/
 *.tgz
 git-journal.md
+
+# Auto-generated linter config
+.markdownlint.yaml

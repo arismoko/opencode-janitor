@@ -1,20 +1,25 @@
 import { z } from 'zod';
 
-const TriggerModeSchema = z.enum(['commit', 'pr', 'both']);
+const TriggerModeSchema = z.enum(['commit', 'pr', 'both', 'manual', 'never']);
 
 type TriggerMode = z.infer<typeof TriggerModeSchema>;
 
-const AgentRuntimeSchema = (defaultTrigger: TriggerMode) =>
+const AgentRuntimeSchema = (
+  defaultTrigger: TriggerMode,
+  defaultMaxFindings = 10,
+) =>
   z.object({
     enabled: z.boolean().default(true),
     trigger: TriggerModeSchema.default(defaultTrigger),
     modelId: z.string().optional(),
     variant: z.string().optional(),
+    maxFindings: z.number().int().min(1).max(50).default(defaultMaxFindings),
   });
 
-const defaultAgentRuntime = (trigger: TriggerMode) => ({
+const defaultAgentRuntime = (trigger: TriggerMode, maxFindings = 10) => ({
   enabled: true,
   trigger,
+  maxFindings,
 });
 
 export const JanitorConfigSchema = z.object({
@@ -22,12 +27,10 @@ export const JanitorConfigSchema = z.object({
 
   autoReview: z
     .object({
-      onCommit: z.boolean().default(true),
       debounceMs: z.number().int().min(0).default(1200),
       pollFallbackSec: z.number().int().min(5).default(15),
     })
     .default(() => ({
-      onCommit: true,
       debounceMs: 1200,
       pollFallbackSec: 15,
     })),
@@ -37,25 +40,19 @@ export const JanitorConfigSchema = z.object({
       janitor: AgentRuntimeSchema('commit').default(() =>
         defaultAgentRuntime('commit'),
       ),
-      reviewer: AgentRuntimeSchema('pr').default(() =>
-        defaultAgentRuntime('pr'),
+      hunter: AgentRuntimeSchema('pr').default(() => defaultAgentRuntime('pr')),
+      inspector: AgentRuntimeSchema('manual').default(() =>
+        defaultAgentRuntime('manual'),
+      ),
+      scribe: AgentRuntimeSchema('manual').default(() =>
+        defaultAgentRuntime('manual'),
       ),
     })
     .default(() => ({
       janitor: defaultAgentRuntime('commit'),
-      reviewer: defaultAgentRuntime('pr'),
-    })),
-
-  categories: z
-    .object({
-      DRY: z.boolean().default(true),
-      DEAD: z.boolean().default(true),
-      STRUCTURAL: z.boolean().default(true),
-    })
-    .default(() => ({
-      DRY: true,
-      DEAD: true,
-      STRUCTURAL: true,
+      hunter: defaultAgentRuntime('pr'),
+      inspector: defaultAgentRuntime('manual'),
+      scribe: defaultAgentRuntime('manual'),
     })),
 
   scope: z
@@ -89,9 +86,8 @@ export const JanitorConfigSchema = z.object({
   model: z
     .object({
       id: z.string().optional(),
-      maxFindings: z.number().int().min(1).max(50).default(10),
     })
-    .default(() => ({ maxFindings: 10 })),
+    .default(() => ({})),
 
   diff: z
     .object({
@@ -110,23 +106,20 @@ export const JanitorConfigSchema = z.object({
       toast: z.boolean().default(true),
       sessionMessage: z.boolean().default(true),
       noReply: z.boolean().default(true),
-      reportFile: z.boolean().default(true),
       reportDir: z.string().default('.janitor/reports'),
-      reviewer: z
+      hunter: z
         .object({
           toast: z.boolean().default(true),
           sessionMessage: z.boolean().default(true),
           noReply: z.boolean().default(true),
-          reportFile: z.boolean().default(true),
-          reportDir: z.string().default('.janitor/reviewer-reports'),
+          reportDir: z.string().default('.janitor/hunter-reports'),
           prComment: z.boolean().default(true),
         })
         .default(() => ({
           toast: true,
           sessionMessage: true,
           noReply: true,
-          reportFile: true,
-          reportDir: '.janitor/reviewer-reports',
+          reportDir: '.janitor/hunter-reports',
           prComment: true,
         })),
     })
@@ -134,14 +127,12 @@ export const JanitorConfigSchema = z.object({
       toast: true,
       sessionMessage: true,
       noReply: true,
-      reportFile: true,
       reportDir: '.janitor/reports',
-      reviewer: {
+      hunter: {
         toast: true,
         sessionMessage: true,
         noReply: true,
-        reportFile: true,
-        reportDir: '.janitor/reviewer-reports',
+        reportDir: '.janitor/hunter-reports',
         prComment: true,
       },
     })),

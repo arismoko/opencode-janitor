@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { FINDING_CATEGORIES } from '../types';
+import { JanitorDomain } from '../schemas/finding';
 
 const SuppressionSchema = z.object({
   exactKey: z.string(),
@@ -10,7 +10,7 @@ const SuppressionSchema = z.object({
   lastSeenAt: z.string().datetime(),
   ttlDays: z.number().int().min(1),
   original: z.object({
-    category: z.enum(FINDING_CATEGORIES),
+    domain: JanitorDomain,
     location: z.string(),
     evidence: z.string(),
     prescription: z.string(),

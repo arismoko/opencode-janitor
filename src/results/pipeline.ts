@@ -17,12 +17,14 @@ import type { EnrichmentData } from '../history/enrichment';
 import type { HistoryStore } from '../history/store';
 import { computeTrends } from '../history/trends';
 import type { ReviewRecord } from '../history/types';
+import type { JanitorOutput } from '../schemas/finding';
+import { JanitorOutput as JanitorOutputSchema } from '../schemas/finding';
 import { createSuppression } from '../suppressions/lifecycle';
 import { matchSuppression } from '../suppressions/matcher';
 import type { SuppressionStore } from '../suppressions/store';
 import type { Finding, ReviewResult } from '../types';
 import { log } from '../utils/logger';
-import { parseReviewOutput } from './parser';
+import { parseAgentOutput } from './agent-output-codec';
 
 export interface PipelineResult {
   result: ReviewResult;
@@ -40,7 +42,7 @@ export interface PipelineDeps {
  * Process raw review output through the full post-processing pipeline.
  *
  * This is the single entry point that replaces direct parseReviewOutput
- * calls in the orchestrator. The flow:
+ * calls in the queue. The flow:
  *
  *   raw text → parse → suppress → annotate → enrich → record → result
  */
@@ -52,7 +54,24 @@ export async function processReviewOutput(
   const { suppressionStore, historyStore, config } = deps;
 
   // Step 1: Parse raw output into findings
-  const parsed = parseReviewOutput(raw, sha);
+  const { output, meta } = parseAgentOutput(raw, JanitorOutputSchema);
+  if (meta.status !== 'ok') {
+    throw new Error(`Janitor parse failed (${meta.status}): ${meta.error}`);
+  }
+  const parsed: ReviewResult = {
+    sha,
+    subject: '',
+    date: new Date(),
+    findings: output.findings.map((f) => ({
+      location: f.location,
+      severity: f.severity,
+      evidence: f.evidence,
+      prescription: f.prescription,
+      domain: f.domain,
+    })),
+    clean: output.findings.length === 0,
+    raw,
+  };
 
   // If both memory systems are disabled, short-circuit
   const suppressionsEnabled = config.suppressions?.enabled ?? true;
@@ -78,7 +97,7 @@ export async function processReviewOutput(
         // Collect key to batch-touch after the loop
         touchedKeys.push(match.suppression.exactKey);
         log(
-          `[pipeline] suppressed: ${finding.category} @ ${finding.location} (${match.tier})`,
+          `[pipeline] suppressed: ${finding.domain} @ ${finding.location} (${match.tier})`,
         );
       } else {
         kept.push(finding);
@@ -129,7 +148,7 @@ export async function processReviewOutput(
         return {
           exactKey: fp.exactKey,
           scopedKey: fp.scopedKey,
-          category: f.category,
+          domain: f.domain,
           location: f.location,
         };
       }),
@@ -171,7 +190,7 @@ export async function processReviewOutput(
           });
           suppressionStore.add(suppression);
           log(
-            `[pipeline] auto-suppressed: ${annotated.finding.category} @ ${annotated.finding.location}`,
+            `[pipeline] auto-suppressed: ${annotated.finding.domain} @ ${annotated.finding.location}`,
           );
         }
       }

@@ -1,10 +1,10 @@
-import type { FindingCategory } from '../types';
+import type { JanitorDomain } from '../schemas/finding';
 
 /** A suppressed finding entry */
 export interface Suppression {
-  /** High-precision key: category|suffix2|shapeHash|evidenceHash */
+  /** High-precision key: domain|suffix2|shapeHash|evidenceHash */
   exactKey: string;
-  /** Rename-tolerant key: category|filename|shapeHash */
+  /** Rename-tolerant key: domain|filename|shapeHash */
   scopedKey: string;
   /** Which tier was used to create this */
   tier: 'exact' | 'scoped';
@@ -18,7 +18,7 @@ export interface Suppression {
   ttlDays: number;
   /** Original finding data for display */
   original: {
-    category: FindingCategory;
+    domain: JanitorDomain;
     location: string;
     evidence: string;
     prescription: string;

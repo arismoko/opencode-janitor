@@ -3,7 +3,7 @@ import { z } from 'zod';
 const ReviewFindingSchema = z.object({
   exactKey: z.string(),
   scopedKey: z.string(),
-  category: z.string(),
+  domain: z.string(),
   location: z.string(),
 });
 

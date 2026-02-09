@@ -1,41 +1,13 @@
 import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { atomicWriteSync } from '../utils/atomic-write';
-import { getErrorMessage, log, warn } from '../utils/logger';
+import { getErrorMessage, warn } from '../utils/logger';
+import { ensureJanitorGitignore } from '../utils/state-dir';
 import { isExpired } from './matcher';
 import { SuppressionsFileSchema } from './schema';
 import type { Suppression, SuppressionsFile } from './types';
 
 const MAX_SUPPRESSIONS = 200;
-
-/** Rewrite a single key's `YAGNI|` prefix to `STRUCTURAL|`. */
-function migrateCategoryPrefix(key: unknown): string | undefined {
-  return typeof key === 'string'
-    ? key.replace(/^YAGNI\|/, 'STRUCTURAL|')
-    : undefined;
-}
-
-/**
- * Migrate legacy YAGNI suppression entries to STRUCTURAL in-place.
- * Rewrites `original.category`, `exactKey`, and `scopedKey` so migrated
- * entries both pass schema validation and match new STRUCTURAL findings.
- * Returns true if any entries were migrated.
- */
-function migrateYagniEntries(parsed: Record<string, unknown>): boolean {
-  if (!Array.isArray(parsed?.suppressions)) return false;
-
-  let migrated = false;
-  for (const entry of parsed.suppressions) {
-    if (entry?.original?.category === 'YAGNI') {
-      entry.original.category = 'STRUCTURAL';
-      entry.exactKey = migrateCategoryPrefix(entry.exactKey) ?? entry.exactKey;
-      entry.scopedKey =
-        migrateCategoryPrefix(entry.scopedKey) ?? entry.scopedKey;
-      migrated = true;
-    }
-  }
-  return migrated;
-}
 
 /** Manages `.janitor/suppressions.json` persistence */
 export class SuppressionStore {
@@ -46,6 +18,7 @@ export class SuppressionStore {
   constructor(workspaceDir: string, opts?: { maxEntries?: number }) {
     this.filePath = join(workspaceDir, '.janitor', 'suppressions.json');
     this.maxEntries = opts?.maxEntries ?? MAX_SUPPRESSIONS;
+    ensureJanitorGitignore(workspaceDir);
     this.load();
   }
 
@@ -59,16 +32,6 @@ export class SuppressionStore {
       const raw = readFileSync(this.filePath, 'utf-8');
       const parsed = JSON.parse(raw);
 
-      // Migrate legacy YAGNI suppressions → STRUCTURAL before validation.
-      // YAGNI was merged into STRUCTURAL; without this, any pre-existing
-      // YAGNI entries would fail schema validation and cause load() to
-      // discard the entire suppressions file.
-      //
-      // Must also rewrite exactKey/scopedKey — both are prefixed with the
-      // category name (e.g. "YAGNI|utils/foo.ts:42|..."). Without this,
-      // migrated entries would never match new STRUCTURAL findings.
-      const migrated = migrateYagniEntries(parsed);
-
       const result = SuppressionsFileSchema.safeParse(parsed);
 
       if (!result.success) {
@@ -80,19 +43,6 @@ export class SuppressionStore {
       }
 
       this.suppressions = result.data.suppressions;
-
-      if (migrated) {
-        log('[suppressions] migrated legacy YAGNI entries → STRUCTURAL');
-        // Best-effort persist — don't let a write failure (read-only FS,
-        // disk full) discard the successfully parsed in-memory suppressions.
-        try {
-          this.save();
-        } catch (saveErr) {
-          warn('[suppressions] migration save failed, will retry next load', {
-            error: getErrorMessage(saveErr),
-          });
-        }
-      }
     } catch (err) {
       warn('Failed to read suppressions file', {
         path: this.filePath,

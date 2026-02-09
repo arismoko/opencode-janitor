@@ -1,72 +1,131 @@
 /**
  * Core domain types for opencode-janitor.
- * No internal imports — this is the leaf dependency.
+ *
+ * Enum values and finding shapes are derived from src/schemas/finding.ts
+ * (Zod schemas). This module re-exports derived types and defines
+ * result containers and infrastructure types.
  */
+import type {
+  HunterDomain as _HunterDomain,
+  HunterFinding as _HunterFinding,
+  InspectorDomain as _InspectorDomain,
+  InspectorFinding as _InspectorFinding,
+  JanitorDomain as _JanitorDomain,
+  JanitorFinding as _JanitorFinding,
+  ScribeDomain as _ScribeDomain,
+  ScribeFinding as _ScribeFinding,
+  Severity as _Severity,
+} from './schemas/finding';
+import {
+  HunterDomain as _HunterDomainSchema,
+  InspectorDomain as _InspectorDomainSchema,
+  JanitorDomain as _JanitorDomainSchema,
+  ScribeDomain as _ScribeDomainSchema,
+  Severity as _SeveritySchema,
+} from './schemas/finding';
 
-/** Canonical list of finding categories — single source of truth */
-export const FINDING_CATEGORIES = ['DRY', 'DEAD', 'STRUCTURAL'] as const;
+// ---------------------------------------------------------------------------
+// Re-exported schema-derived types (source of truth: schemas/finding.ts)
+// ---------------------------------------------------------------------------
 
-/** Category of structural issue (derived from FINDING_CATEGORIES) */
-export type FindingCategory = (typeof FINDING_CATEGORIES)[number];
+/** Janitor finding domain */
+export type JanitorDomain = _JanitorDomain;
 
-/** Pipe-separated category string for use in prompt output format instructions */
-export const CATEGORY_PIPE_STR = FINDING_CATEGORIES.join(' | ');
+/** Hunter finding domain */
+export type HunterDomain = _HunterDomain;
 
-/** Canonical reviewer severity guide — single source of truth for P0-P3 descriptions */
-export const REVIEWER_SEVERITY_GUIDE = [
-  'P0: Must fix before merge — correctness bugs, security holes, data loss risks',
-  'P1: Should fix before merge — performance regressions, architectural violations, missing error handling',
-  'P2: Fix soon — code quality, maintainability, minor edge cases',
-  'P3: Nice to have — style nits, minor improvements, documentation gaps',
+/** Inspector finding domain */
+export type InspectorDomain = _InspectorDomain;
+
+/** Scribe finding domain */
+export type ScribeDomain = _ScribeDomain;
+
+/** Severity level shared by all agents */
+export type Severity = _Severity;
+
+/** A single janitor finding (schema-derived) */
+export type Finding = _JanitorFinding;
+
+/** A single hunter finding (schema-derived) */
+export type HunterFinding = _HunterFinding;
+
+/** A single inspector finding (schema-derived) */
+export type InspectorFinding = _InspectorFinding;
+
+/** A single scribe finding (schema-derived) */
+export type ScribeFinding = _ScribeFinding;
+
+// ---------------------------------------------------------------------------
+// Runtime domain values (derived from Zod schema)
+// ---------------------------------------------------------------------------
+
+/** All valid hunter domain values as a runtime array */
+export const HUNTER_DOMAINS: readonly HunterDomain[] =
+  _HunterDomainSchema.options;
+
+/** All valid inspector domain values as a runtime array */
+export const INSPECTOR_DOMAINS: readonly InspectorDomain[] =
+  _InspectorDomainSchema.options;
+
+/** All valid scribe domain values as a runtime array */
+export const SCRIBE_DOMAINS: readonly ScribeDomain[] =
+  _ScribeDomainSchema.options;
+
+/** All valid severity values as a runtime array */
+export const SEVERITIES: readonly Severity[] = _SeveritySchema.options;
+
+// ---------------------------------------------------------------------------
+// Severity guide (descriptive text, not in schema)
+// ---------------------------------------------------------------------------
+
+/** Canonical severity guide — P0-P3 descriptions for prompts */
+export const SEVERITY_GUIDE = [
+  'P0: Must fix before merge — broken, vulnerable, or data-loss risk',
+  'P1: Should fix soon — clear defect or significant maintenance burden',
+  'P2: Fix when convenient — real issue but low blast radius',
+  'P3: Consider — minor, worth noting for future awareness',
 ] as const;
 
-/** Severity level type for reviewer findings */
-export type ReviewerSeverity = 'P0' | 'P1' | 'P2' | 'P3';
+// ---------------------------------------------------------------------------
+// Parse metadata
+// ---------------------------------------------------------------------------
 
-/** Allowed severity levels for reviewer findings (derived from REVIEWER_SEVERITY_GUIDE) */
-export const REVIEWER_SEVERITIES = REVIEWER_SEVERITY_GUIDE.map(
-  (s) => s.split(':')[0] as ReviewerSeverity,
-);
+export type ParseStatus = 'ok' | 'invalid_output' | 'empty_output';
 
-/** Allowed domain categories for reviewer findings */
-export const REVIEWER_DOMAINS = [
-  'BUG',
-  'SECURITY',
-  'PERFORMANCE',
-  'ARCHITECTURE',
-  'DOCS',
-  'SPEC',
-] as const;
-
-/** Domain category type for reviewer findings */
-export type ReviewerDomain = (typeof REVIEWER_DOMAINS)[number];
-
-/** A single finding from the code reviewer agent */
-export interface ReviewerFinding {
-  location: string;
-  severity: ReviewerSeverity;
-  domain: ReviewerDomain;
-  evidence: string;
-  prescription: string;
+export interface ParseMeta {
+  status: ParseStatus;
+  error?: string;
 }
 
-/** Parsed reviewer result */
-export interface ReviewerResult {
+// ---------------------------------------------------------------------------
+// Result containers
+// ---------------------------------------------------------------------------
+
+/** Parsed hunter result */
+export interface HunterResult {
   id: string;
-  findings: ReviewerFinding[];
+  findings: HunterFinding[];
   clean: boolean;
   raw: string;
 }
 
-/** A single P0 finding from the janitor agent */
-export interface Finding {
-  location: string;
-  category: FindingCategory;
-  evidence: string;
-  prescription: string;
+/** Parsed inspector result */
+export interface InspectorResult {
+  id: string;
+  findings: InspectorFinding[];
+  clean: boolean;
+  raw: string;
 }
 
-/** Parsed review result from the janitor agent */
+/** Parsed scribe result */
+export interface ScribeResult {
+  id: string;
+  findings: ScribeFinding[];
+  clean: boolean;
+  raw: string;
+}
+
+/** Parsed janitor review result */
 export interface ReviewResult {
   sha: string;
   subject: string;
@@ -75,6 +134,10 @@ export interface ReviewResult {
   clean: boolean;
   raw: string;
 }
+
+// ---------------------------------------------------------------------------
+// Git / infrastructure types
+// ---------------------------------------------------------------------------
 
 /** Changed file entry from git diff-tree */
 export interface ChangedFile {
@@ -90,6 +153,7 @@ export interface CommitContext {
   changedFiles: ChangedFile[];
   patch: string;
   patchTruncated: boolean;
+  deletionOnly: boolean;
 }
 
 /** Signal source for commit detection */
@@ -99,24 +163,4 @@ export type SignalSource = 'fswatch' | 'tool-hook' | 'poll';
 export interface CommitSignal {
   source: SignalSource;
   ts: number;
-}
-
-/** Review job in the orchestrator queue */
-export interface ReviewJob {
-  sha: string;
-  /** The root session that was active when this commit was detected. */
-  parentSessionId?: string;
-  /** The child review session spawned for this job. */
-  sessionId?: string;
-  status: 'pending' | 'running' | 'completed' | 'failed';
-  enqueuedAt: Date;
-  startedAt?: Date;
-  completedAt?: Date;
-  result?: ReviewResult;
-  error?: string;
-}
-
-/** Sink interface for delivering results */
-export interface ResultSink {
-  deliver(result: ReviewResult, parentSessionId?: string): Promise<void>;
 }

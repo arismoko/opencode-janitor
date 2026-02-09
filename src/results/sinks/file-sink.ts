@@ -8,42 +8,58 @@ import {
 import { join, resolve, sep } from 'node:path';
 import type { EnrichmentData } from '../../history/enrichment';
 import { buildHistorySection } from '../../history/enrichment';
-import type { ReviewResult } from '../../types';
 import { log, warn } from '../../utils/logger';
+import { ensureJanitorGitignore } from '../../utils/state-dir';
+
+export interface FileDeliveryOptions {
+  /** Short identifier used as filename (e.g. sha, pr id) */
+  fileId: string;
+  /** Report directory relative to workspace */
+  reportDir: string;
+  /** Workspace root directory */
+  workspaceDir: string;
+  /** Optional enrichment data appended as history section */
+  enrichment?: EnrichmentData;
+}
 
 /**
- * Write a janitor report to the filesystem.
- * Creates the report directory if it doesn't exist.
- * Also updates a `latest.md` symlink.
+ * Write a report to the filesystem.
+ *
+ * Unified sink replacing both `deliverToFile` and `deliverReviewerToFile`.
+ * Creates the report directory if it doesn't exist and updates a `latest.md` symlink.
  */
 export async function deliverToFile(
-  result: ReviewResult,
   report: string,
-  reportDir: string,
-  workspaceDir: string,
-  enrichment?: EnrichmentData,
+  opts: FileDeliveryOptions,
 ): Promise<void> {
   try {
-    const absDir = resolve(workspaceDir, reportDir);
-    const normalizedRoot = resolve(workspaceDir) + sep;
+    const absDir = resolve(opts.workspaceDir, opts.reportDir);
+    const normalizedRoot = resolve(opts.workspaceDir) + sep;
     if (
       !absDir.startsWith(normalizedRoot) &&
-      absDir !== resolve(workspaceDir)
+      absDir !== resolve(opts.workspaceDir)
     ) {
-      warn(`[file-sink] reportDir escapes workspace: ${reportDir}`);
+      warn(`[file-sink] reportDir escapes workspace: ${opts.reportDir}`);
       return;
     }
+
+    // Ensure .janitor/.gitignore exists so artifacts are never committed
+    ensureJanitorGitignore(opts.workspaceDir);
 
     // Ensure directory exists
     if (!existsSync(absDir)) {
       mkdirSync(absDir, { recursive: true });
     }
 
+    // Sanitize fileId for cross-platform filename safety (colons, slashes, etc.)
+    const safeFileId = opts.fileId.replace(/[<>:"/\\|?*]/g, '-');
+
     // Write report file
-    const shortSha = result.sha.slice(0, 7);
-    const filename = `${shortSha}.md`;
+    const filename = `${safeFileId}.md`;
     const filepath = join(absDir, filename);
-    const historySection = enrichment ? buildHistorySection(enrichment) : '';
+    const historySection = opts.enrichment
+      ? buildHistorySection(opts.enrichment)
+      : '';
     const fullReport = report + historySection;
     writeFileSync(filepath, fullReport, 'utf-8');
     log(`[file-sink] wrote report: ${filepath}`);

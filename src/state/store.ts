@@ -3,6 +3,7 @@ import { dirname, join } from 'node:path';
 import { atomicWriteSync } from '../utils/atomic-write';
 import { evictOldest, MAX_PROCESSED } from '../utils/eviction';
 import { log, warn } from '../utils/logger';
+import { ensureJanitorGitignore } from '../utils/state-dir';
 
 const STATE_FILE = '.janitor/state.json';
 
@@ -10,25 +11,29 @@ interface StateData {
   version?: number;
   processedShas: string[];
   processedPrKeys?: string[];
-  processedReviewerHeads?: string[];
-  pausedJanitor?: boolean;
-  pausedReviewer?: boolean;
+  processedHunterHeads?: string[];
+  paused?: Record<string, boolean>;
 }
 
 /**
- * In-memory store for tracking processed commits.
+ * Runtime state store for tracking processed reviews, PR keys, and agent control flags.
  * Optionally persists to `.janitor/state.json` for cross-session deduplication.
  */
-export class CommitStore {
+export class RuntimeStateStore {
   private processed = new Set<string>();
   private processedPrKeys = new Set<string>();
-  private processedReviewerHeads = new Set<string>();
-  private pausedJanitor = false;
-  private pausedReviewer = false;
+  private processedHunterHeads = new Set<string>();
+  private paused: Record<string, boolean> = {
+    janitor: false,
+    hunter: false,
+    inspector: false,
+    scribe: false,
+  };
   private statePath: string;
 
   constructor(workspaceDir: string) {
     this.statePath = join(workspaceDir, STATE_FILE);
+    ensureJanitorGitignore(workspaceDir);
     this.load();
   }
 
@@ -61,27 +66,26 @@ export class CommitStore {
     return this.processedPrKeys.has(key);
   }
 
-  /** Mark a reviewer head SHA as processed. */
-  addProcessedReviewerHead(headSha: string): void {
-    this.processedReviewerHeads.add(headSha);
+  /** Mark a hunter head SHA as processed. */
+  addProcessedHunterHead(headSha: string): void {
+    this.processedHunterHeads.add(headSha);
     this.evictOld();
     this.persist();
   }
 
-  /** Check whether reviewer already processed this head SHA. */
-  hasProcessedReviewerHead(headSha: string): boolean {
-    return this.processedReviewerHeads.has(headSha);
+  /** Check whether hunter already processed this head SHA. */
+  hasProcessedHunterHead(headSha: string): boolean {
+    return this.processedHunterHeads.has(headSha);
   }
 
   /** Read paused flags for command controls. */
-  getPaused(): { janitor: boolean; reviewer: boolean } {
-    return { janitor: this.pausedJanitor, reviewer: this.pausedReviewer };
+  getPaused(): Record<string, boolean> {
+    return { ...this.paused };
   }
 
   /** Persist paused flags for command controls. */
-  setPaused(flags: { janitor: boolean; reviewer: boolean }): void {
-    this.pausedJanitor = flags.janitor;
-    this.pausedReviewer = flags.reviewer;
+  setPaused(flags: Record<string, boolean>): void {
+    this.paused = { ...flags };
     this.persist();
   }
 
@@ -112,14 +116,17 @@ export class CommitStore {
         }
       }
 
-      if (Array.isArray(data.processedReviewerHeads)) {
-        for (const head of data.processedReviewerHeads) {
-          this.processedReviewerHeads.add(head);
+      if (Array.isArray(data.processedHunterHeads)) {
+        for (const head of data.processedHunterHeads) {
+          this.processedHunterHeads.add(head);
         }
       }
 
-      this.pausedJanitor = Boolean(data.pausedJanitor);
-      this.pausedReviewer = Boolean(data.pausedReviewer);
+      if (data.paused && typeof data.paused === 'object') {
+        for (const [name, value] of Object.entries(data.paused)) {
+          this.paused[name] = Boolean(value);
+        }
+      }
 
       log(
         `[store] loaded ${this.processed.size} processed commits and ${this.processedPrKeys.size} processed PR keys`,
@@ -143,9 +150,8 @@ export class CommitStore {
         version: 2,
         processedShas: [...this.processed],
         processedPrKeys: [...this.processedPrKeys],
-        processedReviewerHeads: [...this.processedReviewerHeads],
-        pausedJanitor: this.pausedJanitor,
-        pausedReviewer: this.pausedReviewer,
+        processedHunterHeads: [...this.processedHunterHeads],
+        paused: { ...this.paused },
       };
 
       atomicWriteSync(this.statePath, JSON.stringify(data, null, 2));
@@ -165,18 +171,18 @@ export class CommitStore {
     const beforePr = this.processedPrKeys.size;
     evictOldest(this.processedPrKeys, MAX_PROCESSED);
     const evictedPr = beforePr - this.processedPrKeys.size;
-    const beforeReviewerHeads = this.processedReviewerHeads.size;
-    evictOldest(this.processedReviewerHeads, MAX_PROCESSED);
-    const evictedReviewerHeads =
-      beforeReviewerHeads - this.processedReviewerHeads.size;
+    const beforeHunterHeads = this.processedHunterHeads.size;
+    evictOldest(this.processedHunterHeads, MAX_PROCESSED);
+    const evictedHunterHeads =
+      beforeHunterHeads - this.processedHunterHeads.size;
     if (evicted > 0) {
       log(`[store] evicted ${evicted} old entries`);
     }
     if (evictedPr > 0) {
       log(`[store] evicted ${evictedPr} old PR entries`);
     }
-    if (evictedReviewerHeads > 0) {
-      log(`[store] evicted ${evictedReviewerHeads} old reviewer head entries`);
+    if (evictedHunterHeads > 0) {
+      log(`[store] evicted ${evictedHunterHeads} old hunter head entries`);
     }
   }
 }

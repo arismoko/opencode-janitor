@@ -2,9 +2,11 @@ import type { JanitorConfig } from '../config/schema';
 import type { ChangedFile } from '../types';
 import { truncatePatch } from '../utils/limits';
 import { log, warn } from '../utils/logger';
+import { branchKey, prKey, workspaceKey } from '../utils/review-key';
 import {
   getWorkspaceChangedFiles as getWorkspaceChangedFilesShared,
   getWorkspacePatch as getWorkspacePatchShared,
+  shellEscapeQuoted,
 } from '../utils/workspace-git';
 
 /** Full PR context for building review prompts */
@@ -38,13 +40,19 @@ export async function getPrContext(opts: GetPrContextOpts): Promise<PrContext> {
   // Resolve head SHA
   let headSha = opts.headSha;
   if (!headSha) {
-    headSha = (await exec(`git rev-parse ${headRef}`)).trim();
+    headSha = (
+      await exec(`git rev-parse ${shellEscapeQuoted(headRef)}`)
+    ).trim();
   }
 
   // Compute merge base
   let mergeBase: string;
   try {
-    mergeBase = (await exec(`git merge-base ${baseRef} ${headRef}`)).trim();
+    mergeBase = (
+      await exec(
+        `git merge-base ${shellEscapeQuoted(baseRef)} ${shellEscapeQuoted(headRef)}`,
+      )
+    ).trim();
   } catch (err) {
     warn(
       `[pr-context-resolver] merge-base failed, falling back to baseRef: ${err}`,
@@ -60,8 +68,8 @@ export async function getPrContext(opts: GetPrContextOpts): Promise<PrContext> {
 
   // Build key
   const key = opts.number
-    ? `pr:${opts.number}:${headSha}`
-    : `branch:${headRef}:${headSha}`;
+    ? prKey(opts.number, headSha)
+    : branchKey(headRef, headSha);
 
   return {
     key,
@@ -94,7 +102,7 @@ export async function getWorkspacePrContext(
   );
 
   return {
-    key: `workspace:${headRef}:${headSha}`,
+    key: workspaceKey(headRef, headSha),
     headSha,
     baseRef: config.pr.baseBranch,
     headRef,
@@ -113,7 +121,9 @@ async function getChangedFiles(
   exec: (cmd: string) => Promise<string>,
 ): Promise<ChangedFile[]> {
   try {
-    const raw = await exec(`git diff --name-status ${mergeBase}..${headRef}`);
+    const raw = await exec(
+      `git diff --name-status ${shellEscapeQuoted(mergeBase)}..${shellEscapeQuoted(headRef)}`,
+    );
     return raw
       .trim()
       .split('\n')
@@ -138,7 +148,9 @@ async function getPatch(
   exec: (cmd: string) => Promise<string>,
 ): Promise<{ content: string; truncated: boolean }> {
   try {
-    const raw = await exec(`git diff --no-color ${mergeBase}..${headRef}`);
+    const raw = await exec(
+      `git diff --no-color ${shellEscapeQuoted(mergeBase)}..${shellEscapeQuoted(headRef)}`,
+    );
 
     const result = truncatePatch(raw, {
       maxPatchBytes: config.diff.maxPatchBytes,

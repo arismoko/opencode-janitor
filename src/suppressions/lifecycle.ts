@@ -20,7 +20,7 @@ export function createSuppression(
     lastSeenAt: now,
     ttlDays: opts?.ttlDays ?? 90,
     original: {
-      category: finding.category,
+      domain: finding.domain,
       location: finding.location,
       evidence: finding.evidence,
       prescription: finding.prescription,

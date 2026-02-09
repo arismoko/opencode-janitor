@@ -32,6 +32,9 @@ export async function getCommitContext(
   // Get patch
   const patch = await getPatch(sha, parents, config, exec);
 
+  const deletionOnly =
+    changedFiles.length > 0 && changedFiles.every((f) => f.status === 'D');
+
   return {
     sha: fullSha,
     subject,
@@ -39,6 +42,7 @@ export async function getCommitContext(
     changedFiles,
     patch: patch.content,
     patchTruncated: patch.truncated,
+    deletionOnly,
   };
 }
 
@@ -58,6 +62,9 @@ export async function getWorkspaceCommitContext(
     '[commit-resolver]',
   );
 
+  const deletionOnly =
+    changedFiles.length > 0 && changedFiles.every((f) => f.status === 'D');
+
   return {
     sha: headSha,
     subject: `workspace ${branch || 'HEAD'}`,
@@ -65,6 +72,7 @@ export async function getWorkspaceCommitContext(
     changedFiles,
     patch: patch.content,
     patchTruncated: patch.truncated,
+    deletionOnly,
   };
 }
 

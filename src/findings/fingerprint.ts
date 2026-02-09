@@ -2,8 +2,8 @@
  * Shared fingerprinting for findings.
  *
  * Produces two keys per finding:
- * - exactKey: high-precision (category + path suffix + shape + evidence hash)
- * - scopedKey: rename-tolerant (category + filename + shape hash)
+ * - exactKey: high-precision (domain + path suffix + shape + evidence hash)
+ * - scopedKey: rename-tolerant (domain + filename + shape hash)
  *
  * Used by both suppression memory and review history.
  * Leaf module — zero internal dependencies.
@@ -18,7 +18,7 @@ export interface FindingFingerprint {
  * Compute fingerprint keys for a finding.
  */
 export function fingerprint(finding: {
-  category: string;
+  domain: string;
   location: string;
   evidence: string;
 }): FindingFingerprint {
@@ -27,8 +27,8 @@ export function fingerprint(finding: {
   const evidence = fnv1a(finding.evidence.trim());
 
   return {
-    exactKey: `${finding.category}|${suffix}|${shape}|${evidence}`,
-    scopedKey: `${finding.category}|${basename(finding.location)}|${shape}`,
+    exactKey: `${finding.domain}|${suffix}|${shape}|${evidence}`,
+    scopedKey: `${finding.domain}|${basename(finding.location)}|${shape}`,
   };
 }
 
