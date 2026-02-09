@@ -84,7 +84,7 @@ export function createAgentDefinition(
       variant,
       temperature: 0.1,
       prompt: buildPromptFromProfile(profile),
-      mode: 'primary',
+      mode: 'subagent',
       permission: REVIEW_AGENT_PERMISSIONS,
     },
   };
