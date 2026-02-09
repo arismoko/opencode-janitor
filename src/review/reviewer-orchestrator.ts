@@ -2,7 +2,7 @@ import type { PluginInput } from '@opencode-ai/plugin';
 import type { JanitorConfig } from '../config/schema';
 import type { PrContext } from '../git/pr-context-resolver';
 import { parseAgentOutput } from '../results/agent-output-codec';
-import { formatReviewerReport } from '../results/reviewer-formatter';
+import { renderReport } from '../results/report-renderer';
 import { deliverReviewerToFile } from '../results/sinks/reviewer-file-sink';
 import { deliverReviewerToSession } from '../results/sinks/reviewer-session-sink';
 import { deliverReviewerToast } from '../results/sinks/reviewer-toast-sink';
@@ -75,7 +75,12 @@ export class ReviewerOrchestrator extends BaseOrchestrator<
       clean: output.findings.length === 0,
       raw: rawOutput,
     };
-    const report = formatReviewerReport(result);
+    const report = renderReport(result.findings, result.clean, {
+      title: 'Reviewer Report',
+      shortId: resultId.slice(0, 12),
+      findingLabel: 'issue',
+      showSeverityDomain: true,
+    });
 
     job.completedAt = new Date();
     job.result = result;
