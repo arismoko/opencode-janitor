@@ -1,7 +1,10 @@
 import { toJSONSchema } from 'zod';
 import type { JanitorConfig } from '../config/schema';
-import type { AgentProfile } from './agent-profiles';
-import { resolveAgentModel } from './agent-profiles';
+import {
+  AGENT_PROFILES,
+  type AgentProfile,
+  resolveAgentModel,
+} from './agent-profiles';
 
 // ---------------------------------------------------------------------------
 // Agent definition shape (matches OpenCode's AgentConfig)
@@ -85,4 +88,16 @@ export function createAgentDefinition(
       permission: REVIEW_AGENT_PERMISSIONS,
     },
   };
+}
+
+/**
+ * Create an agent definition by name.
+ *
+ * Looks up the profile from AGENT_PROFILES and delegates to the factory.
+ */
+export function createAgent(
+  name: keyof typeof AGENT_PROFILES,
+  config: JanitorConfig,
+): AgentDefinition {
+  return createAgentDefinition(AGENT_PROFILES[name], config);
 }

@@ -184,3 +184,15 @@ export function resolveAgentModel(
     variant: agentConfig.variant,
   };
 }
+
+// ---------------------------------------------------------------------------
+// Profile registry — data-driven agent lookup
+// ---------------------------------------------------------------------------
+
+/** All agent profiles keyed by agent name. */
+export const AGENT_PROFILES = {
+  janitor: JANITOR_PROFILE,
+  hunter: HUNTER_PROFILE,
+  inspector: INSPECTOR_PROFILE,
+  scribe: SCRIBE_PROFILE,
+} as const;
