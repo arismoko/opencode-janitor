@@ -28,12 +28,13 @@ import { PrDetector } from './git/pr-detector';
 import { resolveGitDir } from './git/repo-locator';
 import { HistoryStore } from './history/store';
 import { createJanitorAgent } from './review/janitor-agent';
-import { ReviewOrchestrator } from './review/orchestrator';
 import { buildReviewPrompt } from './review/prompt-builder';
+import { ReviewRunQueue } from './review/review-run-queue';
 import { createReviewerAgent } from './review/reviewer-agent';
-import { ReviewerOrchestrator } from './review/reviewer-orchestrator';
 import { buildReviewerPrompt } from './review/reviewer-prompt-builder';
 import { spawnReview } from './review/runner';
+import { JanitorStrategy } from './review/strategies/janitor-strategy';
+import { ReviewerStrategy } from './review/strategies/reviewer-strategy';
 import { CommitStore } from './state/store';
 import { buildSuppressionsBlock } from './suppressions/prompt';
 import { SuppressionStore } from './suppressions/store';
@@ -212,7 +213,11 @@ const TheJanitor: Plugin = async (ctx) => {
   const previouslyProcessedPrKeys = store.getProcessedPrKeys();
 
   // Orchestrator handles queuing and review lifecycle
-  const orchestrator = new ReviewOrchestrator(
+  const janitorStrategy = new JanitorStrategy(suppressionStore, historyStore);
+  const orchestrator = new ReviewRunQueue<
+    string,
+    import('./types').ReviewResult
+  >(
     config,
     async (runKey) => {
       const workspace = runKey.startsWith('workspace:');
@@ -261,8 +266,8 @@ const TheJanitor: Plugin = async (ctx) => {
       });
       return sessionId;
     },
-    suppressionStore,
-    historyStore,
+    janitorStrategy,
+    'orchestrator',
   );
 
   // Persist SHA only after review completes successfully
@@ -275,9 +280,18 @@ const TheJanitor: Plugin = async (ctx) => {
   // Give orchestrator access to the SDK client for error injection
   orchestrator.setContext(ctx);
 
-  const reviewerOrchestrator = new ReviewerOrchestrator(
+  const reviewerStrategy = new ReviewerStrategy(
+    async (prNumber: number, body: string) => {
+      if (!(await isGhAvailable(exec))) return false;
+      return postPrReviewWithGh(exec, prNumber, body);
+    },
+  );
+  const reviewerOrchestrator = new ReviewRunQueue<
+    PrContext,
+    import('./types').ReviewerResult
+  >(
     config,
-    async (prContext) => {
+    async (prContext: PrContext) => {
       const prompt = buildReviewerPrompt(prContext, {
         scopeInclude: config.scope.include,
         scopeExclude: config.scope.exclude,
@@ -299,13 +313,11 @@ const TheJanitor: Plugin = async (ctx) => {
       });
       return sessionId;
     },
-    async (prNumber, body) => {
-      if (!(await isGhAvailable(exec))) return false;
-      return postPrReviewWithGh(exec, prNumber, body);
-    },
+    reviewerStrategy,
+    'reviewer-orchestrator',
   );
   reviewerOrchestrator.setContext(ctx);
-  reviewerOrchestrator.onCompleted((key) => {
+  reviewerOrchestrator.onCompleted((key: string) => {
     if (key.startsWith('workspace:')) return;
     store.addPrKey(key);
     const headSha = extractReviewerHeadFromKey(key);

@@ -1,63 +1,43 @@
 import type { PluginInput } from '@opencode-ai/plugin';
-import type { JanitorConfig } from '../config/schema';
-import type { PrContext } from '../git/pr-context-resolver';
-import { parseAgentOutput } from '../results/agent-output-codec';
-import { renderReport } from '../results/report-renderer';
-import { deliverToFile } from '../results/sinks/file-sink';
-import { deliverToSession } from '../results/sinks/session-sink';
-import { deliverToast } from '../results/sinks/toast-sink';
-import { HunterOutput as HunterOutputSchema } from '../schemas/finding';
-import type { ReviewerResult } from '../types';
-import { log } from '../utils/logger';
-import { extractWorkspaceHeadFromKey } from '../utils/review-key';
-import { type BaseJob, BaseOrchestrator } from './base-orchestrator';
-
-type ReviewerExecutor = (context: PrContext) => Promise<string>;
+import type { JanitorConfig } from '../../config/schema';
+import type { PrContext } from '../../git/pr-context-resolver';
+import { parseAgentOutput } from '../../results/agent-output-codec';
+import { renderReport } from '../../results/report-renderer';
+import { deliverToFile } from '../../results/sinks/file-sink';
+import { deliverToSession } from '../../results/sinks/session-sink';
+import { deliverToast } from '../../results/sinks/toast-sink';
+import { HunterOutput as HunterOutputSchema } from '../../schemas/finding';
+import type { ReviewerResult } from '../../types';
+import { log } from '../../utils/logger';
+import { extractWorkspaceHeadFromKey } from '../../utils/review-key';
+import type { BaseJob, ReviewStrategy } from '../review-run-queue';
 
 type GhPostReview = (prNumber: number, body: string) => Promise<boolean>;
 
-/**
- * Comprehensive code reviewer orchestrator for PR-level reviews.
- *
- * Extends the shared base with:
- * - PrContext-keyed deduplication
- * - Reviewer-specific JSON parsing
- * - Reviewer delivery sinks (including gh pr review)
- */
-export class ReviewerOrchestrator extends BaseOrchestrator<
-  PrContext,
-  ReviewerResult
-> {
-  private onReviewCompleted?: (key: string) => void;
+export class ReviewerStrategy
+  implements ReviewStrategy<PrContext, ReviewerResult>
+{
+  constructor(private readonly postGhReview?: GhPostReview) {}
 
-  constructor(
-    config: JanitorConfig,
-    executor: ReviewerExecutor,
-    private readonly postGhReview?: GhPostReview,
-  ) {
-    super(config, executor, 'reviewer-orchestrator');
-  }
-
-  /** Register a callback invoked when a reviewer run completes successfully. */
-  onCompleted(callback: (key: string) => void): void {
-    this.onReviewCompleted = callback;
-  }
-
-  protected extractKey(context: PrContext): string {
+  extractKey(context: PrContext): string {
     return context.key;
   }
 
-  protected errorLabel(key: string): string {
+  errorLabel(key: string): string {
     return `\`${key}\``;
   }
 
-  protected async onJobCompleted(
+  async onJobCompleted(
     job: BaseJob<PrContext, ReviewerResult>,
     sessionId: string,
     ctx: PluginInput,
     config: JanitorConfig,
+    extractAssistantOutput: (
+      sessionId: string,
+      ctx: PluginInput,
+    ) => Promise<string>,
   ): Promise<void> {
-    const rawOutput = await this.extractAssistantOutput(sessionId, ctx);
+    const rawOutput = await extractAssistantOutput(sessionId, ctx);
     const resultId = extractWorkspaceHeadFromKey(job.key);
     const { output, meta } = parseAgentOutput(rawOutput, HunterOutputSchema);
     if (meta.status !== 'ok') {
@@ -87,9 +67,6 @@ export class ReviewerOrchestrator extends BaseOrchestrator<
     job.result = result;
 
     await this.deliverResults(result, report, shortId, job, ctx, config);
-
-    // Persist key only after successful extraction + delivery
-    this.onReviewCompleted?.(job.key);
   }
 
   private async deliverResults(
@@ -103,15 +80,10 @@ export class ReviewerOrchestrator extends BaseOrchestrator<
     const delivery = config.delivery.reviewer;
 
     if (delivery.toast) {
-      await deliverToast(ctx, result, {
-        label: 'Code Review',
-        shortId,
-      });
+      await deliverToast(ctx, result, { label: 'Code Review', shortId });
     }
 
     if (delivery.sessionMessage && job.deliverySessionId && !result.clean) {
-      // Skip session injection when a PR comment will be posted —
-      // the PR comment is the primary delivery channel in that case.
       const willPostPr =
         delivery.prComment &&
         config.pr.postWithGh &&
@@ -143,7 +115,7 @@ export class ReviewerOrchestrator extends BaseOrchestrator<
       const posted = await this.postGhReview(job.context.number, report);
       if (posted) {
         log(
-          `[reviewer-orchestrator] posted GH review for PR #${job.context.number}`,
+          `[reviewer-strategy] posted GH review for PR #${job.context.number}`,
         );
       }
     }
