@@ -8,13 +8,19 @@
 import type {
   HunterDomain as _HunterDomain,
   HunterFinding as _HunterFinding,
+  InspectorDomain as _InspectorDomain,
+  InspectorFinding as _InspectorFinding,
   JanitorDomain as _JanitorDomain,
   JanitorFinding as _JanitorFinding,
+  ScribeDomain as _ScribeDomain,
+  ScribeFinding as _ScribeFinding,
   Severity as _Severity,
 } from './schemas/finding';
 import {
   HunterDomain as _HunterDomainSchema,
+  InspectorDomain as _InspectorDomainSchema,
   JanitorDomain as _JanitorDomainSchema,
+  ScribeDomain as _ScribeDomainSchema,
   Severity as _SeveritySchema,
 } from './schemas/finding';
 
@@ -28,6 +34,12 @@ export type JanitorDomain = _JanitorDomain;
 /** Hunter finding domain */
 export type HunterDomain = _HunterDomain;
 
+/** Inspector finding domain */
+export type InspectorDomain = _InspectorDomain;
+
+/** Scribe finding domain */
+export type ScribeDomain = _ScribeDomain;
+
 /** Severity level shared by all agents */
 export type Severity = _Severity;
 
@@ -37,6 +49,12 @@ export type Finding = _JanitorFinding;
 /** A single hunter finding (schema-derived) */
 export type HunterFinding = _HunterFinding;
 
+/** A single inspector finding (schema-derived) */
+export type InspectorFinding = _InspectorFinding;
+
+/** A single scribe finding (schema-derived) */
+export type ScribeFinding = _ScribeFinding;
+
 // ---------------------------------------------------------------------------
 // Runtime domain values (derived from Zod schema)
 // ---------------------------------------------------------------------------
@@ -44,6 +62,14 @@ export type HunterFinding = _HunterFinding;
 /** All valid hunter domain values as a runtime array */
 export const HUNTER_DOMAINS: readonly HunterDomain[] =
   _HunterDomainSchema.options;
+
+/** All valid inspector domain values as a runtime array */
+export const INSPECTOR_DOMAINS: readonly InspectorDomain[] =
+  _InspectorDomainSchema.options;
+
+/** All valid scribe domain values as a runtime array */
+export const SCRIBE_DOMAINS: readonly ScribeDomain[] =
+  _ScribeDomainSchema.options;
 
 /** All valid severity values as a runtime array */
 export const SEVERITIES: readonly Severity[] = _SeveritySchema.options;
@@ -79,6 +105,22 @@ export interface ParseMeta {
 export interface HunterResult {
   id: string;
   findings: HunterFinding[];
+  clean: boolean;
+  raw: string;
+}
+
+/** Parsed inspector result */
+export interface InspectorResult {
+  id: string;
+  findings: InspectorFinding[];
+  clean: boolean;
+  raw: string;
+}
+
+/** Parsed scribe result */
+export interface ScribeResult {
+  id: string;
+  findings: ScribeFinding[];
   clean: boolean;
   raw: string;
 }

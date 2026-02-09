@@ -69,3 +69,43 @@ export const HunterOutput = z.object({
   findings: z.array(HunterFinding),
 });
 export type HunterOutput = z.infer<typeof HunterOutput>;
+
+// ---------------------------------------------------------------------------
+// Inspector schemas
+// ---------------------------------------------------------------------------
+
+/** Inspector domain categories */
+export const InspectorDomain = z.enum(['COMPLEXITY', 'DESIGN', 'SMELL']);
+export type InspectorDomain = z.infer<typeof InspectorDomain>;
+
+/** A single inspector finding */
+export const InspectorFinding = BaseFinding.extend({
+  domain: InspectorDomain,
+});
+export type InspectorFinding = z.infer<typeof InspectorFinding>;
+
+/** Top-level inspector output */
+export const InspectorOutput = z.object({
+  findings: z.array(InspectorFinding),
+});
+export type InspectorOutput = z.infer<typeof InspectorOutput>;
+
+// ---------------------------------------------------------------------------
+// Scribe schemas
+// ---------------------------------------------------------------------------
+
+/** Scribe domain categories */
+export const ScribeDomain = z.enum(['DRIFT', 'GAP', 'RELEASE']);
+export type ScribeDomain = z.infer<typeof ScribeDomain>;
+
+/** A single scribe finding */
+export const ScribeFinding = BaseFinding.extend({
+  domain: ScribeDomain,
+});
+export type ScribeFinding = z.infer<typeof ScribeFinding>;
+
+/** Top-level scribe output */
+export const ScribeOutput = z.object({
+  findings: z.array(ScribeFinding),
+});
+export type ScribeOutput = z.infer<typeof ScribeOutput>;
