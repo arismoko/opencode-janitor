@@ -11,6 +11,7 @@ import type { PluginInput } from '@opencode-ai/plugin';
 import { HunterStrategy } from '../review/strategies/hunter-strategy';
 import { InspectorStrategy } from '../review/strategies/inspector-strategy';
 import { JanitorStrategy } from '../review/strategies/janitor-strategy';
+import { ScribeStrategy } from '../review/strategies/scribe-strategy';
 import { log } from '../utils/logger';
 import { createAgentQueues } from './agent-runtime';
 import { AgentRuntimeRegistry } from './agent-runtime-registry';
@@ -41,17 +42,17 @@ export async function bootstrapRuntime(
   registry.register(JanitorStrategy.createSpec(svc.suppressionStore));
   registry.register(HunterStrategy.createSpec());
   registry.register(InspectorStrategy.createSpec());
+  registry.register(ScribeStrategy.createSpec());
 
-  const { janitorQueue, hunterQueue, inspectorQueue } = createAgentQueues(
-    svc,
-    registry,
-  );
+  const { janitorQueue, hunterQueue, inspectorQueue, scribeQueue } =
+    createAgentQueues(svc, registry);
 
   // Session ownership dispatcher — targeted event routing instead of broadcast
   const dispatcher = new SessionOwnershipDispatcher();
   janitorQueue.setDispatcher(dispatcher);
   hunterQueue.setDispatcher(dispatcher);
   inspectorQueue.setDispatcher(dispatcher);
+  scribeQueue.setDispatcher(dispatcher);
 
   // Forward-declare rcRef so closures created below can reference it.
   // By the time any closure executes (after start()), rcRef is assigned.
@@ -89,6 +90,7 @@ export async function bootstrapRuntime(
     janitorQueue,
     hunterQueue,
     inspectorQueue,
+    scribeQueue,
     dispatcher,
     detector,
     prDetector,
@@ -120,12 +122,15 @@ export async function bootstrapRuntime(
     janitorQueue.shutdown();
     hunterQueue.shutdown();
     inspectorQueue.shutdown();
+    scribeQueue.shutdown();
     janitorQueue.clearPending();
     hunterQueue.clearPending();
     inspectorQueue.clearPending();
+    scribeQueue.clearPending();
     await janitorQueue.abortRunning(ctx);
     await hunterQueue.abortRunning(ctx);
     await inspectorQueue.abortRunning(ctx);
+    await scribeQueue.abortRunning(ctx);
     log('plugin runtime stopped: detectors halted');
   };
 

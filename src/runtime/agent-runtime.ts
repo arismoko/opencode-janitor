@@ -15,7 +15,13 @@ import { spawnReview } from '../review/runner';
 import { HunterStrategy } from '../review/strategies/hunter-strategy';
 import { InspectorStrategy } from '../review/strategies/inspector-strategy';
 import { JanitorStrategy } from '../review/strategies/janitor-strategy';
-import type { HunterResult, InspectorResult, ReviewResult } from '../types';
+import { ScribeStrategy } from '../review/strategies/scribe-strategy';
+import type {
+  HunterResult,
+  InspectorResult,
+  ReviewResult,
+  ScribeResult,
+} from '../types';
 import { log } from '../utils/logger';
 import { extractHeadSha } from '../utils/review-key';
 import type { AgentRuntimeRegistry } from './agent-runtime-registry';
@@ -30,6 +36,7 @@ export interface AgentQueues {
   janitorQueue: ReviewRunQueue<string, ReviewResult>;
   hunterQueue: ReviewRunQueue<PrContext, HunterResult>;
   inspectorQueue: ReviewRunQueue<string, InspectorResult>;
+  scribeQueue: ReviewRunQueue<string, ScribeResult>;
 }
 
 // ---------------------------------------------------------------------------
@@ -140,5 +147,27 @@ export function createAgentQueues(
   );
   inspectorQueue.setContext(ctx);
 
-  return { janitorQueue, hunterQueue, inspectorQueue };
+  // Scribe
+  const scribeSpec = registry.get<string>('scribe');
+  const scribeStrategy = new ScribeStrategy();
+  const scribeExecutor = createSpecExecutor(scribeSpec, {
+    ctx,
+    config,
+    exec,
+    trackedSessions,
+    writeSessionMeta,
+    buildPrompt: buildReviewPrompt,
+    spawnReview,
+    extractKey: scribeStrategy.extractKey.bind(scribeStrategy),
+  });
+
+  const scribeQueue = new ReviewRunQueue<string, ScribeResult>(
+    config,
+    scribeExecutor,
+    scribeStrategy,
+    scribeSpec.queueTag,
+  );
+  scribeQueue.setContext(ctx);
+
+  return { janitorQueue, hunterQueue, inspectorQueue, scribeQueue };
 }
