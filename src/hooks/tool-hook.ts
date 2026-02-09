@@ -3,7 +3,7 @@
  */
 
 import type { Hooks } from '@opencode-ai/plugin';
-import type { RuntimeContext } from '../runtime/context';
+import type { ToolHookContext } from '../runtime/context';
 
 /**
  * Create the tool.execute.after hook handler.
@@ -13,7 +13,7 @@ import type { RuntimeContext } from '../runtime/context';
  * trigger immediately instead of waiting for the next poll cycle.
  */
 export function createToolHook(
-  rc: RuntimeContext,
+  rc: ToolHookContext,
 ): NonNullable<Hooks['tool.execute.after']> {
   return async (input, output) => {
     if (rc.runtime.disposed) return;

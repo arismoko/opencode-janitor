@@ -10,7 +10,7 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Event } from '@opencode-ai/sdk';
-import type { RuntimeContext } from '../runtime/context';
+import type { EventHookContext } from '../runtime/context';
 import { atomicWriteSync } from '../utils/atomic-write';
 import { appendEvent } from '../utils/event-log';
 import { warn } from '../utils/logger';
@@ -24,7 +24,7 @@ import { warn } from '../utils/logger';
  * session was never tracked, or was already removed from tracking).
  */
 export function createEventHook(
-  rc: RuntimeContext,
+  rc: EventHookContext,
 ): (input: { event: Event }) => Promise<void> {
   return async (input) => {
     if (rc.runtime.disposed) return;

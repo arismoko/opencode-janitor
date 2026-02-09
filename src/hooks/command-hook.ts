@@ -17,7 +17,7 @@ import {
   getWorkspacePrContext,
   type PrContext,
 } from '../git/pr-context-resolver';
-import type { RuntimeContext } from '../runtime/context';
+import type { CommandHookContext } from '../runtime/context';
 import { injectMessage } from '../utils/notifier';
 import { extractHeadSha, workspaceKey } from '../utils/review-key';
 
@@ -25,7 +25,7 @@ import { extractHeadSha, workspaceKey } from '../utils/review-key';
  * Create the command.execute.before hook handler.
  */
 export function createCommandHook(
-  rc: RuntimeContext,
+  rc: CommandHookContext,
 ): (
   hookInput: { command: string; sessionID: string; arguments: string },
   _output: { parts: Part[] },

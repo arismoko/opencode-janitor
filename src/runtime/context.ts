@@ -7,15 +7,13 @@
  */
 
 import type { PluginInput } from '@opencode-ai/plugin';
-import type { JanitorConfig } from '../config/schema';
-import type { CommitDetector } from '../git/commit-detector';
-import type { PrContext } from '../git/pr-context-resolver';
-import type { PrDetector } from '../git/pr-detector';
-import type { HistoryStore } from '../history/store';
-import type { ReviewRunQueue } from '../review/review-run-queue';
-import type { RuntimeStateStore } from '../state/store';
-import type { SuppressionStore } from '../suppressions/store';
-import type { HunterResult, ReviewResult } from '../types';
+import type { ConfigContext } from './context/config-context';
+import type { GitContext } from './context/git-context';
+import type { QueueContext } from './context/queue-context';
+import type { SessionContext } from './context/session-context';
+
+// Re-export slices for convenience
+export type { ConfigContext, GitContext, QueueContext, SessionContext };
 
 /** Shell exec bridge — runs a command and returns stdout. */
 export type Exec = (cmd: string) => Promise<string>;
@@ -32,57 +30,56 @@ export interface RuntimeFlag {
 }
 
 /**
- * Full runtime context threaded through hooks and runtime modules.
- *
+ * Full runtime context — composition boundary.
  * Created once during bootstrap and shared by reference.
+ * Hooks should consume narrow projection types instead.
  */
-export interface RuntimeContext {
-  ctx: PluginInput;
-  config: JanitorConfig;
-  exec: Exec;
-  gitDir: string;
-  stateDir: string;
+export interface RuntimeContext
+  extends ConfigContext,
+    GitContext,
+    QueueContext,
+    SessionContext {}
 
-  store: RuntimeStateStore;
-  suppressionStore: SuppressionStore;
-  historyStore: HistoryStore;
+// ---------------------------------------------------------------------------
+// Consumer projections — minimum contracts for hook modules
+// ---------------------------------------------------------------------------
 
-  orchestrator: ReviewRunQueue<string, ReviewResult>;
-  hunterOrchestrator: ReviewRunQueue<PrContext, HunterResult>;
+/** Projection for event-hook: session lifecycle + queue completion/failure routing */
+export type EventHookContext = Pick<
+  RuntimeContext,
+  | 'ctx'
+  | 'config'
+  | 'runtime'
+  | 'trackedSessions'
+  | 'stateDir'
+  | 'orchestrator'
+  | 'hunterOrchestrator'
+>;
 
-  detector: CommitDetector;
-  prDetector: PrDetector | null;
+/** Projection for tool-hook: detection acceleration */
+export type ToolHookContext = Pick<
+  RuntimeContext,
+  | 'runtime'
+  | 'anyCommitReviews'
+  | 'detector'
+  | 'prDetector'
+  | 'config'
+  | 'ghAvailableAtStartup'
+  | 'branchPushPending'
+>;
 
-  trackedSessions: Set<string>;
-  control: AgentControl;
-  runtime: RuntimeFlag;
-
-  /** Whether gh CLI was available at startup */
-  ghAvailableAtStartup: boolean;
-  /** Whether a branch push was observed (for fallback PR detection) */
-  branchPushPending: boolean;
-
-  /** Agent trigger flags */
-  janitorCommitEnabled: boolean;
-  janitorPrEnabled: boolean;
-  hunterCommitEnabled: boolean;
-  hunterPrEnabled: boolean;
-  anyCommitReviews: boolean;
-  anyPrReviews: boolean;
-
-  /** Write session metadata JSON alongside the JSONL event log. */
-  writeSessionMeta: (
-    sessionId: string,
-    meta: {
-      title: string;
-      agent: string;
-      key: string;
-      status: string;
-      startedAt: number;
-      completedAt?: number;
-    },
-  ) => void;
-}
+/** Projection for command-hook: full control surface */
+export type CommandHookContext = Pick<
+  RuntimeContext,
+  | 'ctx'
+  | 'config'
+  | 'exec'
+  | 'runtime'
+  | 'control'
+  | 'store'
+  | 'orchestrator'
+  | 'hunterOrchestrator'
+>;
 
 /**
  * Create the exec bridge that pins git commands to the workspace directory.
