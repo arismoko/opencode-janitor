@@ -111,6 +111,7 @@ export interface CommitContext {
   changedFiles: ChangedFile[];
   patch: string;
   patchTruncated: boolean;
+  deletionOnly: boolean;
 }
 
 /** Signal source for commit detection */

@@ -60,6 +60,14 @@ export function createDetectors(
       if (runtime.disposed) return;
       log(`new commit detected: ${sha} via ${signal.source}`);
 
+      // Resolve commit context once for both agents
+      const commit = await getCommitContext(sha, config, exec);
+
+      if (commit.deletionOnly) {
+        log(`[detector] skipping deletion-only commit: ${sha.slice(0, 8)}`);
+        return;
+      }
+
       if (janitorCommitEnabled) {
         if (!control.pausedJanitor) {
           if (runtime.disposed) return;
@@ -84,7 +92,6 @@ export function createDetectors(
           );
           return;
         }
-        const commit = await getCommitContext(sha, config, exec);
 
         if (!commit.patch.trim() && commit.changedFiles.length === 0) {
           warn(`[hunter] skipping empty commit context: ${sha.slice(0, 8)}`);
