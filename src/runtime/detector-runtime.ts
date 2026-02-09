@@ -62,40 +62,31 @@ export function createDetectors(
       if (runtime.disposed) return;
       log(`new commit detected: ${sha} via ${signal.source}`);
 
-      // Resolve commit context once for both agents
+      // ── Resolve context ──────────────────────────────────────────────
       const commit = await getCommitContext(sha, config, exec);
-
       if (commit.deletionOnly) {
         log(`[detector] skipping deletion-only commit: ${sha.slice(0, 8)}`);
         return;
       }
 
-      if (agentTriggers.janitor.commit) {
-        if (!control.paused.janitor) {
-          if (runtime.disposed) return;
-          janitorQueue.enqueue(sha);
-        }
+      // ── Janitor ──────────────────────────────────────────────────────
+      if (agentTriggers.janitor.commit && !control.paused.janitor) {
+        if (runtime.disposed) return;
+        janitorQueue.enqueue(sha);
       }
 
-      if (agentTriggers.hunter.commit) {
-        if (control.paused.hunter) {
-          return;
-        }
+      // ── Hunter (commit-as-PR context) ────────────────────────────────
+      if (agentTriggers.hunter.commit && !control.paused.hunter) {
         if (runtime.disposed) return;
         if (hunterQueue.hasHeadInFlight(sha)) {
           log(
             `[hunter] skipping commit-triggered in-flight duplicate: ${sha.slice(0, 8)}`,
           );
-          return;
-        }
-        if (store.hasProcessedHunterHead(sha)) {
+        } else if (store.hasProcessedHunterHead(sha)) {
           log(
             `[hunter] skipping commit-triggered duplicate for processed head: ${sha.slice(0, 8)}`,
           );
-          return;
-        }
-
-        if (!commit.patch.trim() && commit.changedFiles.length === 0) {
+        } else if (!commit.patch.trim() && commit.changedFiles.length === 0) {
           warn(`[hunter] skipping empty commit context: ${sha.slice(0, 8)}`);
         } else {
           hunterQueue.enqueue({
@@ -110,18 +101,16 @@ export function createDetectors(
         }
       }
 
-      if (agentTriggers.inspector.commit) {
-        if (!control.paused.inspector) {
-          if (runtime.disposed) return;
-          inspectorQueue.enqueue(`inspector:auto:commit:${sha}`);
-        }
+      // ── Inspector ────────────────────────────────────────────────────
+      if (agentTriggers.inspector.commit && !control.paused.inspector) {
+        if (runtime.disposed) return;
+        inspectorQueue.enqueue(`inspector:auto:commit:${sha}`);
       }
 
-      if (agentTriggers.scribe.commit) {
-        if (!control.paused.scribe) {
-          if (runtime.disposed) return;
-          scribeQueue.enqueue(`scribe:auto:commit:${sha}`);
-        }
+      // ── Scribe ───────────────────────────────────────────────────────
+      if (agentTriggers.scribe.commit && !control.paused.scribe) {
+        if (runtime.disposed) return;
+        scribeQueue.enqueue(`scribe:auto:commit:${sha}`);
       }
     },
     config.autoReview.debounceMs,
@@ -152,8 +141,8 @@ export function createDetectors(
           if (runtime.disposed) return;
           log(`new PR state detected: ${key} via ${signal.source}`);
 
+          // ── Resolve PR context ─────────────────────────────────────────
           let prContext: PrContext;
-
           const parsed = parseReviewKey(key);
 
           if (parsed?.type === 'pr') {
@@ -164,7 +153,6 @@ export function createDetectors(
               warn(`PR disappeared between detection and callback: ${key}`);
               return;
             }
-
             if (ghPr.number !== detectedPrNum || ghPr.headSha !== detectedSha) {
               warn(
                 `PR state changed between detection and callback: key=${key} but re-fetch got pr:${ghPr.number}:${ghPr.headSha}`,
@@ -200,6 +188,7 @@ export function createDetectors(
             getRcRef().branchPushPending = false;
           }
 
+          // ── Guard: empty context ───────────────────────────────────────
           if (!prContext.patch.trim() && prContext.changedFiles.length === 0) {
             warn(`[pr] skipping empty PR context: ${prContext.key}`);
             return;
@@ -209,53 +198,47 @@ export function createDetectors(
             store.addPrKey(prContext.key);
           }
 
-          if (agentTriggers.janitor.pr) {
-            if (!control.paused.janitor) {
-              if (runtime.disposed) return;
-              if (
-                agentTriggers.janitor.commit &&
-                store.hasProcessedSha(prContext.headSha)
-              ) {
-                log(
-                  `[janitor] skipping PR-triggered duplicate for processed SHA: ${prContext.headSha.slice(0, 8)}`,
-                );
-              } else {
-                janitorQueue.enqueue(prContext.headSha);
-              }
+          // ── Janitor (SHA dedup against commit trigger) ─────────────────
+          if (agentTriggers.janitor.pr && !control.paused.janitor) {
+            if (runtime.disposed) return;
+            if (
+              agentTriggers.janitor.commit &&
+              store.hasProcessedSha(prContext.headSha)
+            ) {
+              log(
+                `[janitor] skipping PR-triggered duplicate for processed SHA: ${prContext.headSha.slice(0, 8)}`,
+              );
+            } else {
+              janitorQueue.enqueue(prContext.headSha);
             }
           }
 
-          if (agentTriggers.hunter.pr) {
-            if (!control.paused.hunter) {
-              if (runtime.disposed) return;
-              if (hunterQueue.hasHeadInFlight(prContext.headSha)) {
-                log(
-                  `[hunter] skipping PR-triggered in-flight duplicate: ${prContext.headSha.slice(0, 8)}`,
-                );
-                return;
-              }
-              if (store.hasProcessedHunterHead(prContext.headSha)) {
-                log(
-                  `[hunter] skipping PR-triggered duplicate for processed head: ${prContext.headSha.slice(0, 8)}`,
-                );
-                return;
-              }
+          // ── Hunter (head-in-flight + processed-head dedup) ─────────────
+          if (agentTriggers.hunter.pr && !control.paused.hunter) {
+            if (runtime.disposed) return;
+            if (hunterQueue.hasHeadInFlight(prContext.headSha)) {
+              log(
+                `[hunter] skipping PR-triggered in-flight duplicate: ${prContext.headSha.slice(0, 8)}`,
+              );
+            } else if (store.hasProcessedHunterHead(prContext.headSha)) {
+              log(
+                `[hunter] skipping PR-triggered duplicate for processed head: ${prContext.headSha.slice(0, 8)}`,
+              );
+            } else {
               hunterQueue.enqueue(prContext);
             }
           }
 
-          if (agentTriggers.inspector.pr) {
-            if (!control.paused.inspector) {
-              if (runtime.disposed) return;
-              inspectorQueue.enqueue(`inspector:auto:pr:${prContext.key}`);
-            }
+          // ── Inspector ──────────────────────────────────────────────────
+          if (agentTriggers.inspector.pr && !control.paused.inspector) {
+            if (runtime.disposed) return;
+            inspectorQueue.enqueue(`inspector:auto:pr:${prContext.key}`);
           }
 
-          if (agentTriggers.scribe.pr) {
-            if (!control.paused.scribe) {
-              if (runtime.disposed) return;
-              scribeQueue.enqueue(`scribe:auto:pr:${prContext.key}`);
-            }
+          // ── Scribe ─────────────────────────────────────────────────────
+          if (agentTriggers.scribe.pr && !control.paused.scribe) {
+            if (runtime.disposed) return;
+            scribeQueue.enqueue(`scribe:auto:pr:${prContext.key}`);
           }
         },
         config.autoReview.debounceMs,
