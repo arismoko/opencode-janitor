@@ -16,6 +16,7 @@ import { AgentRuntimeRegistry } from './agent-runtime-registry';
 import { bootstrapServices } from './bootstrap';
 import type { RuntimeContext } from './context';
 import { createDetectors } from './detector-runtime';
+import { SessionOwnershipDispatcher } from './session-ownership-dispatcher';
 
 export interface BootstrapResult {
   rc: RuntimeContext;
@@ -40,6 +41,11 @@ export async function bootstrapRuntime(
   registry.register(HunterStrategy.createSpec());
 
   const { janitorQueue, hunterQueue } = createAgentQueues(svc, registry);
+
+  // Session ownership dispatcher — targeted event routing instead of broadcast
+  const dispatcher = new SessionOwnershipDispatcher();
+  janitorQueue.setDispatcher(dispatcher);
+  hunterQueue.setDispatcher(dispatcher);
 
   // Forward-declare rcRef so closures created below can reference it.
   // By the time any closure executes (after start()), rcRef is assigned.
@@ -76,6 +82,7 @@ export async function bootstrapRuntime(
     historyStore: svc.historyStore,
     janitorQueue,
     hunterQueue,
+    dispatcher,
     detector,
     prDetector,
     trackedSessions: svc.trackedSessions,

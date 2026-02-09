@@ -44,16 +44,10 @@ export interface RuntimeContext
 // Consumer projections — minimum contracts for hook modules
 // ---------------------------------------------------------------------------
 
-/** Projection for event-hook: session lifecycle + queue completion/failure routing */
+/** Projection for event-hook: session lifecycle + dispatcher routing */
 export type EventHookContext = Pick<
   RuntimeContext,
-  | 'ctx'
-  | 'config'
-  | 'runtime'
-  | 'trackedSessions'
-  | 'stateDir'
-  | 'janitorQueue'
-  | 'hunterQueue'
+  'ctx' | 'config' | 'runtime' | 'trackedSessions' | 'stateDir' | 'dispatcher'
 >;
 
 /** Projection for tool-hook: detection acceleration */

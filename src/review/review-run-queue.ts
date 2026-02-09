@@ -1,6 +1,7 @@
 import type { PluginInput } from '@opencode-ai/plugin';
 import type { Message, Part } from '@opencode-ai/sdk';
 import type { JanitorConfig } from '../config/schema';
+import type { SessionOwnershipDispatcher } from '../runtime/session-ownership-dispatcher';
 import { getErrorMessage, log, warn } from '../utils/logger';
 import { notifyError } from '../utils/notifier';
 
@@ -68,6 +69,7 @@ export class ReviewRunQueue<TContext, TResult> {
   private activeCount = 0;
   private halted = false;
   private ctx?: PluginInput;
+  private dispatcher?: SessionOwnershipDispatcher;
   private completedCallback?: (key: string) => void;
 
   private readonly tag: string;
@@ -89,6 +91,11 @@ export class ReviewRunQueue<TContext, TResult> {
   /** Set the plugin context for error notification injection. */
   setContext(ctx: PluginInput): void {
     this.ctx = ctx;
+  }
+
+  /** Set the session ownership dispatcher for targeted event routing. */
+  setDispatcher(dispatcher: SessionOwnershipDispatcher): void {
+    this.dispatcher = dispatcher;
   }
 
   /** Snapshot current jobs for command/status views. */
@@ -145,6 +152,7 @@ export class ReviewRunQueue<TContext, TResult> {
         job.status = 'cancelled';
         job.completedAt = new Date();
         this.sessionToKey.delete(job.sessionId);
+        this.dispatcher?.release(job.sessionId);
         this.jobs.delete(job.key);
         this.activeCount = Math.max(0, this.activeCount - 1);
         aborted++;
@@ -247,6 +255,7 @@ export class ReviewRunQueue<TContext, TResult> {
         job.status = 'running';
         job.sessionId = sessionId;
         this.sessionToKey.set(sessionId, key);
+        this.dispatcher?.register(sessionId, this);
         log(`[${this.tag}] review started: ${key} → ${sessionId}`);
       } catch (err) {
         this.activeCount--;
@@ -325,6 +334,7 @@ export class ReviewRunQueue<TContext, TResult> {
       }
     } finally {
       this.sessionToKey.delete(sessionId);
+      this.dispatcher?.release(sessionId);
       this.activeCount--;
       // Prune terminal jobs to prevent unbounded growth
       this.jobs.delete(key);
@@ -348,6 +358,7 @@ export class ReviewRunQueue<TContext, TResult> {
     job.completedAt = new Date();
 
     this.sessionToKey.delete(sessionId);
+    this.dispatcher?.release(sessionId);
     this.jobs.delete(job.key);
     this.activeCount = Math.max(0, this.activeCount - 1);
     this.processQueue();
