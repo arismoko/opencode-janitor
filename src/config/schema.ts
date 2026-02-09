@@ -55,18 +55,6 @@ export const JanitorConfigSchema = z.object({
       scribe: defaultAgentRuntime('manual'),
     })),
 
-  categories: z
-    .object({
-      DRY: z.boolean().default(true),
-      DEAD: z.boolean().default(true),
-      STRUCTURAL: z.boolean().default(true),
-    })
-    .default(() => ({
-      DRY: true,
-      DEAD: true,
-      STRUCTURAL: true,
-    })),
-
   scope: z
     .object({
       include: z

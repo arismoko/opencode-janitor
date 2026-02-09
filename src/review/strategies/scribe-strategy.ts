@@ -157,23 +157,30 @@ export class ScribeStrategy implements ReviewStrategy<string, ScribeResult> {
  * Returns a formatted table string listing all .md files in the repo
  * with their last commit date. This gives the scribe agent a staleness
  * signal for prioritizing which docs to verify against code.
+ *
+ * Note: exec() pins `git` commands with `-C <workspace>`, but only the
+ * first `git` in a shell pipeline gets pinned. We avoid pipelines by
+ * running discrete git commands and iterating in JS.
  */
 async function buildDocIndex(exec: Exec): Promise<string> {
   try {
-    // List all tracked markdown files with their last commit date.
-    // Format: YYYY-MM-DD<tab>relative/path.md
-    const raw = await exec(
-      'git ls-files "*.md" | while read f; do ' +
-        'echo "$(git log -1 --format=%cs -- "$f")\t$f"; ' +
-        'done',
-    );
+    const raw = await exec('git ls-files "*.md"');
+    const files = raw.trim().split('\n').filter(Boolean);
 
-    const lines = raw
-      .trim()
-      .split('\n')
-      .filter((l) => l.includes('\t'));
+    if (files.length === 0) return '';
 
-    if (lines.length === 0) return '';
+    // Fetch last-modified date for each file individually
+    const lines: string[] = [];
+    for (const file of files) {
+      try {
+        const date = (
+          await exec(`git log -1 --format=%cs -- "${file}"`)
+        ).trim();
+        lines.push(`${date || 'unknown'}\t${file}`);
+      } catch {
+        lines.push(`unknown\t${file}`);
+      }
+    }
 
     // Sort by date ascending (oldest first — most likely stale)
     lines.sort();

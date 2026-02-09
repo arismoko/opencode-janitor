@@ -5,7 +5,7 @@
  *
  * Usage:
  *   bun script/inspect-review-sessions.ts              # list sessions
- *   bun script/inspect-review-sessions.ts --follow <id> # tail JSONL events
+ *   bun script/inspect-review-sessions.ts --follow [id] # tail JSONL events (latest if no id)
  *   bun script/inspect-review-sessions.ts --dump <id>   # dump full JSONL
  *   bun script/inspect-review-sessions.ts --all         # include completed
  */
@@ -330,6 +330,32 @@ function printTable(rows: Row[]): void {
   }
 }
 
+// ── Helpers ──
+
+async function mostRecentSessionId(
+  stateDir: string,
+): Promise<string | undefined> {
+  const files = await readdir(stateDir);
+  const metaFiles = files.filter(
+    (f) => f.endsWith('.json') && !f.endsWith('.jsonl'),
+  );
+
+  let latest: { id: string; startedAt: number } | undefined;
+  for (const f of metaFiles) {
+    try {
+      const meta = JSON.parse(
+        readFileSync(join(stateDir, f), 'utf-8'),
+      ) as SessionMeta;
+      if (!latest || meta.startedAt > latest.startedAt) {
+        latest = { id: meta.id, startedAt: meta.startedAt };
+      }
+    } catch {
+      // skip corrupt files
+    }
+  }
+  return latest?.id;
+}
+
 // ── Main ──
 
 async function main(): Promise<void> {
@@ -345,8 +371,13 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
-  if (followId) {
-    await followSession(stateDir, followId);
+  if (hasFlag('--follow')) {
+    const resolvedId = followId ?? (await mostRecentSessionId(stateDir));
+    if (!resolvedId) {
+      console.error('No sessions found to follow.');
+      process.exit(1);
+    }
+    await followSession(stateDir, resolvedId);
     return;
   }
 

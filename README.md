@@ -1,10 +1,10 @@
 # opencode-janitor
 
-Automatic structural and comprehensive code reviews inside [OpenCode](https://github.com/anomalyco/opencode). Runs silently in the background and can trigger on commits, PR updates, or both.
+Automatic code reviews inside [OpenCode](https://github.com/anomalyco/opencode). Runs silently in the background and can trigger on commits, PR updates, manual commands, or any combination.
 
 ## What It Does
 
-The janitor plugin ships two independent review agents that watch your work and produce structured findings:
+The janitor plugin ships four independent review agents that watch your work and produce structured findings:
 
 ### Janitor Agent
 
@@ -30,9 +30,33 @@ Comprehensive review focused on correctness and security:
 
 Default trigger: **pr**
 
-Both agents share a severity scale: **P0** (critical) → **P1** (high) → **P2** (medium) → **P3** (low).
+### Inspector Agent
 
-Every finding includes a **location**, **evidence**, and an **exact prescription** (delete, extract, merge, fix).
+Detects structural complexity and design debt that impedes safe change:
+
+| Domain | What It Catches |
+|--------|----------------|
+| **COMPLEXITY** | Deep nesting, high cyclomatic complexity, oversized functions/modules |
+| **DESIGN** | Tight coupling, broken abstractions, layering violations, missing interfaces |
+| **SMELL** | Code smells that signal deeper structural problems |
+
+Default trigger: **manual**
+
+### Scribe Agent
+
+Verifies documentation stays aligned with code and identifies gaps:
+
+| Domain | What It Catches |
+|--------|----------------|
+| **DRIFT** | Documentation that no longer matches the code it describes |
+| **GAP** | Missing documentation for public APIs, config options, or key behaviors |
+| **RELEASE** | Changelog and release note gaps for significant changes |
+
+Default trigger: **manual**
+
+All agents share a severity scale: **P0** (critical) → **P1** (high) → **P2** (medium) → **P3** (low).
+
+Every finding includes a **location**, **severity**, **domain**, **evidence**, and a **prescription** (delete, extract, merge, fix).
 
 ## Install
 
@@ -79,27 +103,33 @@ Both are optional. All fields have defaults. Example:
       "enabled": true,
       "trigger": "commit",
       "modelId": "anthropic/claude-sonnet-4-20250514",
-      "variant": "high"
+      "variant": "high",
+      "maxFindings": 10
     },
     "hunter": {
       "enabled": true,
       "trigger": "pr",
       "modelId": "openai/gpt-5.3-codex",
-      "variant": "medium"
+      "variant": "medium",
+      "maxFindings": 10
+    },
+    "inspector": {
+      "enabled": true,
+      "trigger": "manual",
+      "maxFindings": 10
+    },
+    "scribe": {
+      "enabled": true,
+      "trigger": "manual",
+      "maxFindings": 10
     }
-  },
-  "categories": {
-    "DRY": true,
-    "DEAD": true,
-    "YAGNI": true
   },
   "scope": {
     "include": ["**/*.{ts,tsx,js,jsx,py,go,rs,java,rb,swift,kt}"],
-    "exclude": ["**/dist/**", "**/node_modules/**", "**/*.test.*"]
+    "exclude": ["**/dist/**", "**/build/**", "**/node_modules/**", "**/*.test.*", "**/*.spec.*", "**/__tests__/**"]
   },
   "model": {
-    "id": "anthropic/claude-sonnet-4-20250514",
-    "maxFindings": 10
+    "id": "anthropic/claude-sonnet-4-20250514"
   },
   "diff": {
     "maxPatchBytes": 200000,
@@ -109,11 +139,13 @@ Both are optional. All fields have defaults. Example:
   "delivery": {
     "toast": true,
     "sessionMessage": true,
+    "noReply": true,
     "reportFile": true,
     "reportDir": ".janitor/reports",
     "hunter": {
       "toast": true,
       "sessionMessage": true,
+      "noReply": true,
       "reportFile": true,
       "reportDir": ".janitor/hunter-reports",
       "prComment": true
@@ -136,16 +168,26 @@ Both are optional. All fields have defaults. Example:
 
 | Setting | Default | Notes |
 |---------|---------|-------|
-| `model.id` | *(inherits from OpenCode)* | Fallback model for both agents if per-agent `modelId` is not set |
-| `agents.janitor.modelId` | *(inherits from `model.id`)* | Override model for the janitor agent (`provider/model` format) |
-| `agents.hunter.modelId` | *(inherits from `model.id`)* | Override model for the hunter agent (`provider/model` format) |
+| `model.id` | *(inherits from OpenCode)* | Fallback model for all agents if per-agent `modelId` is not set |
+| `agents.*.modelId` | *(inherits from `model.id`)* | Override model for a specific agent (`provider/model` format) |
 | `agents.*.variant` | *(none)* | Model-specific config variant (e.g. reasoning effort for OpenAI, thinking budget for Anthropic) |
-| `agents.janitor.trigger` | `commit` | `commit`, `pr`, `both`, or `never` |
-| `agents.hunter.trigger` | `pr` | `commit`, `pr`, `both`, or `never` |
+| `agents.*.maxFindings` | `10` | Maximum findings per review run (1–50) |
+| `agents.janitor.trigger` | `commit` | `commit`, `pr`, `both`, `manual`, or `never` |
+| `agents.hunter.trigger` | `pr` | `commit`, `pr`, `both`, `manual`, or `never` |
+| `agents.inspector.trigger` | `manual` | `commit`, `pr`, `both`, `manual`, or `never` |
+| `agents.scribe.trigger` | `manual` | `commit`, `pr`, `both`, `manual`, or `never` |
 | `queue.dropIntermediate` | `true` | During rapid commits, only review the latest |
+| `delivery.noReply` | `true` | Deliver results without triggering an assistant reply |
 | `delivery.reportFile` | `true` | Writes reports to `.janitor/reports/<sha>.md` |
 | `delivery.hunter.prComment` | `true` | Post hunter report to PR via `gh pr review` when available |
 | `pr.baseBranch` | `master` | Fallback base branch when `gh` PR metadata is unavailable |
+| `suppressions.enabled` | `true` | Enable finding suppression (auto-dismiss repeated findings) |
+| `suppressions.ttlDays` | `90` | Days before suppression entries expire |
+| `suppressions.maxEntries` | `200` | Maximum stored suppressions (10–500) |
+| `suppressions.autoSuppressThreshold` | `0.6` | Similarity threshold for auto-suppression (0–1) |
+| `history.enabled` | `true` | Enable review history tracking |
+| `history.maxReviews` | `50` | Maximum stored reviews (5–200) |
+| `history.trendWindow` | `10` | Number of recent reviews used for trend computation |
 
 ## How It Works
 
@@ -175,8 +217,8 @@ If `gh` is unavailable, PR comments are skipped gracefully and results still lan
 signal detected → debounce → resolve context (commit/PR) → build prompt → spawn background session → parse output → deliver results
 ```
 
-- Reviews run in isolated background sessions with per-agent prompts (`janitor`, `bug-hunter`)
-- Both agents run with a strict tool allowlist: `glob`, `grep`, `list`, `read`, `lsp` (everything else denied)
+- Reviews run in isolated background sessions with per-agent prompts
+- All agents run with a strict tool allowlist: `glob`, `grep`, `list`, `read`, `lsp` (everything else denied)
 - Large diffs are truncated; the agent uses tools to explore beyond the patch
 - Burst commits are coalesced: only the oldest running + latest pending are kept
 
@@ -205,32 +247,35 @@ src/
   agents/
     registry.ts                     # Agent definition registry (config hook)
   hooks/
-    command-hook.ts                 # /janitor command surface (handler map dispatch)
+    command-hook.ts                 # /janitor command surface (per-agent subcommands)
     event-hook.ts                   # Session completion/error routing
     tool-hook.ts                    # Tool accelerator for commit/PR detection
   runtime/
     context.ts                      # RuntimeContext type, Exec bridge
     bootstrap.ts                    # Config, git, stores, state dir, trigger flags
+    runtime-types.ts                # AgentName, AgentControl, shared runtime types
     agent-runtime.ts                # Agent queue construction with runtime specs
     agent-runtime-spec.ts           # AgentRuntimeSpec type + generic executor factory
+    agent-runtime-registry.ts       # Registry of per-agent runtime specs
     detector-runtime.ts             # Commit/PR signal detector wiring
     review-runtime.ts               # Thin composition root
+    session-ownership-dispatcher.ts # SessionID → owning queue O(1) routing
   review/
     review-run-queue.ts             # Generic queue with strategy pattern
     runner.ts                       # Background session spawner (spawnReview)
     prompt-builder.ts               # Unified prompt assembly
     agent-factory.ts                # Agent definition factory
     agent-profiles.ts               # Per-agent system prompts and tool configs
-    janitor-agent.ts                # Janitor agent definition
-    hunter-agent.ts                 # Hunter agent definition
     strategies/
       janitor-strategy.ts           # Janitor result parsing + delivery
       hunter-strategy.ts            # Hunter result parsing + delivery + GH PR comments
+      inspector-strategy.ts         # Inspector result parsing + delivery
+      scribe-strategy.ts            # Scribe result parsing + delivery
   results/
     agent-output-codec.ts           # Unified JSON extraction + Zod validation
     report-renderer.ts              # Shared markdown report renderer
-    formatter.ts                    # Janitor-specific report formatting
     format-helpers.ts               # Shared helpers (summarizeLocation, formatChangedFiles)
+    formatter.ts                    # Janitor-specific report formatting
     pipeline.ts                     # Janitor result pipeline (parse → enrich → suppress)
     sinks/
       toast-sink.ts                 # Toast notification delivery
