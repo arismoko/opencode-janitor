@@ -15,7 +15,7 @@ export interface SpawnReviewOpts {
 /**
  * Spawn an isolated background session for a review.
  *
- * Replaces `spawnJanitorReview` and `spawnReviewerReview` with a single
+ * Replaces `spawnJanitorReview` and `spawnHunterReview` with a single
  * agent-agnostic entry point. The agent is referenced by name so OpenCode
  * resolves its model, temperature, system prompt, and tool permissions.
  *

@@ -27,13 +27,13 @@ import {
 import { PrDetector } from './git/pr-detector';
 import { resolveGitDir } from './git/repo-locator';
 import { HistoryStore } from './history/store';
+import { createHunterAgent } from './review/hunter-agent';
 import { createJanitorAgent } from './review/janitor-agent';
 import { buildReviewPrompt } from './review/prompt-builder';
 import { ReviewRunQueue } from './review/review-run-queue';
-import { createReviewerAgent } from './review/reviewer-agent';
 import { spawnReview } from './review/runner';
+import { HunterStrategy } from './review/strategies/hunter-strategy';
 import { JanitorStrategy } from './review/strategies/janitor-strategy';
-import { ReviewerStrategy } from './review/strategies/reviewer-strategy';
 import { CommitStore } from './state/store';
 import { buildSuppressionsBlock } from './suppressions/prompt';
 import { SuppressionStore } from './suppressions/store';
@@ -81,7 +81,7 @@ function triggerMatches(trigger: TriggerMode, mode: 'commit' | 'pr'): boolean {
   return trigger === mode || trigger === 'both';
 }
 
-function extractReviewerHeadFromKey(key: string): string | null {
+function extractHunterHeadFromKey(key: string): string | null {
   if (key.startsWith('commit:')) {
     return key.slice('commit:'.length);
   }
@@ -139,7 +139,7 @@ const TheJanitor: Plugin = async (ctx) => {
   }
 
   const janitorAgent = createJanitorAgent(config);
-  const reviewerAgent = createReviewerAgent(config);
+  const hunterAgent = createHunterAgent(config);
 
   const janitorCommitEnabled =
     config.agents.janitor.enabled &&
@@ -147,15 +147,15 @@ const TheJanitor: Plugin = async (ctx) => {
   const janitorPrEnabled =
     config.agents.janitor.enabled &&
     triggerMatches(config.agents.janitor.trigger, 'pr');
-  const reviewerCommitEnabled =
-    config.agents.reviewer.enabled &&
-    triggerMatches(config.agents.reviewer.trigger, 'commit');
-  const reviewerPrEnabled =
-    config.agents.reviewer.enabled &&
-    triggerMatches(config.agents.reviewer.trigger, 'pr');
+  const hunterCommitEnabled =
+    config.agents.hunter.enabled &&
+    triggerMatches(config.agents.hunter.trigger, 'commit');
+  const hunterPrEnabled =
+    config.agents.hunter.enabled &&
+    triggerMatches(config.agents.hunter.trigger, 'pr');
 
-  const anyCommitReviews = janitorCommitEnabled || reviewerCommitEnabled;
-  const anyPrReviews = janitorPrEnabled || reviewerPrEnabled;
+  const anyCommitReviews = janitorCommitEnabled || hunterCommitEnabled;
+  const anyPrReviews = janitorPrEnabled || hunterPrEnabled;
 
   const ghAvailableAtStartup = anyPrReviews ? await isGhAvailable(exec) : false;
   if (anyPrReviews && !ghAvailableAtStartup) {
@@ -197,7 +197,7 @@ const TheJanitor: Plugin = async (ctx) => {
   const paused = store.getPaused();
   const control = {
     pausedJanitor: paused.janitor,
-    pausedReviewer: paused.reviewer,
+    pausedHunter: paused.hunter,
   };
   const suppressionStore = new SuppressionStore(ctx.directory, {
     maxEntries: config.suppressions?.maxEntries,
@@ -289,15 +289,15 @@ const TheJanitor: Plugin = async (ctx) => {
   // Give orchestrator access to the SDK client for error injection
   orchestrator.setContext(ctx);
 
-  const reviewerStrategy = new ReviewerStrategy(
+  const hunterStrategy = new HunterStrategy(
     async (prNumber: number, body: string) => {
       if (!(await isGhAvailable(exec))) return false;
       return postPrReviewWithGh(exec, prNumber, body);
     },
   );
-  const reviewerOrchestrator = new ReviewRunQueue<
+  const hunterOrchestrator = new ReviewRunQueue<
     PrContext,
-    import('./types').ReviewerResult
+    import('./types').HunterResult
   >(
     config,
     async (prContext: PrContext) => {
@@ -323,36 +323,36 @@ const TheJanitor: Plugin = async (ctx) => {
 
       const sessionId = await spawnReview(ctx, {
         prompt,
-        title: `[reviewer-run] ${prContext.key}`,
-        agent: 'code-reviewer',
-        modelId: config.agents.reviewer.modelId ?? config.model.id,
+        title: `[hunter-run] ${prContext.key}`,
+        agent: 'bug-hunter',
+        modelId: config.agents.hunter.modelId ?? config.model.id,
       });
       trackedSessions.add(sessionId);
       writeSessionMeta(sessionId, {
-        title: `[reviewer-run] ${prContext.key}`,
-        agent: 'code-reviewer',
+        title: `[hunter-run] ${prContext.key}`,
+        agent: 'bug-hunter',
         key: prContext.key,
         status: 'running',
         startedAt: Date.now(),
       });
       return sessionId;
     },
-    reviewerStrategy,
-    'reviewer-orchestrator',
+    hunterStrategy,
+    'hunter-orchestrator',
   );
-  reviewerOrchestrator.setContext(ctx);
-  reviewerOrchestrator.onCompleted((key: string) => {
+  hunterOrchestrator.setContext(ctx);
+  hunterOrchestrator.onCompleted((key: string) => {
     if (key.startsWith('workspace:')) return;
     store.addPrKey(key);
-    const headSha = extractReviewerHeadFromKey(key);
+    const headSha = extractHunterHeadFromKey(key);
     if (headSha) {
-      store.addProcessedReviewerHead(headSha);
+      store.addProcessedHunterHead(headSha);
     }
     log(`persisted reviewed PR key: ${key}`);
   });
 
-  const hasReviewerHeadInFlight = (headSha: string): boolean => {
-    return reviewerOrchestrator.getJobsSnapshot().some((job) => {
+  const hasHunterHeadInFlight = (headSha: string): boolean => {
+    return hunterOrchestrator.getJobsSnapshot().some((job) => {
       if (
         job.status !== 'pending' &&
         job.status !== 'starting' &&
@@ -360,7 +360,7 @@ const TheJanitor: Plugin = async (ctx) => {
       ) {
         return false;
       }
-      return extractReviewerHeadFromKey(job.key) === headSha;
+      return extractHunterHeadFromKey(job.key) === headSha;
     });
   };
 
@@ -384,29 +384,29 @@ const TheJanitor: Plugin = async (ctx) => {
         }
       }
 
-      if (reviewerCommitEnabled) {
-        if (control.pausedReviewer) {
+      if (hunterCommitEnabled) {
+        if (control.pausedHunter) {
           return;
         }
         if (runtime.disposed) return;
-        if (hasReviewerHeadInFlight(sha)) {
+        if (hasHunterHeadInFlight(sha)) {
           log(
-            `[reviewer] skipping commit-triggered in-flight duplicate: ${sha.slice(0, 8)}`,
+            `[hunter] skipping commit-triggered in-flight duplicate: ${sha.slice(0, 8)}`,
           );
           return;
         }
-        if (store.hasProcessedReviewerHead(sha)) {
+        if (store.hasProcessedHunterHead(sha)) {
           log(
-            `[reviewer] skipping commit-triggered duplicate for processed head: ${sha.slice(0, 8)}`,
+            `[hunter] skipping commit-triggered duplicate for processed head: ${sha.slice(0, 8)}`,
           );
           return;
         }
         const commit = await getCommitContext(sha, config, exec);
 
         if (!commit.patch.trim() && commit.changedFiles.length === 0) {
-          warn(`[reviewer] skipping empty commit context: ${sha.slice(0, 8)}`);
+          warn(`[hunter] skipping empty commit context: ${sha.slice(0, 8)}`);
         } else {
-          reviewerOrchestrator.enqueue({
+          hunterOrchestrator.enqueue({
             key: `commit:${sha}`,
             headSha: sha,
             baseRef: commit.parents[0] ?? config.pr.baseBranch,
@@ -532,22 +532,22 @@ const TheJanitor: Plugin = async (ctx) => {
             }
           }
 
-          if (reviewerPrEnabled) {
-            if (!control.pausedReviewer) {
+          if (hunterPrEnabled) {
+            if (!control.pausedHunter) {
               if (runtime.disposed) return;
-              if (hasReviewerHeadInFlight(prContext.headSha)) {
+              if (hasHunterHeadInFlight(prContext.headSha)) {
                 log(
-                  `[reviewer] skipping PR-triggered in-flight duplicate: ${prContext.headSha.slice(0, 8)}`,
+                  `[hunter] skipping PR-triggered in-flight duplicate: ${prContext.headSha.slice(0, 8)}`,
                 );
                 return;
               }
-              if (store.hasProcessedReviewerHead(prContext.headSha)) {
+              if (store.hasProcessedHunterHead(prContext.headSha)) {
                 log(
-                  `[reviewer] skipping PR-triggered duplicate for processed head: ${prContext.headSha.slice(0, 8)}`,
+                  `[hunter] skipping PR-triggered duplicate for processed head: ${prContext.headSha.slice(0, 8)}`,
                 );
                 return;
               }
-              reviewerOrchestrator.enqueue(prContext);
+              hunterOrchestrator.enqueue(prContext);
             }
           }
         },
@@ -579,11 +579,11 @@ const TheJanitor: Plugin = async (ctx) => {
     detector.stop();
     prDetector?.stop();
     orchestrator.shutdown();
-    reviewerOrchestrator.shutdown();
+    hunterOrchestrator.shutdown();
     orchestrator.clearPending();
-    reviewerOrchestrator.clearPending();
+    hunterOrchestrator.clearPending();
     await orchestrator.abortRunning(ctx);
-    await reviewerOrchestrator.abortRunning(ctx);
+    await hunterOrchestrator.abortRunning(ctx);
     log('plugin runtime stopped: detectors halted');
   };
 
@@ -593,13 +593,13 @@ const TheJanitor: Plugin = async (ctx) => {
   return {
     name: 'the-janitor',
 
-    // Register janitor + reviewer agents in OpenCode's agent registry.
+    // Register janitor + hunter agents in OpenCode's agent registry.
     // Plugins must mutate the config object in place — the return value
     // of the config hook is ignored.
     config: async (opencodeConfig: Record<string, unknown>) => {
       const agents = (opencodeConfig.agent ?? {}) as Record<string, unknown>;
 
-      for (const agent of [janitorAgent, reviewerAgent]) {
+      for (const agent of [janitorAgent, hunterAgent]) {
         agents[agent.name] = {
           ...agent.config,
           description: agent.description,
@@ -612,13 +612,13 @@ const TheJanitor: Plugin = async (ctx) => {
       >;
       commands.janitor = {
         description:
-          'Janitor control: /janitor status|stop|resume [janitor|reviewer|all], /janitor clean, /janitor review [pr#]',
+          'Janitor control: /janitor status|stop|resume [janitor|hunter|all], /janitor clean, /janitor review [pr#]',
         template: '',
       };
       opencodeConfig.command = commands;
 
       opencodeConfig.agent = agents;
-      log("registered agents 'janitor' and 'code-reviewer' in config hook");
+      log("registered agents 'janitor' and 'bug-hunter' in config hook");
     },
 
     'command.execute.before': async (
@@ -639,36 +639,32 @@ const TheJanitor: Plugin = async (ctx) => {
       const action = (args[0] ?? 'status').toLowerCase();
       const target = (args[1] ?? 'all').toLowerCase();
       const usage =
-        'Usage: /janitor status | /janitor stop|resume [janitor|reviewer|all] | /janitor clean | /janitor review [pr#]';
+        'Usage: /janitor status | /janitor stop|resume [janitor|hunter|all] | /janitor clean | /janitor review [pr#]';
 
       const respond = async (text: string) =>
         injectMessage(ctx, hookInput.sessionID, text, true);
 
       const renderJobs = () => {
         const janitorJobs = orchestrator.getJobsSnapshot();
-        const reviewerJobs = reviewerOrchestrator.getJobsSnapshot();
+        const hunterJobs = hunterOrchestrator.getJobsSnapshot();
         const janitorRunning = janitorJobs.filter(
           (j) => j.status === 'running',
         );
         const janitorPending = janitorJobs.filter(
           (j) => j.status === 'pending',
         );
-        const reviewerRunning = reviewerJobs.filter(
-          (j) => j.status === 'running',
-        );
-        const reviewerPending = reviewerJobs.filter(
-          (j) => j.status === 'pending',
-        );
+        const hunterRunning = hunterJobs.filter((j) => j.status === 'running');
+        const hunterPending = hunterJobs.filter((j) => j.status === 'pending');
 
         return [
-          `paused: janitor=${control.pausedJanitor}, reviewer=${control.pausedReviewer}`,
-          `jobs: janitor running=${janitorRunning.length}, pending=${janitorPending.length}; reviewer running=${reviewerRunning.length}, pending=${reviewerPending.length}`,
+          `paused: janitor=${control.pausedJanitor}, hunter=${control.pausedHunter}`,
+          `jobs: janitor running=${janitorRunning.length}, pending=${janitorPending.length}; hunter running=${hunterRunning.length}, pending=${hunterPending.length}`,
           janitorRunning.length
             ? `janitor running: ${janitorRunning.map((j) => `${j.key} (${j.sessionId ?? 'starting'})`).join(', ')}`
             : 'janitor running: none',
-          reviewerRunning.length
-            ? `reviewer running: ${reviewerRunning.map((j) => `${j.key} (${j.sessionId ?? 'starting'})`).join(', ')}`
-            : 'reviewer running: none',
+          hunterRunning.length
+            ? `hunter running: ${hunterRunning.map((j) => `${j.key} (${j.sessionId ?? 'starting'})`).join(', ')}`
+            : 'hunter running: none',
         ].join('\n');
       };
 
@@ -683,11 +679,11 @@ const TheJanitor: Plugin = async (ctx) => {
       }
 
       const targetJanitor = target === 'all' || target === 'janitor';
-      const targetReviewer = target === 'all' || target === 'reviewer';
+      const targetHunter = target === 'all' || target === 'hunter';
 
       if (
         (action === 'stop' || action === 'resume') &&
-        !['all', 'janitor', 'reviewer'].includes(target)
+        !['all', 'janitor', 'hunter'].includes(target)
       ) {
         await respond(usage);
         handled();
@@ -695,10 +691,10 @@ const TheJanitor: Plugin = async (ctx) => {
 
       if (action === 'stop') {
         if (targetJanitor) control.pausedJanitor = true;
-        if (targetReviewer) control.pausedReviewer = true;
+        if (targetHunter) control.pausedHunter = true;
         store.setPaused({
           janitor: control.pausedJanitor,
-          reviewer: control.pausedReviewer,
+          hunter: control.pausedHunter,
         });
 
         let dropped = 0;
@@ -707,9 +703,9 @@ const TheJanitor: Plugin = async (ctx) => {
           dropped += orchestrator.clearPending();
           aborted += await orchestrator.abortRunning(ctx);
         }
-        if (targetReviewer) {
-          dropped += reviewerOrchestrator.clearPending();
-          aborted += await reviewerOrchestrator.abortRunning(ctx);
+        if (targetHunter) {
+          dropped += hunterOrchestrator.clearPending();
+          aborted += await hunterOrchestrator.abortRunning(ctx);
         }
 
         await respond(
@@ -720,10 +716,10 @@ const TheJanitor: Plugin = async (ctx) => {
 
       if (action === 'resume') {
         if (targetJanitor) control.pausedJanitor = false;
-        if (targetReviewer) control.pausedReviewer = false;
+        if (targetHunter) control.pausedHunter = false;
         store.setPaused({
           janitor: control.pausedJanitor,
-          reviewer: control.pausedReviewer,
+          hunter: control.pausedHunter,
         });
         await respond(
           `▶️ **[Janitor Control]** resumed ${target}\n\n${renderJobs()}`,
@@ -810,14 +806,14 @@ const TheJanitor: Plugin = async (ctx) => {
           handled();
         }
 
-        if (hasReviewerHeadInFlight(reviewContext.headSha)) {
+        if (hasHunterHeadInFlight(reviewContext.headSha)) {
           await respond(
             `🔍 **[Janitor Control]** review skipped: in-flight ${reviewContext.headSha.slice(0, 8)}`,
           );
           handled();
         }
 
-        reviewerOrchestrator.enqueue(reviewContext, hookInput.sessionID);
+        hunterOrchestrator.enqueue(reviewContext, hookInput.sessionID);
         await respond(
           `🔍 **[Janitor Control]** review queued: ${reviewContext.key}`,
         );
@@ -904,7 +900,7 @@ const TheJanitor: Plugin = async (ctx) => {
           }
 
           await orchestrator.handleCompletion(props.sessionID, ctx, config);
-          await reviewerOrchestrator.handleCompletion(
+          await hunterOrchestrator.handleCompletion(
             props.sessionID,
             ctx,
             config,
@@ -935,7 +931,7 @@ const TheJanitor: Plugin = async (ctx) => {
             props.sessionID,
             props.error?.message ?? 'unknown error',
           );
-          reviewerOrchestrator.handleFailure(
+          hunterOrchestrator.handleFailure(
             props.sessionID,
             props.error?.message ?? 'unknown error',
           );

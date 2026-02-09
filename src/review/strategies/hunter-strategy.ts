@@ -7,16 +7,14 @@ import { deliverToFile } from '../../results/sinks/file-sink';
 import { deliverToSession } from '../../results/sinks/session-sink';
 import { deliverToast } from '../../results/sinks/toast-sink';
 import { HunterOutput as HunterOutputSchema } from '../../schemas/finding';
-import type { ReviewerResult } from '../../types';
+import type { HunterResult } from '../../types';
 import { log } from '../../utils/logger';
 import { extractWorkspaceHeadFromKey } from '../../utils/review-key';
 import type { BaseJob, ReviewStrategy } from '../review-run-queue';
 
 type GhPostReview = (prNumber: number, body: string) => Promise<boolean>;
 
-export class ReviewerStrategy
-  implements ReviewStrategy<PrContext, ReviewerResult>
-{
+export class HunterStrategy implements ReviewStrategy<PrContext, HunterResult> {
   constructor(private readonly postGhReview?: GhPostReview) {}
 
   extractKey(context: PrContext): string {
@@ -28,7 +26,7 @@ export class ReviewerStrategy
   }
 
   async onJobCompleted(
-    job: BaseJob<PrContext, ReviewerResult>,
+    job: BaseJob<PrContext, HunterResult>,
     sessionId: string,
     ctx: PluginInput,
     config: JanitorConfig,
@@ -41,14 +39,14 @@ export class ReviewerStrategy
     const resultId = extractWorkspaceHeadFromKey(job.key);
     const { output, meta } = parseAgentOutput(rawOutput, HunterOutputSchema);
     if (meta.status !== 'ok') {
-      throw new Error(`Reviewer parse failed (${meta.status}): ${meta.error}`);
+      throw new Error(`Hunter parse failed (${meta.status}): ${meta.error}`);
     }
-    const result: ReviewerResult = {
+    const result: HunterResult = {
       id: resultId,
       findings: output.findings.map((f) => ({
         location: f.location,
         severity: f.severity,
-        domain: f.domain as ReviewerResult['findings'][0]['domain'],
+        domain: f.domain as HunterResult['findings'][0]['domain'],
         evidence: f.evidence,
         prescription: f.prescription,
       })),
@@ -57,7 +55,7 @@ export class ReviewerStrategy
     };
     const shortId = resultId.slice(0, 12);
     const report = renderReport(result.findings, result.clean, {
-      title: 'Reviewer Report',
+      title: 'Hunter Report',
       shortId,
       findingLabel: 'issue',
       showSeverityDomain: true,
@@ -70,17 +68,17 @@ export class ReviewerStrategy
   }
 
   private async deliverResults(
-    result: ReviewerResult,
+    result: HunterResult,
     report: string,
     shortId: string,
-    job: BaseJob<PrContext, ReviewerResult>,
+    job: BaseJob<PrContext, HunterResult>,
     ctx: PluginInput,
     config: JanitorConfig,
   ): Promise<void> {
-    const delivery = config.delivery.reviewer;
+    const delivery = config.delivery.hunter;
 
     if (delivery.toast) {
-      await deliverToast(ctx, result, { label: 'Code Review', shortId });
+      await deliverToast(ctx, result, { label: 'Bug Hunt', shortId });
     }
 
     if (delivery.sessionMessage && job.deliverySessionId && !result.clean) {
@@ -92,7 +90,7 @@ export class ReviewerStrategy
 
       if (!willPostPr) {
         await deliverToSession(ctx, job.deliverySessionId, report, {
-          label: 'Code Review Complete',
+          label: 'Bug Hunt Complete',
           noReply: delivery.noReply,
         });
       }
@@ -114,9 +112,7 @@ export class ReviewerStrategy
     ) {
       const posted = await this.postGhReview(job.context.number, report);
       if (posted) {
-        log(
-          `[reviewer-strategy] posted GH review for PR #${job.context.number}`,
-        );
+        log(`[hunter-strategy] posted GH review for PR #${job.context.number}`);
       }
     }
   }

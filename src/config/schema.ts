@@ -37,13 +37,11 @@ export const JanitorConfigSchema = z.object({
       janitor: AgentRuntimeSchema('commit').default(() =>
         defaultAgentRuntime('commit'),
       ),
-      reviewer: AgentRuntimeSchema('pr').default(() =>
-        defaultAgentRuntime('pr'),
-      ),
+      hunter: AgentRuntimeSchema('pr').default(() => defaultAgentRuntime('pr')),
     })
     .default(() => ({
       janitor: defaultAgentRuntime('commit'),
-      reviewer: defaultAgentRuntime('pr'),
+      hunter: defaultAgentRuntime('pr'),
     })),
 
   categories: z
@@ -112,13 +110,13 @@ export const JanitorConfigSchema = z.object({
       noReply: z.boolean().default(true),
       reportFile: z.boolean().default(true),
       reportDir: z.string().default('.janitor/reports'),
-      reviewer: z
+      hunter: z
         .object({
           toast: z.boolean().default(true),
           sessionMessage: z.boolean().default(true),
           noReply: z.boolean().default(true),
           reportFile: z.boolean().default(true),
-          reportDir: z.string().default('.janitor/reviewer-reports'),
+          reportDir: z.string().default('.janitor/hunter-reports'),
           prComment: z.boolean().default(true),
         })
         .default(() => ({
@@ -126,7 +124,7 @@ export const JanitorConfigSchema = z.object({
           sessionMessage: true,
           noReply: true,
           reportFile: true,
-          reportDir: '.janitor/reviewer-reports',
+          reportDir: '.janitor/hunter-reports',
           prComment: true,
         })),
     })
@@ -136,12 +134,12 @@ export const JanitorConfigSchema = z.object({
       noReply: true,
       reportFile: true,
       reportDir: '.janitor/reports',
-      reviewer: {
+      hunter: {
         toast: true,
         sessionMessage: true,
         noReply: true,
         reportFile: true,
-        reportDir: '.janitor/reviewer-reports',
+        reportDir: '.janitor/hunter-reports',
         prComment: true,
       },
     })),

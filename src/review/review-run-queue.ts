@@ -406,7 +406,7 @@ export class ReviewRunQueue<TContext, TResult> {
             session.id &&
             !session.parentID &&
             !session.title?.startsWith('[janitor-run] ') &&
-            !session.title?.startsWith('[reviewer-run] '),
+            !session.title?.startsWith('[hunter-run] '),
         )
         .sort((a, b) => (b.time?.updated ?? 0) - (a.time?.updated ?? 0))[0];
       return root?.id;

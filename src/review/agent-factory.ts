@@ -64,7 +64,7 @@ function buildPromptFromProfile(profile: AgentProfile): string {
 /**
  * Create an agent definition from a profile and config.
  *
- * Replaces bespoke `createJanitorAgent` and `createReviewerAgent` with a
+ * Replaces bespoke `createJanitorAgent` and `createHunterAgent` with a
  * single profile-driven factory.
  */
 export function createAgentDefinition(

@@ -11,7 +11,7 @@ import { SEVERITY_GUIDE } from '../types';
 // ---------------------------------------------------------------------------
 
 export interface AgentProfile {
-  /** Agent name used for registration (e.g. 'janitor', 'code-reviewer') */
+  /** Agent name used for registration (e.g. 'janitor', 'bug-hunter') */
   name: string;
   /** Human-readable description */
   description: string;
@@ -24,7 +24,7 @@ export interface AgentProfile {
   /** Zod output schema for JSON schema injection */
   outputSchema: z.ZodType;
   /** Config key under agents.* for model/variant/trigger resolution */
-  configKey: 'janitor' | 'reviewer';
+  configKey: 'janitor' | 'hunter';
 }
 
 // ---------------------------------------------------------------------------
@@ -53,11 +53,11 @@ No finding is preferred over a weak finding.`,
   outputSchema: JanitorOutputSchema,
 };
 
-export const REVIEWER_PROFILE: AgentProfile = {
-  name: 'code-reviewer',
+export const HUNTER_PROFILE: AgentProfile = {
+  name: 'bug-hunter',
   description:
-    'Comprehensive code reviewer for PRs. Detects bugs, security vulnerabilities, and correctness issues.',
-  role: `You are a comprehensive code reviewer for pull requests.
+    'Comprehensive bug hunter for PRs. Detects bugs, security vulnerabilities, and correctness issues.',
+  role: `You are a comprehensive bug hunter for pull requests.
 
 Your concerns span: bugs, security vulnerabilities, and correctness issues.
 
@@ -68,7 +68,7 @@ Report ALL findings you discover, organized by severity. Be thorough.`,
   domains: ['BUG', 'SECURITY', 'CORRECTNESS'],
   rules: `Severity guide:
 ${SEVERITY_GUIDE.map((s) => `- ${s}`).join('\n')}`,
-  configKey: 'reviewer',
+  configKey: 'hunter',
   outputSchema: HunterOutputSchema,
 };
 

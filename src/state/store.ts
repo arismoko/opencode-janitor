@@ -10,9 +10,9 @@ interface StateData {
   version?: number;
   processedShas: string[];
   processedPrKeys?: string[];
-  processedReviewerHeads?: string[];
+  processedHunterHeads?: string[];
   pausedJanitor?: boolean;
-  pausedReviewer?: boolean;
+  pausedHunter?: boolean;
 }
 
 /**
@@ -22,9 +22,9 @@ interface StateData {
 export class CommitStore {
   private processed = new Set<string>();
   private processedPrKeys = new Set<string>();
-  private processedReviewerHeads = new Set<string>();
+  private processedHunterHeads = new Set<string>();
   private pausedJanitor = false;
-  private pausedReviewer = false;
+  private pausedHunter = false;
   private statePath: string;
 
   constructor(workspaceDir: string) {
@@ -61,27 +61,27 @@ export class CommitStore {
     return this.processedPrKeys.has(key);
   }
 
-  /** Mark a reviewer head SHA as processed. */
-  addProcessedReviewerHead(headSha: string): void {
-    this.processedReviewerHeads.add(headSha);
+  /** Mark a hunter head SHA as processed. */
+  addProcessedHunterHead(headSha: string): void {
+    this.processedHunterHeads.add(headSha);
     this.evictOld();
     this.persist();
   }
 
-  /** Check whether reviewer already processed this head SHA. */
-  hasProcessedReviewerHead(headSha: string): boolean {
-    return this.processedReviewerHeads.has(headSha);
+  /** Check whether hunter already processed this head SHA. */
+  hasProcessedHunterHead(headSha: string): boolean {
+    return this.processedHunterHeads.has(headSha);
   }
 
   /** Read paused flags for command controls. */
-  getPaused(): { janitor: boolean; reviewer: boolean } {
-    return { janitor: this.pausedJanitor, reviewer: this.pausedReviewer };
+  getPaused(): { janitor: boolean; hunter: boolean } {
+    return { janitor: this.pausedJanitor, hunter: this.pausedHunter };
   }
 
   /** Persist paused flags for command controls. */
-  setPaused(flags: { janitor: boolean; reviewer: boolean }): void {
+  setPaused(flags: { janitor: boolean; hunter: boolean }): void {
     this.pausedJanitor = flags.janitor;
-    this.pausedReviewer = flags.reviewer;
+    this.pausedHunter = flags.hunter;
     this.persist();
   }
 
@@ -112,14 +112,14 @@ export class CommitStore {
         }
       }
 
-      if (Array.isArray(data.processedReviewerHeads)) {
-        for (const head of data.processedReviewerHeads) {
-          this.processedReviewerHeads.add(head);
+      if (Array.isArray(data.processedHunterHeads)) {
+        for (const head of data.processedHunterHeads) {
+          this.processedHunterHeads.add(head);
         }
       }
 
       this.pausedJanitor = Boolean(data.pausedJanitor);
-      this.pausedReviewer = Boolean(data.pausedReviewer);
+      this.pausedHunter = Boolean(data.pausedHunter);
 
       log(
         `[store] loaded ${this.processed.size} processed commits and ${this.processedPrKeys.size} processed PR keys`,
@@ -143,9 +143,9 @@ export class CommitStore {
         version: 2,
         processedShas: [...this.processed],
         processedPrKeys: [...this.processedPrKeys],
-        processedReviewerHeads: [...this.processedReviewerHeads],
+        processedHunterHeads: [...this.processedHunterHeads],
         pausedJanitor: this.pausedJanitor,
-        pausedReviewer: this.pausedReviewer,
+        pausedHunter: this.pausedHunter,
       };
 
       atomicWriteSync(this.statePath, JSON.stringify(data, null, 2));
@@ -165,18 +165,18 @@ export class CommitStore {
     const beforePr = this.processedPrKeys.size;
     evictOldest(this.processedPrKeys, MAX_PROCESSED);
     const evictedPr = beforePr - this.processedPrKeys.size;
-    const beforeReviewerHeads = this.processedReviewerHeads.size;
-    evictOldest(this.processedReviewerHeads, MAX_PROCESSED);
-    const evictedReviewerHeads =
-      beforeReviewerHeads - this.processedReviewerHeads.size;
+    const beforeHunterHeads = this.processedHunterHeads.size;
+    evictOldest(this.processedHunterHeads, MAX_PROCESSED);
+    const evictedHunterHeads =
+      beforeHunterHeads - this.processedHunterHeads.size;
     if (evicted > 0) {
       log(`[store] evicted ${evicted} old entries`);
     }
     if (evictedPr > 0) {
       log(`[store] evicted ${evictedPr} old PR entries`);
     }
-    if (evictedReviewerHeads > 0) {
-      log(`[store] evicted ${evictedReviewerHeads} old reviewer head entries`);
+    if (evictedHunterHeads > 0) {
+      log(`[store] evicted ${evictedHunterHeads} old hunter head entries`);
     }
   }
 }

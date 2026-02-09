@@ -25,8 +25,8 @@ import {
 /** Janitor finding domain */
 export type FindingCategory = _JanitorDomain;
 
-/** Reviewer/hunter finding domain */
-export type ReviewerDomain = _HunterDomain;
+/** Hunter finding domain */
+export type HunterDomain = _HunterDomain;
 
 /** Severity level shared by all agents */
 export type ReviewerSeverity = _Severity;
@@ -34,8 +34,8 @@ export type ReviewerSeverity = _Severity;
 /** A single janitor finding (schema-derived) */
 export type Finding = _JanitorFinding;
 
-/** A single hunter/reviewer finding (schema-derived) */
-export type ReviewerFinding = _HunterFinding;
+/** A single hunter finding (schema-derived) */
+export type HunterFinding = _HunterFinding;
 
 // ---------------------------------------------------------------------------
 // Runtime domain values (derived from Zod schema)
@@ -48,8 +48,8 @@ export const FINDING_CATEGORIES: readonly FindingCategory[] =
 /** Pipe-separated domain string for prompt injection */
 export const CATEGORY_PIPE_STR: string = FINDING_CATEGORIES.join(' | ');
 
-/** All valid reviewer/hunter domain values as a runtime array */
-export const REVIEWER_DOMAINS: readonly ReviewerDomain[] =
+/** All valid hunter domain values as a runtime array */
+export const HUNTER_DOMAINS: readonly HunterDomain[] =
   _HunterDomainSchema.options;
 
 /** All valid severity values as a runtime array */
@@ -86,10 +86,10 @@ export interface ParseMeta {
 // Result containers
 // ---------------------------------------------------------------------------
 
-/** Parsed reviewer/hunter result */
-export interface ReviewerResult {
+/** Parsed hunter result */
+export interface HunterResult {
   id: string;
-  findings: ReviewerFinding[];
+  findings: HunterFinding[];
   clean: boolean;
   raw: string;
 }
