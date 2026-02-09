@@ -150,14 +150,14 @@ export function createDetectors(
 
             const ghPr = await getCurrentPrFromGh(exec);
             if (!ghPr) {
-              warn(`PR disappeared between detection and callback: ${key}`);
-              return;
+              throw new Error(
+                `PR disappeared between detection and callback: ${key}`,
+              );
             }
             if (ghPr.number !== detectedPrNum || ghPr.headSha !== detectedSha) {
-              warn(
+              throw new Error(
                 `PR state changed between detection and callback: key=${key} but re-fetch got pr:${ghPr.number}:${ghPr.headSha}`,
               );
-              return;
             }
 
             prContext = await getPrContext({
@@ -192,10 +192,6 @@ export function createDetectors(
           if (!prContext.patch.trim() && prContext.changedFiles.length === 0) {
             warn(`[pr] skipping empty PR context: ${prContext.key}`);
             return;
-          }
-
-          if (!store.hasProcessedPrKey(prContext.key)) {
-            store.addPrKey(prContext.key);
           }
 
           // ── Janitor (SHA dedup against commit trigger) ─────────────────

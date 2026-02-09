@@ -13,6 +13,7 @@ import type { Exec } from '../../runtime/runtime-types';
 import { ScribeOutput as ScribeOutputSchema } from '../../schemas/finding';
 import type { ScribeResult } from '../../types';
 import { log } from '../../utils/logger';
+import { shellEscapeQuoted } from '../../utils/workspace-git';
 import type { BaseJob, ReviewStrategy } from '../review-run-queue';
 
 export class ScribeStrategy implements ReviewStrategy<string, ScribeResult> {
@@ -174,7 +175,7 @@ async function buildDocIndex(exec: Exec): Promise<string> {
     for (const file of files) {
       try {
         const date = (
-          await exec(`git log -1 --format=%cs -- "${file}"`)
+          await exec(`git log -1 --format=%cs -- ${shellEscapeQuoted(file)}`)
         ).trim();
         lines.push(`${date || 'unknown'}\t${file}`);
       } catch {
