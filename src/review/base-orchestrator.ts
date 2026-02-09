@@ -318,6 +318,29 @@ export abstract class BaseOrchestrator<TContext, TResult> {
   }
 
   /**
+   * Handle session failure event.
+   * Releases the job so the queue is unblocked.
+   */
+  handleFailure(sessionId: string, error: string): void {
+    const key = this.sessionToKey.get(sessionId);
+    if (!key) return; // Not our session
+
+    const job = this.jobs.get(key);
+    if (!job || (job.status !== 'running' && job.status !== 'starting')) return;
+
+    job.status = 'failed';
+    job.error = error;
+    job.completedAt = new Date();
+
+    this.sessionToKey.delete(sessionId);
+    this.jobs.delete(key);
+    this.activeCount = Math.max(0, this.activeCount - 1);
+    this.processQueue();
+
+    warn(`[${this.tag}] session failed: ${key} — ${error}`);
+  }
+
+  /**
    * Extract assistant text output from a completed review session.
    * Shared utility for subclasses to use in their `onJobCompleted`.
    */

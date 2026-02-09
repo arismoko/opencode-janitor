@@ -4,6 +4,8 @@
  * Wires commit detection → review orchestration → result delivery.
  */
 
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import type { Plugin } from '@opencode-ai/plugin';
 import { loadConfig } from './config/loader';
 import { CommitDetector } from './git/commit-detector';
@@ -35,8 +37,11 @@ import { spawnJanitorReview, spawnReviewerReview } from './review/runner';
 import { CommitStore } from './state/store';
 import { buildSuppressionsBlock } from './suppressions/prompt';
 import { SuppressionStore } from './suppressions/store';
+import { atomicWriteSync } from './utils/atomic-write';
+import { appendEvent } from './utils/event-log';
 import { log, warn } from './utils/logger';
 import { injectMessage } from './utils/notifier';
+import { ensureStateDir, resolveStateDir } from './utils/state-dir';
 
 /** Plugin return shape — typed locally since the SDK Plugin type doesn't
  *  export a precise return interface for hooks we use. */
@@ -69,9 +74,10 @@ function toast(ctx: Parameters<Plugin>[0], message: string) {
   }
 }
 
-type TriggerMode = 'commit' | 'pr' | 'both';
+type TriggerMode = 'commit' | 'pr' | 'both' | 'never';
 
 function triggerMatches(trigger: TriggerMode, mode: 'commit' | 'pr'): boolean {
+  if (trigger === 'never') return false;
   return trigger === mode || trigger === 'both';
 }
 
@@ -160,6 +166,34 @@ const TheJanitor: Plugin = async (ctx) => {
 
   const store = new CommitStore(ctx.directory);
   const runtime = { disposed: false };
+
+  // XDG state directory for session event logs
+  const stateDir = resolveStateDir(ctx.directory);
+  ensureStateDir(stateDir);
+  const trackedSessions = new Set<string>();
+
+  /** Write session metadata JSON alongside the JSONL event log. */
+  const writeSessionMeta = (
+    sessionId: string,
+    meta: {
+      title: string;
+      agent: string;
+      key: string;
+      status: string;
+      startedAt: number;
+      completedAt?: number;
+    },
+  ) => {
+    atomicWriteSync(
+      join(stateDir, `${sessionId}.json`),
+      JSON.stringify(
+        { id: sessionId, workspaceDir: ctx.directory, ...meta },
+        null,
+        2,
+      ),
+    );
+  };
+
   const paused = store.getPaused();
   const control = {
     pausedJanitor: paused.janitor,
@@ -216,6 +250,14 @@ const TheJanitor: Plugin = async (ctx) => {
         runKey,
         config,
       });
+      trackedSessions.add(sessionId);
+      writeSessionMeta(sessionId, {
+        title: `[janitor-run] ${runKey}`,
+        agent: 'janitor',
+        key: runKey,
+        status: 'running',
+        startedAt: Date.now(),
+      });
       return sessionId;
     },
     suppressionStore,
@@ -244,6 +286,14 @@ const TheJanitor: Plugin = async (ctx) => {
         prompt,
         runKey: prContext.key,
         config,
+      });
+      trackedSessions.add(sessionId);
+      writeSessionMeta(sessionId, {
+        title: `[reviewer-run] ${prContext.key}`,
+        agent: 'code-reviewer',
+        key: prContext.key,
+        status: 'running',
+        startedAt: Date.now(),
       });
       return sessionId;
     },
@@ -768,7 +818,7 @@ const TheJanitor: Plugin = async (ctx) => {
       }
     },
 
-    // Review completion detection
+    // Review completion detection + event logging
     event: async (input: {
       event: {
         type: string;
@@ -778,17 +828,78 @@ const TheJanitor: Plugin = async (ctx) => {
       if (runtime.disposed) return;
       const { event } = input;
 
+      // Stream events for tracked sessions to JSONL
+      const eventSessionId = (event.properties?.sessionID ??
+        (event.properties?.part as { sessionID?: string })?.sessionID) as
+        | string
+        | undefined;
+      if (eventSessionId && trackedSessions.has(eventSessionId)) {
+        try {
+          appendEvent(stateDir, eventSessionId, event);
+        } catch (err) {
+          warn('[session-event] failed to append event', {
+            error: String(err),
+          });
+        }
+      }
+
       // Detect review session completion
       if (event.type === 'session.status') {
         const props = event.properties as
           | { status?: { type?: string }; sessionID?: string }
           | undefined;
         if (props?.status?.type === 'idle' && props?.sessionID) {
+          // Update session metadata to reflect completion
+          if (trackedSessions.has(props.sessionID)) {
+            try {
+              const metaPath = join(stateDir, `${props.sessionID}.json`);
+              const existing = JSON.parse(readFileSync(metaPath, 'utf-8'));
+              existing.status = 'completed';
+              existing.completedAt = Date.now();
+              atomicWriteSync(metaPath, JSON.stringify(existing, null, 2));
+            } catch (err) {
+              warn('[session-event] failed to update failed session metadata', {
+                error: String(err),
+              });
+            }
+            trackedSessions.delete(props.sessionID);
+          }
+
           await orchestrator.handleCompletion(props.sessionID, ctx, config);
           await reviewerOrchestrator.handleCompletion(
             props.sessionID,
             ctx,
             config,
+          );
+        }
+      }
+
+      // Detect review session error
+      if (event.type === 'session.error') {
+        const props = event.properties as
+          | { error?: { message?: string }; sessionID?: string }
+          | undefined;
+        if (props?.sessionID && trackedSessions.has(props.sessionID)) {
+          try {
+            const metaPath = join(stateDir, `${props.sessionID}.json`);
+            const existing = JSON.parse(readFileSync(metaPath, 'utf-8'));
+            existing.status = 'failed';
+            existing.completedAt = Date.now();
+            existing.error = props.error?.message ?? 'unknown error';
+            atomicWriteSync(metaPath, JSON.stringify(existing, null, 2));
+          } catch (err) {
+            warn('[session-event] failed to update failed session metadata', {
+              error: String(err),
+            });
+          }
+          trackedSessions.delete(props.sessionID);
+          orchestrator.handleFailure(
+            props.sessionID,
+            props.error?.message ?? 'unknown error',
+          );
+          reviewerOrchestrator.handleFailure(
+            props.sessionID,
+            props.error?.message ?? 'unknown error',
           );
         }
       }
