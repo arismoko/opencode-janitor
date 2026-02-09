@@ -1,27 +1,36 @@
 /**
- * Build commit review context from repo path + SHA using git commands.
+ * Build review context from repo path + trigger subject key.
+ *
+ * Validates subject keys via the shared parseReviewKey parser and throws
+ * explicit errors on malformed/unresolved keys. No fallback-to-HEAD.
  */
 import {
   type ChangedFile,
   type CommitContext,
-  extractHeadSha,
   parseReviewKey,
 } from '@opencode-janitor/shared';
-import { resolveHeadSha } from '../utils/git';
+import type { TriggerContext } from '../runtime/agent-runtime-spec';
 
 const MAX_PATCH_CHARS = 200_000;
 
-function runGit(cwd: string, args: string[]) {
+function runGit(cwd: string, args: string[]): string {
   const proc = Bun.spawnSync({
     cmd: ['git', '-C', cwd, ...args],
     stdout: 'pipe',
     stderr: 'pipe',
   });
-  return {
-    stdout: proc.stdout.toString('utf8').trim(),
-    stderr: proc.stderr.toString('utf8').trim(),
-    exitCode: proc.exitCode,
-  };
+
+  const stdout = proc.stdout.toString('utf8').trim();
+  const stderr = proc.stderr.toString('utf8').trim();
+  if (proc.exitCode !== 0) {
+    const command = ['git', '-C', cwd, ...args].join(' ');
+    const details = stderr || stdout || 'no output';
+    throw new Error(
+      `Git command failed (${proc.exitCode}): ${command}\n${details}`,
+    );
+  }
+
+  return stdout;
 }
 
 /**
@@ -32,9 +41,9 @@ export function buildCommitContext(
   repoPath: string,
   sha: string,
 ): CommitContext {
-  const subject = runGit(repoPath, ['log', '-1', '--format=%s', sha]).stdout;
+  const subject = runGit(repoPath, ['log', '-1', '--format=%s', sha]);
 
-  const parentsRaw = runGit(repoPath, ['log', '-1', '--format=%P', sha]).stdout;
+  const parentsRaw = runGit(repoPath, ['log', '-1', '--format=%P', sha]);
   const parents = parentsRaw ? parentsRaw.split(' ') : [];
 
   const filesRaw = runGit(repoPath, [
@@ -43,7 +52,7 @@ export function buildCommitContext(
     '-r',
     '--name-status',
     sha,
-  ]).stdout;
+  ]);
   const changedFiles: ChangedFile[] = filesRaw
     ? filesRaw.split('\n').map((line) => {
         const [status, ...rest] = line.split('\t');
@@ -54,7 +63,7 @@ export function buildCommitContext(
   const deletionOnly =
     changedFiles.length > 0 && changedFiles.every((f) => f.status === 'D');
 
-  let patch = runGit(repoPath, ['diff-tree', '-p', sha]).stdout;
+  let patch = runGit(repoPath, ['diff-tree', '-p', sha]);
   let patchTruncated = false;
   if (patch.length > MAX_PATCH_CHARS) {
     patch = patch.slice(0, MAX_PATCH_CHARS);
@@ -74,12 +83,60 @@ export function buildCommitContext(
 
 /**
  * Resolve the commit SHA from a trigger's subject_key.
- * Falls back to HEAD if the key is unrecognised.
+ * Throws on malformed or unrecognised keys — no fallback to HEAD.
  */
-export function resolveCommitSha(repoPath: string, subjectKey: string): string {
-  const headSha = extractHeadSha(subjectKey);
-  if (headSha) return headSha;
+export function resolveCommitSha(
+  _repoPath: string,
+  subjectKey: string,
+): string {
+  const parsed = parseReviewKey(subjectKey);
+  if (!parsed) {
+    throw new Error(
+      `Malformed subject key: "${subjectKey}" — expected commit:<sha>, pr:<n>:<sha>, branch:<name>:<sha>, workspace:<name>:<sha>, or manual:<id>:<sha>`,
+    );
+  }
+  return parsed.type === 'commit' ? parsed.sha : parsed.headSha;
+}
 
-  // Unrecognised key format — fall back to current HEAD
-  return resolveHeadSha(repoPath);
+/**
+ * Build a trigger-discriminated context object from a job's subject key
+ * and payload. Validates the key and builds commit context as needed.
+ *
+ * Throws on malformed/unresolved keys (fail-closed).
+ */
+export function buildTriggerContext(
+  repoPath: string,
+  subjectKey: string,
+  payloadSha: string | null,
+): TriggerContext {
+  const parsed = parseReviewKey(subjectKey);
+  if (!parsed) {
+    throw new Error(
+      `Malformed subject key: "${subjectKey}" — expected commit:<sha>, pr:<n>:<sha>, branch:<name>:<sha>, workspace:<name>:<sha>, or manual:<id>:<sha>`,
+    );
+  }
+
+  const sha =
+    payloadSha ?? (parsed.type === 'commit' ? parsed.sha : parsed.headSha);
+
+  if (parsed.type === 'manual') {
+    return { kind: 'manual', commitSha: sha };
+  }
+
+  const commitContext = buildCommitContext(repoPath, sha);
+
+  switch (parsed.type) {
+    case 'commit':
+    case 'branch':
+    case 'workspace':
+      return { kind: 'commit', commitSha: sha, commitContext };
+
+    case 'pr':
+      return {
+        kind: 'pr',
+        commitSha: sha,
+        commitContext,
+        prNumber: parsed.number,
+      };
+  }
 }

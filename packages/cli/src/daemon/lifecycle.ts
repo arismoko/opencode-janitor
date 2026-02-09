@@ -1,99 +1,48 @@
-import { loadConfig } from '../config/loader';
-import { defaultDbPath } from '../config/paths';
-import { openDatabase } from '../db/connection';
-import { runMigrations } from '../db/migrations';
+import { resolve as resolvePath } from 'node:path';
+import { manualKey } from '@opencode-janitor/shared';
 import {
   appendEvent,
-  recoverRunningAgentRuns,
-  recoverRunningJobs,
+  enqueueTriggerAndJob,
+  findRepoByIdOrPath,
+  listEventsAfterSeq,
 } from '../db/queries';
-import { startRepoWatch } from '../detectors/repo-watch';
-import { createAgentConfigMap } from '../runtime/agent-factory';
-import { createDefaultAgentRegistry } from '../runtime/default-agent-specs';
 import {
-  type OpencodeChild,
-  startOpencodeChild,
-} from '../runtime/opencode-child';
-import { createSessionCompletionBus } from '../runtime/session-completion-bus';
-import { startScheduler } from '../scheduler/worker';
-import { acquireProcessLock } from './lock';
+  type BootstrapRuntimeOptions,
+  bootstrapRuntime,
+  shutdownRuntime,
+} from '../runtime/bootstrap';
+import type { SocketContext } from '../runtime/context';
+import { resolveHeadSha } from '../utils/git';
 import { createSocketServer, type DaemonStatusSnapshot } from './socket';
 
-export interface RunDaemonOptions {
-  configPath?: string;
-}
+export interface RunDaemonOptions extends BootstrapRuntimeOptions {}
 
 const SCHEDULER_DRAIN_TIMEOUT_MS = 10_000;
 const SHUTDOWN_CANCEL_MESSAGE = 'daemon stopping';
 
-/** Map CLI log level to opencode SDK log level. */
-function mapLogLevel(
-  level: 'debug' | 'info' | 'warn' | 'error',
-): 'DEBUG' | 'INFO' | 'WARN' | 'ERROR' {
-  return level.toUpperCase() as 'DEBUG' | 'INFO' | 'WARN' | 'ERROR';
+function buildStatusSnapshot(
+  rc: SocketContext,
+  draining: boolean,
+): DaemonStatusSnapshot {
+  return {
+    pid: process.pid,
+    version: '0.1.0',
+    uptimeMs: Date.now() - rc.startedAt,
+    draining,
+    socketPath: rc.config.daemon.socketPath,
+    dbPath: rc.dbPath,
+  };
 }
 
 export async function runDaemon(options: RunDaemonOptions): Promise<void> {
-  const config = loadConfig(options.configPath);
+  const { rc, recoveredJobs, recoveredAgentRuns } =
+    await bootstrapRuntime(options);
 
-  const lock = acquireProcessLock({
-    lockFile: config.daemon.lockFile,
-    pidFile: config.daemon.pidFile,
-    socketPath: config.daemon.socketPath,
-  });
-
-  const dbPath = defaultDbPath();
-  const db = openDatabase(dbPath);
-
-  runMigrations(db);
-  const recoveredJobs = recoverRunningJobs(db);
-  const recoveredAgentRuns = recoverRunningAgentRuns(db);
-
-  // Build agent config map from profiles + CLI config (data-driven)
-  const agentDefinitions = createAgentConfigMap(config);
-  const agentConfigEntries = Object.fromEntries(
-    Object.entries(agentDefinitions).map(([name, def]) => [name, def.config]),
-  );
-
-  let child: OpencodeChild;
-  try {
-    child = await startOpencodeChild({
-      host: config.opencode.serverHost,
-      port: config.opencode.serverPort,
-      startTimeoutMs: config.opencode.serverStartTimeoutMs,
-      config: {
-        agent: agentConfigEntries,
-      },
-      logLevel: mapLogLevel(config.daemon.logLevel),
-    });
-  } catch (error) {
-    try {
-      db.close(false);
-    } finally {
-      lock.release();
-    }
-    throw error;
-  }
-
-  // Build runtime registry for the scheduler
-  const registry = createDefaultAgentRegistry();
-  const completionBus = createSessionCompletionBus({ client: child.client });
-  completionBus.start();
-
-  const startedAt = Date.now();
   let draining = false;
   let resolved = false;
-  let shutdownDrain: Promise<void> | undefined;
   let resolveStop: (() => void) | null = null;
-
-  const statusSnapshot = (): DaemonStatusSnapshot => ({
-    pid: process.pid,
-    version: '0.1.0',
-    uptimeMs: Date.now() - startedAt,
-    draining,
-    socketPath: config.daemon.socketPath,
-    dbPath,
-  });
+  const statusSnapshot = (): DaemonStatusSnapshot =>
+    buildStatusSnapshot(rc, draining);
 
   const stopPromise = new Promise<void>((resolve) => {
     resolveStop = resolve;
@@ -102,20 +51,62 @@ export async function runDaemon(options: RunDaemonOptions): Promise<void> {
   let server: ReturnType<typeof createSocketServer>;
   try {
     server = createSocketServer({
-      socketPath: config.daemon.socketPath,
+      socketPath: rc.config.daemon.socketPath,
       getStatus: statusSnapshot,
       onStopRequested: () => {
         shutdown();
       },
+      onEnqueueReview: async ({ repoOrId }) => {
+        const normalized = resolvePath(repoOrId);
+        const repo =
+          findRepoByIdOrPath(rc.db, normalized) ??
+          findRepoByIdOrPath(rc.db, repoOrId);
+
+        if (!repo) {
+          throw new Error(
+            `Repository not found: ${repoOrId}. Use \`janitor add\` first.`,
+          );
+        }
+
+        const sha = resolveHeadSha(repo.path);
+        const subjectKey = manualKey(String(Date.now()), sha);
+        const enqueued = enqueueTriggerAndJob(rc.db, {
+          repoId: repo.id,
+          kind: 'manual',
+          source: 'cli',
+          subjectKey,
+          payload: { sha, manual: true },
+          maxAttempts: rc.config.scheduler.maxAttempts,
+        });
+
+        if (enqueued) {
+          rc.scheduler.wake();
+          appendEvent(rc.db, {
+            eventType: 'review.enqueued',
+            repoId: repo.id,
+            message: `Manual review enqueued for ${sha.slice(0, 10)}`,
+            level: 'info',
+            payload: { sha, subjectKey },
+          });
+        }
+
+        return {
+          ok: true as const,
+          enqueued,
+          repoId: repo.id,
+          repoPath: repo.path,
+          sha,
+          subjectKey,
+        };
+      },
+      listEventsAfterSeq: (afterSeq, limit) =>
+        listEventsAfterSeq(rc.db, afterSeq, limit),
     });
   } catch (error) {
-    try {
-      await completionBus.stop();
-      db.close(false);
-    } finally {
-      await child.close();
-      lock.release();
-    }
+    await shutdownRuntime(rc, {
+      schedulerDrainTimeoutMs: SCHEDULER_DRAIN_TIMEOUT_MS,
+      cancelMessage: SHUTDOWN_CANCEL_MESSAGE,
+    });
     throw error;
   }
 
@@ -123,22 +114,8 @@ export async function runDaemon(options: RunDaemonOptions): Promise<void> {
   process.on('SIGINT', onSignal);
   process.on('SIGTERM', onSignal);
 
-  const watch = startRepoWatch({
-    db,
-    commitPollMs: config.git.commitPollSec * 1000,
-    prPollMs: config.git.prPollSec * 1000,
-  });
-
-  const scheduler = startScheduler({
-    db,
-    client: child.client,
-    config,
-    registry,
-    completionBus,
-  });
-
   try {
-    appendEvent(db, {
+    appendEvent(rc.db, {
       eventType: 'daemon.started',
       message: 'Daemon started',
       level: 'info',
@@ -165,14 +142,7 @@ export async function runDaemon(options: RunDaemonOptions): Promise<void> {
     draining = true;
 
     try {
-      watch.stop();
-      completionBus.cancelAll(SHUTDOWN_CANCEL_MESSAGE);
-      shutdownDrain = scheduler.stop({
-        timeoutMs: SCHEDULER_DRAIN_TIMEOUT_MS,
-        cancelMessage: SHUTDOWN_CANCEL_MESSAGE,
-      });
-
-      appendEvent(db, {
+      appendEvent(rc.db, {
         eventType: 'daemon.stopping',
         message: 'Daemon stop requested',
         level: 'info',
@@ -188,16 +158,8 @@ export async function runDaemon(options: RunDaemonOptions): Promise<void> {
   process.off('SIGINT', onSignal);
   process.off('SIGTERM', onSignal);
 
-  try {
-    await (shutdownDrain ??
-      scheduler.stop({
-        timeoutMs: SCHEDULER_DRAIN_TIMEOUT_MS,
-        cancelMessage: SHUTDOWN_CANCEL_MESSAGE,
-      }));
-    await completionBus.stop(SHUTDOWN_CANCEL_MESSAGE);
-    db.close(false);
-  } finally {
-    await child.close();
-    lock.release();
-  }
+  await shutdownRuntime(rc, {
+    schedulerDrainTimeoutMs: SCHEDULER_DRAIN_TIMEOUT_MS,
+    cancelMessage: SHUTDOWN_CANCEL_MESSAGE,
+  });
 }

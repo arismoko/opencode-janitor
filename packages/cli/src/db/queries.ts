@@ -34,6 +34,7 @@ export interface TriggerEnqueueInput {
   source: 'fswatch' | 'poll' | 'tool-hook' | 'cli' | 'recovery';
   subjectKey: string;
   payload: Record<string, unknown>;
+  maxAttempts?: number;
 }
 
 /** Add a tracked repository row. */
@@ -107,6 +108,7 @@ export function enqueueTriggerAndJob(
   const dedupeKey = `${input.repoId}:${input.kind}:${input.subjectKey}`;
   const triggerID = makeId('trg');
   const jobID = makeId('job');
+  const maxAttempts = input.maxAttempts ?? 3;
 
   return db.transaction(() => {
     const triggerInsert = db
@@ -136,10 +138,10 @@ export function enqueueTriggerAndJob(
       `
         INSERT OR IGNORE INTO review_jobs (
           id, repo_id, trigger_id, dedupe_key, status, priority,
-          attempt, max_attempts, cancel_requested, queued_at
-        ) VALUES (?, ?, ?, ?, 'queued', 100, 0, 3, 0, ?)
+          attempt, max_attempts, cancel_requested, queued_at, next_attempt_at
+        ) VALUES (?, ?, ?, ?, 'queued', 100, 0, ?, 0, ?, ?)
       `,
-    ).run(jobID, input.repoId, triggerID, dedupeKey, now);
+    ).run(jobID, input.repoId, triggerID, dedupeKey, maxAttempts, now, now);
 
     return true;
   })();
@@ -174,6 +176,17 @@ export function listEvents(db: Database, limit: number): EventRow[] {
     .all(limit) as EventRow[];
 }
 
+/** List events after a cursor sequence, oldest first. */
+export function listEventsAfterSeq(
+  db: Database,
+  afterSeq: number,
+  limit: number,
+): EventRow[] {
+  return db
+    .query('SELECT * FROM event_journal WHERE seq > ? ORDER BY seq ASC LIMIT ?')
+    .all(afterSeq, limit) as EventRow[];
+}
+
 // ---------------------------------------------------------------------------
 // Scheduler query helpers
 // ---------------------------------------------------------------------------
@@ -195,10 +208,12 @@ export function claimNextQueuedJobWithRepoLimit(
   perRepoConcurrency: number,
 ): QueuedJobRow | null {
   return db.transaction(() => {
+    const now = nowMs();
+
     const job = db
       .query(
         `
-        SELECT j.id, j.repo_id, j.trigger_id, j.dedupe_key, j.attempt, j.max_attempts, j.queued_at,
+        SELECT j.id, j.repo_id, j.trigger_id, j.dedupe_key, j.attempt, j.max_attempts, j.next_attempt_at, j.queued_at,
                r.path, r.default_branch,
                COALESCE(t.kind, 'manual') AS kind,
                COALESCE(t.subject_key, '') AS subject_key,
@@ -208,6 +223,7 @@ export function claimNextQueuedJobWithRepoLimit(
         LEFT JOIN review_triggers t ON t.id = j.trigger_id
         WHERE j.status = 'queued'
           AND j.cancel_requested = 0
+          AND j.next_attempt_at <= ?
           AND r.enabled = 1
           AND r.paused = 0
           AND (
@@ -220,13 +236,12 @@ export function claimNextQueuedJobWithRepoLimit(
         LIMIT 1
         `,
       )
-      .get(perRepoConcurrency) as QueuedJobRow | null;
+      .get(now, perRepoConcurrency) as QueuedJobRow | null;
 
     if (!job) return null;
 
-    const now = nowMs();
     db.query(
-      `UPDATE review_jobs SET status = 'running', started_at = ?, attempt = attempt + 1 WHERE id = ?`,
+      `UPDATE review_jobs SET status = 'running', started_at = ?, next_attempt_at = 0, attempt = attempt + 1 WHERE id = ?`,
     ).run(now, job.id);
 
     // Return with updated attempt
@@ -260,6 +275,7 @@ export function requeueJob(
   jobId: string,
   errorCode: string,
   errorMessage: string,
+  nextAttemptAt: number,
   errorType: 'transient' | 'cancelled' | 'unknown' = 'transient',
 ): void {
   db.query(
@@ -270,10 +286,11 @@ export function requeueJob(
         started_at = NULL,
         error_code = ?,
         error_message = ?,
+        next_attempt_at = ?,
         last_error_type = ?
       WHERE id = ?
     `,
-  ).run(errorCode, errorMessage, errorType, jobId);
+  ).run(errorCode, errorMessage, nextAttemptAt, errorType, jobId);
 }
 
 /** Reset stale running jobs to queued on daemon startup. */

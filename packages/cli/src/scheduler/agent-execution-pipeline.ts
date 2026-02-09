@@ -1,6 +1,5 @@
 import type { Database } from 'bun:sqlite';
 import type { OpencodeClient } from '@opencode-ai/sdk';
-import type { CommitContext } from '@opencode-janitor/shared';
 import type { CliConfig } from '../config/schema';
 import type {
   AgentRunOutcome,
@@ -21,7 +20,10 @@ import {
   parseModelOverride,
   promptReviewAsync,
 } from '../reviews/runner';
-import type { AgentRuntimeSpec } from '../runtime/agent-runtime-spec';
+import type {
+  AgentRuntimeSpec,
+  TriggerContext,
+} from '../runtime/agent-runtime-spec';
 import type { SessionCompletionBus } from '../runtime/session-completion-bus';
 import {
   classifyAgentFailure,
@@ -53,8 +55,7 @@ export interface AgentExecutionPipeline {
   execute(
     job: QueuedJobRow,
     spec: AgentRuntimeSpec,
-    commitSha: string,
-    commitContext: CommitContext,
+    trigger: TriggerContext,
   ): Promise<AgentRunResult>;
   cancelActiveSessions(message?: string): Promise<void>;
 }
@@ -84,7 +85,7 @@ export function createAgentExecutionPipeline(
   const activeSessions = new Map<string, ActiveSession>();
 
   return {
-    async execute(job, spec, commitSha, commitContext) {
+    async execute(job, spec, trigger) {
       const modelId = spec.modelId(config);
       const modelOverride = parseModelOverride(modelId);
       const startedAt = Date.now();
@@ -99,18 +100,19 @@ export function createAgentExecutionPipeline(
       let sessionId: string | undefined;
       let completionType: AgentRunSummary['completion'] = 'unknown';
 
+      const titleSha =
+        trigger.kind !== 'manual' ? trigger.commitSha.slice(0, 10) : null;
+
       try {
         const preparedContext = spec.prepareContext({
           config,
           job,
-          triggerKind: job.kind,
-          commitSha,
-          commitContext,
+          trigger,
         });
         const userPrompt = spec.buildPrompt({ preparedContext });
 
         sessionId = await createReviewSession(client, {
-          title: `[${spec.agent}] ${job.subject_key || commitSha.slice(0, 10)}`,
+          title: `[${spec.agent}] ${job.subject_key || titleSha || 'manual'}`,
           directory: job.path,
         });
 

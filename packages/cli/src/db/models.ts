@@ -38,6 +38,7 @@ export interface QueuedJobRow {
   dedupe_key: string;
   attempt: number;
   max_attempts: number;
+  next_attempt_at: number;
   queued_at: number;
 
   // repo fields

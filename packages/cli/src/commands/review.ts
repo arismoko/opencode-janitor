@@ -1,73 +1,55 @@
 /**
  * `janitor review <repoOrId>` — trigger a manual review for a repository.
  */
-import { resolve } from 'node:path';
 import chalk from 'chalk';
 import type { Command } from 'commander';
-import { openDatabase } from '../db/connection';
-import { runMigrations } from '../db/migrations';
-import {
-  appendEvent,
-  enqueueTriggerAndJob,
-  findRepoByIdOrPath,
-} from '../db/queries';
-import { resolveHeadSha } from '../utils/git';
+import { loadConfig } from '../config/loader';
+import { requestJson } from '../ipc/client';
+import type { EnqueueReviewResponse, ErrorResponse } from '../ipc/protocol';
 
 export function registerReviewCommand(program: Command): void {
   program
     .command('review <repoOrId>')
     .description('Trigger a manual review for a tracked repository')
-    .action((repoArg: string) => {
-      const json = program.opts()['json'] as boolean | undefined;
+    .action(async (repoArg: string) => {
+      const rootOptions = program.opts<{ json?: boolean; config?: string }>();
+      const json = rootOptions.json;
       try {
-        const db = openDatabase();
-        runMigrations(db);
-
-        const normalized = resolve(repoArg);
-        const repo =
-          findRepoByIdOrPath(db, normalized) ?? findRepoByIdOrPath(db, repoArg);
-        if (!repo) {
-          throw new Error(
-            `Repository not found: ${repoArg}. Use "janitor add" first.`,
-          );
-        }
-
-        const sha = resolveHeadSha(repo.path);
-        const subjectKey = `manual:${Date.now()}:${repo.id}`;
-        const enqueued = enqueueTriggerAndJob(db, {
-          repoId: repo.id,
-          kind: 'manual',
-          source: 'cli',
-          subjectKey,
-          payload: { sha, manual: true },
+        const config = loadConfig(rootOptions.config);
+        const response = await requestJson<
+          EnqueueReviewResponse | ErrorResponse
+        >({
+          socketPath: config.daemon.socketPath,
+          path: '/v1/reviews/enqueue',
+          method: 'POST',
+          body: { repoOrId: repoArg },
+          timeoutMs: 4000,
         });
 
-        if (enqueued) {
-          appendEvent(db, {
-            eventType: 'review.enqueued',
-            repoId: repo.id,
-            message: `Manual review enqueued for ${sha.slice(0, 10)}`,
-            level: 'info',
-            payload: { sha, subjectKey },
-          });
+        if (response.status !== 200) {
+          const err = response.data as ErrorResponse;
+          const message = err.error?.message ?? 'Failed to enqueue review';
+          throw new Error(message);
         }
 
-        db.close();
+        const payload = response.data as EnqueueReviewResponse;
+
+        const { enqueued, repoId, repoPath, sha, subjectKey } = payload;
 
         if (json) {
           console.log(
-            JSON.stringify({ enqueued, repoId: repo.id, sha, subjectKey }),
+            JSON.stringify({ enqueued, repoId, repoPath, sha, subjectKey }),
           );
           return;
         }
 
         if (enqueued) {
           console.log(
-            `${chalk.green('✓')} Review enqueued for ${chalk.bold(repo.path)} at ${chalk.dim(sha.slice(0, 10))}`,
+            `${chalk.green('✓')} Review enqueued for ${chalk.bold(repoPath)} at ${chalk.dim(sha.slice(0, 10))}`,
           );
         } else {
           console.log(
-            `${chalk.yellow('⚠')} Review already queued for ${chalk.bold(repo.path)} at ${chalk.dim(sha.slice(0, 10))}`,
+            `${chalk.yellow('⚠')} Review already queued for ${chalk.bold(repoPath)} at ${chalk.dim(sha.slice(0, 10))}`,
           );
         }
       } catch (err) {

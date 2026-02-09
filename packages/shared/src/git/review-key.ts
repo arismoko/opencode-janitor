@@ -4,7 +4,8 @@ export type ReviewKey =
   | { type: 'commit'; sha: string }
   | { type: 'pr'; number: number; headSha: string }
   | { type: 'branch'; branch: string; headSha: string }
-  | { type: 'workspace'; branch: string; headSha: string };
+  | { type: 'workspace'; branch: string; headSha: string }
+  | { type: 'manual'; id: string; headSha: string };
 
 // ── Parser ──────────────────────────────────────────────────────────────
 
@@ -34,6 +35,11 @@ export function parseReviewKey(key: string): ReviewKey | null {
         ? { type: 'workspace', branch: parts[1], headSha: parts[2] }
         : null;
 
+    case 'manual':
+      return parts.length >= 3 && parts[1] && parts[2]
+        ? { type: 'manual', id: parts[1], headSha: parts[2] }
+        : null;
+
     default:
       return null;
   }
@@ -55,6 +61,10 @@ export function branchKey(branch: string, headSha: string): string {
 
 export function workspaceKey(branch: string, headSha: string): string {
   return `workspace:${branch}:${headSha}`;
+}
+
+export function manualKey(id: string, headSha: string): string {
+  return `manual:${id}:${headSha}`;
 }
 
 // ── Extractors ──────────────────────────────────────────────────────────

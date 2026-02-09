@@ -11,13 +11,16 @@ export interface RepoWatchOptions {
   db: Database;
   commitPollMs: number;
   prPollMs: number;
+  maxAttempts: number;
+  onJobEnqueued?: () => void;
 }
 
 export interface RepoWatchHandle {
   stop: () => void;
 }
 
-function scanCommitSignals(db: Database): void {
+function scanCommitSignals(options: RepoWatchOptions): void {
+  const { db, maxAttempts } = options;
   const repos = listRepos(db).filter(
     (repo) => repo.enabled === 1 && repo.paused === 0,
   );
@@ -37,9 +40,11 @@ function scanCommitSignals(db: Database): void {
         source: 'poll',
         subjectKey: `commit:${headSha}`,
         payload: { path: repo.path, sha: headSha },
+        maxAttempts,
       });
 
       if (inserted) {
+        options.onJobEnqueued?.();
         appendEvent(db, {
           eventType: 'trigger.detected',
           repoId: repo.id,
@@ -60,7 +65,8 @@ function scanCommitSignals(db: Database): void {
   }
 }
 
-function scanPrSignals(db: Database): void {
+function scanPrSignals(options: RepoWatchOptions): void {
+  const { db, maxAttempts } = options;
   const repos = listRepos(db).filter(
     (repo) => repo.enabled === 1 && repo.paused === 0,
   );
@@ -80,9 +86,11 @@ function scanPrSignals(db: Database): void {
         source: 'poll',
         subjectKey: `pr:${prKey}`,
         payload: { path: repo.path, prKey },
+        maxAttempts,
       });
 
       if (inserted) {
+        options.onJobEnqueued?.();
         appendEvent(db, {
           eventType: 'trigger.detected',
           repoId: repo.id,
@@ -114,7 +122,7 @@ export function startRepoWatch(options: RepoWatchOptions): RepoWatchHandle {
 
     commitBusy = true;
     try {
-      scanCommitSignals(options.db);
+      scanCommitSignals(options);
     } finally {
       commitBusy = false;
     }
@@ -127,15 +135,15 @@ export function startRepoWatch(options: RepoWatchOptions): RepoWatchHandle {
 
     prBusy = true;
     try {
-      scanPrSignals(options.db);
+      scanPrSignals(options);
     } finally {
       prBusy = false;
     }
   }, options.prPollMs);
 
   // Prime initial state immediately.
-  scanCommitSignals(options.db);
-  scanPrSignals(options.db);
+  scanCommitSignals(options);
+  scanPrSignals(options);
 
   return {
     stop: () => {

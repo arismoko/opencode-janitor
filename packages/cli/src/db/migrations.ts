@@ -2,6 +2,7 @@
  * Schema migrations for the janitor SQLite database.
  */
 import type { Database } from 'bun:sqlite';
+import { AGENT_SQL_LIST, SEVERITY_SQL_LIST } from './enum-literals';
 
 interface Migration {
   version: number;
@@ -58,6 +59,7 @@ const MIGRATIONS: readonly Migration[] = [
         cancel_requested INTEGER NOT NULL CHECK (cancel_requested IN (0,1)) DEFAULT 0,
         hub_session_id TEXT,
         queued_at INTEGER NOT NULL,
+        next_attempt_at INTEGER NOT NULL DEFAULT 0,
         started_at INTEGER,
         finished_at INTEGER,
         error_code TEXT,
@@ -70,7 +72,7 @@ const MIGRATIONS: readonly Migration[] = [
       CREATE TABLE IF NOT EXISTS agent_runs (
         id TEXT PRIMARY KEY,
         job_id TEXT NOT NULL REFERENCES review_jobs(id) ON DELETE CASCADE,
-        agent TEXT NOT NULL CHECK (agent IN ('janitor','hunter','inspector','scribe')),
+        agent TEXT NOT NULL CHECK (agent IN (${AGENT_SQL_LIST})),
         status TEXT NOT NULL CHECK (status IN ('queued','running','succeeded','failed','skipped')),
         model_id TEXT,
         variant TEXT,
@@ -91,8 +93,8 @@ const MIGRATIONS: readonly Migration[] = [
         repo_id TEXT NOT NULL REFERENCES repos(id) ON DELETE CASCADE,
         job_id TEXT NOT NULL REFERENCES review_jobs(id) ON DELETE CASCADE,
         agent_run_id TEXT NOT NULL REFERENCES agent_runs(id) ON DELETE CASCADE,
-        agent TEXT NOT NULL CHECK (agent IN ('janitor','hunter','inspector','scribe')),
-        severity TEXT NOT NULL CHECK (severity IN ('P0','P1','P2','P3')),
+        agent TEXT NOT NULL CHECK (agent IN (${AGENT_SQL_LIST})),
+        severity TEXT NOT NULL CHECK (severity IN (${SEVERITY_SQL_LIST})),
         domain TEXT NOT NULL,
         location TEXT NOT NULL,
         evidence TEXT NOT NULL,
@@ -124,9 +126,94 @@ const MIGRATIONS: readonly Migration[] = [
   {
     version: 2,
     sql: `
-      ALTER TABLE review_jobs ADD COLUMN IF NOT EXISTS last_error_type TEXT;
-      ALTER TABLE agent_runs ADD COLUMN IF NOT EXISTS outcome TEXT;
-      ALTER TABLE agent_runs ADD COLUMN IF NOT EXISTS summary_json TEXT;
+      ALTER TABLE review_jobs ADD COLUMN last_error_type TEXT;
+      ALTER TABLE agent_runs ADD COLUMN outcome TEXT;
+      ALTER TABLE agent_runs ADD COLUMN summary_json TEXT;
+    `,
+  },
+  {
+    version: 3,
+    sql: `
+      PRAGMA foreign_keys = OFF;
+
+      ALTER TABLE findings RENAME TO findings_old;
+      ALTER TABLE agent_runs RENAME TO agent_runs_old;
+
+      CREATE TABLE agent_runs (
+        id TEXT PRIMARY KEY,
+        job_id TEXT NOT NULL REFERENCES review_jobs(id) ON DELETE CASCADE,
+        agent TEXT NOT NULL CHECK (agent IN (${AGENT_SQL_LIST})),
+        status TEXT NOT NULL CHECK (status IN ('queued','running','succeeded','failed','skipped')),
+        model_id TEXT,
+        variant TEXT,
+        session_id TEXT UNIQUE,
+        outcome TEXT,
+        summary_json TEXT,
+        findings_count INTEGER NOT NULL DEFAULT 0,
+        raw_output TEXT,
+        started_at INTEGER,
+        finished_at INTEGER,
+        error_code TEXT,
+        error_message TEXT,
+        UNIQUE(job_id, agent)
+      ) STRICT;
+
+      INSERT INTO agent_runs (
+        id, job_id, agent, status, model_id, variant, session_id,
+        outcome, summary_json, findings_count, raw_output,
+        started_at, finished_at, error_code, error_message
+      )
+      SELECT
+        id, job_id, agent, status, model_id, variant, session_id,
+        outcome, summary_json, findings_count, raw_output,
+        started_at, finished_at, error_code, error_message
+      FROM agent_runs_old;
+
+      DROP TABLE agent_runs_old;
+
+      CREATE TABLE findings (
+        id TEXT PRIMARY KEY,
+        repo_id TEXT NOT NULL REFERENCES repos(id) ON DELETE CASCADE,
+        job_id TEXT NOT NULL REFERENCES review_jobs(id) ON DELETE CASCADE,
+        agent_run_id TEXT NOT NULL REFERENCES agent_runs(id) ON DELETE CASCADE,
+        agent TEXT NOT NULL CHECK (agent IN (${AGENT_SQL_LIST})),
+        severity TEXT NOT NULL CHECK (severity IN (${SEVERITY_SQL_LIST})),
+        domain TEXT NOT NULL,
+        location TEXT NOT NULL,
+        evidence TEXT NOT NULL,
+        prescription TEXT NOT NULL,
+        fingerprint TEXT NOT NULL,
+        created_at INTEGER NOT NULL
+      ) STRICT;
+
+      INSERT INTO findings (
+        id, repo_id, job_id, agent_run_id, agent, severity,
+        domain, location, evidence, prescription, fingerprint, created_at
+      )
+      SELECT
+        id, repo_id, job_id, agent_run_id, agent, severity,
+        domain, location, evidence, prescription, fingerprint, created_at
+      FROM findings_old;
+
+      DROP TABLE findings_old;
+
+      CREATE INDEX IF NOT EXISTS idx_agent_runs_job_status ON agent_runs(job_id, status);
+      CREATE INDEX IF NOT EXISTS idx_findings_repo_created ON findings(repo_id, created_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_findings_job_agent ON findings(job_id, agent);
+      CREATE INDEX IF NOT EXISTS idx_findings_fingerprint ON findings(fingerprint);
+
+      PRAGMA foreign_keys = ON;
+    `,
+  },
+  {
+    version: 4,
+    sql: `
+      ALTER TABLE review_jobs ADD COLUMN next_attempt_at INTEGER NOT NULL DEFAULT 0;
+
+      UPDATE review_jobs
+      SET next_attempt_at = queued_at
+      WHERE next_attempt_at = 0
+        AND status = 'queued';
     `,
   },
 ];

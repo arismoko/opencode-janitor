@@ -16,6 +16,7 @@ export {
   TriggerMode,
 } from './schemas/config';
 export * as findingSchemas from './schemas/finding';
+export { Severity } from './schemas/finding';
 export * from './types/agent';
 export * as findingTypes from './types/finding';
 export * from './types/review';

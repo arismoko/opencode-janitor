@@ -12,12 +12,43 @@ import type {
   PromptConfig,
   ReviewContext,
 } from '@opencode-janitor/shared';
-import { buildReviewPrompt, parseAgentOutput } from '@opencode-janitor/shared';
 import type { z } from 'zod';
 import type { CliConfig } from '../config/schema';
 import type { FindingRow, QueuedJobRow } from '../db/models';
 
 export type ReviewTriggerKind = 'commit' | 'pr' | 'manual';
+
+// ---------------------------------------------------------------------------
+// Trigger-discriminated context input
+// ---------------------------------------------------------------------------
+
+export interface CommitTriggerContext {
+  kind: 'commit';
+  commitSha: string;
+  commitContext: CommitContext;
+}
+
+export interface PrTriggerContext {
+  kind: 'pr';
+  commitSha: string;
+  commitContext: CommitContext;
+  prNumber: number;
+}
+
+export interface ManualTriggerContext {
+  kind: 'manual';
+  commitSha?: string;
+  commitContext?: CommitContext;
+}
+
+export type TriggerContext =
+  | CommitTriggerContext
+  | PrTriggerContext
+  | ManualTriggerContext;
+
+// ---------------------------------------------------------------------------
+// Parsed output types
+// ---------------------------------------------------------------------------
 
 export interface ParsedFinding {
   severity: string;
@@ -31,12 +62,14 @@ export interface ParsedAgentOutput {
   findings: ParsedFinding[];
 }
 
+// ---------------------------------------------------------------------------
+// Spec I/O interfaces
+// ---------------------------------------------------------------------------
+
 export interface PrepareContextInput {
   config: CliConfig;
   job: QueuedJobRow;
-  triggerKind: ReviewTriggerKind;
-  commitSha: string;
-  commitContext: CommitContext;
+  trigger: TriggerContext;
 }
 
 export interface PreparedAgentContext {
@@ -71,7 +104,7 @@ export interface AgentRuntimeSpec {
   configKey: AgentName;
 
   /** Whether this spec can handle the given trigger kind. */
-  supportsTrigger(config: CliConfig, kind: 'commit' | 'pr' | 'manual'): boolean;
+  supportsTrigger(config: CliConfig, kind: ReviewTriggerKind): boolean;
 
   /** Maximum findings from config. */
   maxFindings(config: CliConfig): number;
@@ -93,105 +126,4 @@ export interface AgentRuntimeSpec {
 
   /** Map parsed output into DB finding rows for successful runs. */
   onSuccess(input: SuccessInput): PersistableFindingRow[];
-}
-
-// ---------------------------------------------------------------------------
-// Default spec builder
-// ---------------------------------------------------------------------------
-
-/** Create a standard runtime spec for an agent. */
-export function createAgentRuntimeSpec(
-  profile: AgentProfile,
-): AgentRuntimeSpec {
-  const agentName = profile.name;
-
-  return {
-    agent: agentName,
-    profile,
-    configKey: agentName,
-
-    supportsTrigger(
-      config: CliConfig,
-      kind: 'commit' | 'pr' | 'manual',
-    ): boolean {
-      const agentConfig = config.agents[agentName];
-      if (!agentConfig.enabled) return false;
-
-      const trigger = agentConfig.trigger;
-      if (trigger === 'never') return false;
-      if (trigger === 'both') return kind === 'commit' || kind === 'pr';
-      if (trigger === 'manual') return kind === 'manual';
-      return trigger === kind;
-    },
-
-    maxFindings(config: CliConfig): number {
-      return config.agents[agentName].maxFindings;
-    },
-
-    modelId(config: CliConfig): string {
-      return config.agents[agentName].modelId ?? config.opencode.defaultModelId;
-    },
-
-    variant(config: CliConfig): string | undefined {
-      return config.agents[agentName].variant;
-    },
-
-    prepareContext(input: PrepareContextInput): PreparedAgentContext {
-      const { config, commitSha, commitContext } = input;
-
-      return {
-        reviewContext: {
-          label: `${commitSha.slice(0, 8)} - ${commitContext.subject}`,
-          changedFiles: commitContext.changedFiles,
-          patch: commitContext.patch,
-          patchTruncated: commitContext.patchTruncated,
-          metadata: [
-            `SHA: ${commitSha}`,
-            `Subject: ${commitContext.subject}`,
-            `Parents: ${commitContext.parents.join(' ')}`,
-          ],
-        },
-        promptConfig: {
-          scopeInclude: config.scope.include,
-          scopeExclude: config.scope.exclude,
-          maxFindings: config.agents[agentName].maxFindings,
-        },
-      };
-    },
-
-    buildPrompt(input: BuildPromptInput): string {
-      return buildReviewPrompt(
-        input.preparedContext.reviewContext,
-        input.preparedContext.promptConfig,
-      );
-    },
-
-    parseOutput(rawOutput: string): ParsedAgentOutput {
-      const schema = profile.outputSchema as z.ZodType<ParsedAgentOutput>;
-      const parsed = parseAgentOutput(rawOutput, schema);
-
-      if (parsed.meta.status !== 'ok') {
-        throw new Error(
-          `agent output parse failed (${parsed.meta.status}): ${parsed.meta.error ?? 'unknown parse error'}`,
-        );
-      }
-
-      return parsed.output;
-    },
-
-    onSuccess(input: SuccessInput): PersistableFindingRow[] {
-      return input.output.findings.map((finding) => ({
-        repo_id: input.job.repo_id,
-        job_id: input.job.id,
-        agent_run_id: input.runId,
-        agent: agentName,
-        severity: finding.severity,
-        domain: finding.domain,
-        location: finding.location,
-        evidence: finding.evidence,
-        prescription: finding.prescription,
-        fingerprint: `${finding.domain}:${finding.location}:${finding.severity}`,
-      }));
-    },
-  };
 }

@@ -15,7 +15,7 @@ import {
   markJobSucceeded,
   requeueJob,
 } from '../db/queries';
-import { buildCommitContext, resolveCommitSha } from '../reviews/context';
+import { buildTriggerContext } from '../reviews/context';
 import type { AgentRuntimeRegistry } from '../runtime/agent-runtime-registry';
 import type { SessionCompletionBus } from '../runtime/session-completion-bus';
 import {
@@ -23,9 +23,20 @@ import {
   type AgentRunResult,
   createAgentExecutionPipeline,
 } from './agent-execution-pipeline';
+import { createJobSignal } from './job-signal';
 import { classifyUnexpectedJobError } from './retry-policy';
 
 const DEFAULT_STOP_TIMEOUT_MS = 10_000;
+const FALLBACK_HEARTBEAT_MS = 1000;
+
+function computeRetryBackoffMs(baseMs: number, attempt: number): number {
+  const exponent = Math.max(0, attempt - 1);
+  return baseMs * 2 ** exponent;
+}
+
+function computeNextAttemptAt(baseMs: number, attempt: number): number {
+  return Date.now() + computeRetryBackoffMs(baseMs, attempt);
+}
 
 export interface SchedulerDeps {
   db: Database;
@@ -36,13 +47,16 @@ export interface SchedulerDeps {
 }
 
 export interface SchedulerHandle {
+  wake(): void;
   stop(options?: { timeoutMs?: number; cancelMessage?: string }): Promise<void>;
 }
 
 export function startScheduler(deps: SchedulerDeps): SchedulerHandle {
   const active = new Set<Promise<void>>();
+  const signal = createJobSignal();
   const pipeline = createAgentExecutionPipeline(deps);
   let stopped = false;
+  let loopPromise: Promise<void> | undefined;
   let stopPromise: Promise<void> | undefined;
 
   const tick = () => {
@@ -66,15 +80,30 @@ export function startScheduler(deps: SchedulerDeps): SchedulerHandle {
         })
         .finally(() => {
           active.delete(promise);
+          signal.notify();
         });
 
       active.add(promise);
     }
   };
 
-  const interval = setInterval(tick, 500);
+  const runLoop = async () => {
+    while (!stopped) {
+      tick();
+      if (stopped) {
+        break;
+      }
+      await signal.wait(FALLBACK_HEARTBEAT_MS);
+    }
+  };
+
+  loopPromise = runLoop();
 
   return {
+    wake() {
+      signal.notify();
+    },
+
     stop(options) {
       if (stopPromise) {
         return stopPromise;
@@ -82,7 +111,9 @@ export function startScheduler(deps: SchedulerDeps): SchedulerHandle {
 
       stopPromise = (async () => {
         stopped = true;
-        clearInterval(interval);
+        signal.notify();
+        await loopPromise;
+        loopPromise = undefined;
 
         await pipeline.cancelActiveSessions(
           options?.cancelMessage ?? 'scheduler stopping',
@@ -129,10 +160,8 @@ async function processJob(
       jobId: job.id,
     });
 
-    const sha =
-      payloadSha(job.payload_json) ??
-      resolveCommitSha(job.path, job.subject_key);
-    const commit = buildCommitContext(job.path, sha);
+    const sha = payloadSha(job.payload_json);
+    const trigger = buildTriggerContext(job.path, job.subject_key, sha);
 
     const selectedSpecs = registry
       .agents()
@@ -156,7 +185,7 @@ async function processJob(
     for (let i = 0; i < selectedSpecs.length; i += parallelism) {
       const chunk = selectedSpecs.slice(i, i + parallelism);
       const chunkResults = await Promise.all(
-        chunk.map((spec) => pipeline.execute(job, spec, sha, commit)),
+        chunk.map((spec) => pipeline.execute(job, spec, trigger)),
       );
       allResults.push(...chunkResults);
     }
@@ -196,7 +225,18 @@ async function processJob(
       const message = `agent(s) failed: ${failedAgentDetails.join(', ')}`;
 
       if (allRetryable && job.attempt < job.max_attempts) {
-        requeueJob(db, job.id, 'JOB_RETRY_TRANSIENT', message, 'transient');
+        const nextAttemptAt = computeNextAttemptAt(
+          config.scheduler.retryBackoffMs,
+          job.attempt,
+        );
+        requeueJob(
+          db,
+          job.id,
+          'JOB_RETRY_TRANSIENT',
+          message,
+          nextAttemptAt,
+          'transient',
+        );
         appendEvent(db, {
           eventType: 'job.requeued',
           message: `Job ${job.id} requeued after transient agent failure: ${message}`,
@@ -254,11 +294,16 @@ async function processJob(
     const message = classified.message;
 
     if (classified.retryable && job.attempt < job.max_attempts) {
+      const nextAttemptAt = computeNextAttemptAt(
+        config.scheduler.retryBackoffMs,
+        job.attempt,
+      );
       requeueJob(
         db,
         job.id,
         classified.errorCode,
         message,
+        nextAttemptAt,
         classified.errorType === 'transient' ? 'transient' : 'unknown',
       );
       appendEvent(db, {

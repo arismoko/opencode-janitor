@@ -3,46 +3,117 @@
  */
 import chalk from 'chalk';
 import type { Command } from 'commander';
+import { loadConfig } from '../config/loader';
 import { openDatabase } from '../db/connection';
 import { runMigrations } from '../db/migrations';
 import { listEvents } from '../db/queries';
+import { requestSse } from '../ipc/client';
+import type { EventJournalEntry } from '../ipc/protocol';
 import { formatTs } from '../utils/time';
+
+function printEvent(event: EventJournalEntry): void {
+  const ts = chalk.dim(formatTs(event.ts));
+  const kind = chalk.cyan(event.event_type);
+  const level = chalk.dim(event.level.toUpperCase());
+  const repo = event.repo_id ? chalk.dim(` repo=${event.repo_id}`) : '';
+  console.log(`${ts}  ${level}  ${kind}  ${event.message}${repo}`);
+}
+
+function readRecentEvents(limit: number): EventJournalEntry[] {
+  const db = openDatabase();
+  runMigrations(db);
+  const events = listEvents(db, limit) as EventJournalEntry[];
+  db.close();
+  return events;
+}
+
+async function followEvents(
+  socketPath: string,
+  afterSeq: number,
+  json: boolean,
+): Promise<void> {
+  const controller = new AbortController();
+  const onSigint = () => {
+    controller.abort();
+  };
+
+  process.on('SIGINT', onSigint);
+
+  try {
+    await requestSse({
+      socketPath,
+      path: `/v1/events/stream?afterSeq=${afterSeq}`,
+      signal: controller.signal,
+      onEvent: (event, payload) => {
+        if (event !== 'event') {
+          return;
+        }
+
+        const row = payload as EventJournalEntry;
+        if (json) {
+          console.log(JSON.stringify(row));
+          return;
+        }
+
+        printEvent(row);
+      },
+    });
+  } catch (error) {
+    if (controller.signal.aborted) {
+      return;
+    }
+    throw error;
+  } finally {
+    process.off('SIGINT', onSigint);
+  }
+}
 
 export function registerLogCommand(program: Command): void {
   program
     .command('log')
     .description('Show recent activity events')
     .option('-n, --limit <number>', 'Number of events to show', '25')
-    .action((opts: { limit: string }) => {
-      const json = program.opts()['json'] as boolean | undefined;
+    .option('-f, --follow', 'Follow daemon event stream')
+    .action(async (opts: { limit: string; follow?: boolean }) => {
+      const rootOptions = program.opts<{ json?: boolean; config?: string }>();
+      const json = rootOptions.json;
       try {
         const limit = Number.parseInt(opts.limit, 10);
         if (Number.isNaN(limit) || limit < 1) {
           throw new Error('--limit must be a positive integer');
         }
 
-        const db = openDatabase();
-        runMigrations(db);
-
-        const events = listEvents(db, limit);
-        db.close();
+        const eventsDesc = readRecentEvents(limit);
+        const events = [...eventsDesc].reverse();
+        const lastSeq = events.at(-1)?.seq ?? 0;
 
         if (json) {
-          console.log(JSON.stringify(events, null, 2));
-          return;
-        }
-
-        if (events.length === 0) {
+          if (opts.follow) {
+            for (const event of events) {
+              console.log(JSON.stringify(event));
+            }
+          } else {
+            console.log(JSON.stringify(eventsDesc, null, 2));
+            return;
+          }
+        } else if (events.length === 0) {
           console.log(chalk.dim('No events recorded yet.'));
-          return;
+        } else {
+          for (const ev of events) {
+            printEvent(ev);
+          }
         }
 
-        for (const ev of events) {
-          const ts = chalk.dim(formatTs(ev.ts));
-          const kind = chalk.cyan(ev.event_type);
-          const level = chalk.dim(ev.level.toUpperCase());
-          const repo = ev.repo_id ? chalk.dim(` repo=${ev.repo_id}`) : '';
-          console.log(`${ts}  ${level}  ${kind}  ${ev.message}${repo}`);
+        if (opts.follow) {
+          const config = loadConfig(rootOptions.config);
+
+          if (!json) {
+            console.log(
+              chalk.dim('--- following live events (Ctrl+C to stop) ---'),
+            );
+          }
+
+          await followEvents(config.daemon.socketPath, lastSeq, Boolean(json));
         }
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
