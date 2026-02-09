@@ -1,9 +1,45 @@
 /**
  * @opencode-janitor/cli
  *
- * CLI daemon and TUI dashboard for automated code reviews.
- * Watches git repos, detects changes, spawns review sessions
- * via the OpenCode SDK, and provides a live dashboard.
+ * Commander-based CLI for managing tracked repos and querying activity.
  */
 
-console.log('opencode-janitor cli — not yet implemented');
+import { Command } from 'commander';
+import { registerAddCommand } from './commands/add';
+import { registerConfigCommand } from './commands/config';
+import { registerLogCommand } from './commands/log';
+import { registerRemoveCommand } from './commands/remove';
+import { registerReviewCommand } from './commands/review';
+import { registerStartCommand } from './commands/start';
+import { registerStatusCommand } from './commands/status';
+import { registerStopCommand } from './commands/stop';
+import { runDaemonMain } from './daemon/main';
+
+const program = new Command();
+
+program
+  .name('opencode-janitor')
+  .description('CLI for opencode-janitor — automated code review management')
+  .version('0.1.0')
+  .option('--json', 'Output in JSON format')
+  .option('--config <path>', 'Path to config TOML file');
+
+// Phase 2 commands
+registerAddCommand(program);
+registerRemoveCommand(program);
+registerLogCommand(program);
+registerConfigCommand(program);
+registerStartCommand(program);
+registerStopCommand(program);
+registerStatusCommand(program);
+registerReviewCommand(program);
+
+program
+  .command('daemon', { hidden: true })
+  .description('Internal daemon entrypoint')
+  .action(async () => {
+    const rootOptions = program.opts<{ config?: string }>();
+    await runDaemonMain(rootOptions.config);
+  });
+
+program.parse();
