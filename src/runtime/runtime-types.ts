@@ -13,6 +13,8 @@ export type Exec = (cmd: string) => Promise<string>;
 export interface AgentControl {
   pausedJanitor: boolean;
   pausedHunter: boolean;
+  pausedInspector: boolean;
+  pausedScribe: boolean;
 }
 
 /** Runtime lifecycle flag. */

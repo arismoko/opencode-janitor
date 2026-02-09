@@ -13,6 +13,8 @@ interface StateData {
   processedHunterHeads?: string[];
   pausedJanitor?: boolean;
   pausedHunter?: boolean;
+  pausedInspector?: boolean;
+  pausedScribe?: boolean;
 }
 
 /**
@@ -25,6 +27,8 @@ export class RuntimeStateStore {
   private processedHunterHeads = new Set<string>();
   private pausedJanitor = false;
   private pausedHunter = false;
+  private pausedInspector = false;
+  private pausedScribe = false;
   private statePath: string;
 
   constructor(workspaceDir: string) {
@@ -74,14 +78,31 @@ export class RuntimeStateStore {
   }
 
   /** Read paused flags for command controls. */
-  getPaused(): { janitor: boolean; hunter: boolean } {
-    return { janitor: this.pausedJanitor, hunter: this.pausedHunter };
+  getPaused(): {
+    janitor: boolean;
+    hunter: boolean;
+    inspector: boolean;
+    scribe: boolean;
+  } {
+    return {
+      janitor: this.pausedJanitor,
+      hunter: this.pausedHunter,
+      inspector: this.pausedInspector,
+      scribe: this.pausedScribe,
+    };
   }
 
   /** Persist paused flags for command controls. */
-  setPaused(flags: { janitor: boolean; hunter: boolean }): void {
+  setPaused(flags: {
+    janitor: boolean;
+    hunter: boolean;
+    inspector: boolean;
+    scribe: boolean;
+  }): void {
     this.pausedJanitor = flags.janitor;
     this.pausedHunter = flags.hunter;
+    this.pausedInspector = flags.inspector;
+    this.pausedScribe = flags.scribe;
     this.persist();
   }
 
@@ -120,6 +141,8 @@ export class RuntimeStateStore {
 
       this.pausedJanitor = Boolean(data.pausedJanitor);
       this.pausedHunter = Boolean(data.pausedHunter);
+      this.pausedInspector = Boolean(data.pausedInspector);
+      this.pausedScribe = Boolean(data.pausedScribe);
 
       log(
         `[store] loaded ${this.processed.size} processed commits and ${this.processedPrKeys.size} processed PR keys`,
@@ -146,6 +169,8 @@ export class RuntimeStateStore {
         processedHunterHeads: [...this.processedHunterHeads],
         pausedJanitor: this.pausedJanitor,
         pausedHunter: this.pausedHunter,
+        pausedInspector: this.pausedInspector,
+        pausedScribe: this.pausedScribe,
       };
 
       atomicWriteSync(this.statePath, JSON.stringify(data, null, 2));

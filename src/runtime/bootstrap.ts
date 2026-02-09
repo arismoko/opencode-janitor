@@ -137,6 +137,8 @@ export async function bootstrapServices(
   const control = {
     pausedJanitor: paused.janitor,
     pausedHunter: paused.hunter,
+    pausedInspector: paused.inspector,
+    pausedScribe: paused.scribe,
   };
   const suppressionStore = new SuppressionStore(ctx.directory, {
     maxEntries: config.suppressions?.maxEntries,

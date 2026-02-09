@@ -58,6 +58,8 @@ export type CommandHookContext = Pick<
   | 'store'
   | 'janitorQueue'
   | 'hunterQueue'
+  | 'inspectorQueue'
+  | 'scribeQueue'
 >;
 
 /**

@@ -4,8 +4,8 @@
  * Commands:
  * - /janitor run|status|stop|resume — janitor agent control
  * - /hunter run [pr#]|status|stop|resume — hunter agent control
- * - /inspector run|status — inspector agent (not yet wired)
- * - /scribe run|status — scribe agent (not yet wired)
+ * - /inspector run|status|stop|resume — inspector agent control (manual trigger)
+ * - /scribe run|status|stop|resume — scribe agent control (manual trigger)
  */
 
 import type { Part } from '@opencode-ai/sdk';
@@ -47,20 +47,35 @@ export function createCommandHook(
     const respond = async (text: string) =>
       injectMessage(rc.ctx, hookInput.sessionID, text, true);
 
+    /** Persist current control pause state to store. */
+    const persistPaused = () =>
+      rc.store.setPaused({
+        janitor: rc.control.pausedJanitor,
+        hunter: rc.control.pausedHunter,
+        inspector: rc.control.pausedInspector,
+        scribe: rc.control.pausedScribe,
+      });
+
     // Cross-agent status renderer (shown by /janitor status as plugin overview)
     const renderAllStatus = () => {
       const janitorJobs = rc.janitorQueue.getJobsSnapshot();
       const hunterJobs = rc.hunterQueue.getJobsSnapshot();
+      const inspectorJobs = rc.inspectorQueue.getJobsSnapshot();
+      const scribeJobs = rc.scribeQueue.getJobsSnapshot();
       const jRunning = janitorJobs.filter((j) => j.status === 'running');
       const jPending = janitorJobs.filter((j) => j.status === 'pending');
       const hRunning = hunterJobs.filter((j) => j.status === 'running');
       const hPending = hunterJobs.filter((j) => j.status === 'pending');
+      const iRunning = inspectorJobs.filter((j) => j.status === 'running');
+      const iPending = inspectorJobs.filter((j) => j.status === 'pending');
+      const sRunning = scribeJobs.filter((j) => j.status === 'running');
+      const sPending = scribeJobs.filter((j) => j.status === 'pending');
 
       return [
         `**janitor** ${rc.control.pausedJanitor ? '⏸ paused' : '▶ active'} — running=${jRunning.length}, pending=${jPending.length}`,
         `**hunter** ${rc.control.pausedHunter ? '⏸ paused' : '▶ active'} — running=${hRunning.length}, pending=${hPending.length}`,
-        `**inspector** — not yet wired`,
-        `**scribe** — not yet wired`,
+        `**inspector** ${rc.control.pausedInspector ? '⏸ paused' : '▶ active'} — running=${iRunning.length}, pending=${iPending.length}`,
+        `**scribe** ${rc.control.pausedScribe ? '⏸ paused' : '▶ active'} — running=${sRunning.length}, pending=${sPending.length}`,
       ].join('\n');
     };
 
@@ -93,10 +108,7 @@ export function createCommandHook(
         await respond(`🧼 **[janitor]** review queued: ${runKey}`);
       } else if (action === 'stop') {
         rc.control.pausedJanitor = true;
-        rc.store.setPaused({
-          janitor: true,
-          hunter: rc.control.pausedHunter,
-        });
+        persistPaused();
         const dropped = rc.janitorQueue.clearPending();
         const aborted = await rc.janitorQueue.abortRunning(rc.ctx);
         await respond(
@@ -104,10 +116,7 @@ export function createCommandHook(
         );
       } else if (action === 'resume') {
         rc.control.pausedJanitor = false;
-        rc.store.setPaused({
-          janitor: false,
-          hunter: rc.control.pausedHunter,
-        });
+        persistPaused();
         await respond(`▶️ **[janitor]** resumed`);
       } else {
         await respond(usage);
@@ -194,10 +203,7 @@ export function createCommandHook(
         await respond(`🔍 **[hunter]** review queued: ${prContext.key}`);
       } else if (action === 'stop') {
         rc.control.pausedHunter = true;
-        rc.store.setPaused({
-          janitor: rc.control.pausedJanitor,
-          hunter: true,
-        });
+        persistPaused();
         const dropped = rc.hunterQueue.clearPending();
         const aborted = await rc.hunterQueue.abortRunning(rc.ctx);
         await respond(
@@ -205,10 +211,7 @@ export function createCommandHook(
         );
       } else if (action === 'resume') {
         rc.control.pausedHunter = false;
-        rc.store.setPaused({
-          janitor: rc.control.pausedJanitor,
-          hunter: false,
-        });
+        persistPaused();
         await respond(`▶️ **[hunter]** resumed`);
       } else {
         await respond(usage);
@@ -217,20 +220,78 @@ export function createCommandHook(
       return;
     }
 
-    // --- /inspector (not yet wired) ---
+    // --- /inspector ---
     if (hookInput.command === 'inspector') {
-      await respond(
-        '⚠️ **[inspector]** not yet implemented — coming in a future commit',
-      );
+      const usage = 'Usage: /inspector run | status | stop | resume';
+
+      if (action === 'status') {
+        const inspectorJobs = rc.inspectorQueue.getJobsSnapshot();
+        const running = inspectorJobs.filter((j) => j.status === 'running');
+        const pending = inspectorJobs.filter((j) => j.status === 'pending');
+        await respond(
+          `📋 **[inspector]** ${rc.control.pausedInspector ? '⏸ paused' : '▶ active'} — running=${running.length}, pending=${pending.length}` +
+            (running.length
+              ? `\nrunning: ${running.map((j) => `${j.key} (${j.sessionId ?? 'starting'})`).join(', ')}`
+              : ''),
+        );
+      } else if (action === 'run') {
+        const runKey = `inspector:${Date.now()}`;
+        rc.inspectorQueue.enqueue(runKey, hookInput.sessionID);
+        await respond(
+          `🔎 **[inspector]** repo-wide analysis queued: ${runKey}`,
+        );
+      } else if (action === 'stop') {
+        rc.control.pausedInspector = true;
+        persistPaused();
+        const dropped = rc.inspectorQueue.clearPending();
+        const aborted = await rc.inspectorQueue.abortRunning(rc.ctx);
+        await respond(
+          `🛑 **[inspector]** stopped. dropped=${dropped}, aborted=${aborted}`,
+        );
+      } else if (action === 'resume') {
+        rc.control.pausedInspector = false;
+        persistPaused();
+        await respond(`▶️ **[inspector]** resumed`);
+      } else {
+        await respond(usage);
+      }
       handled();
       return;
     }
 
-    // --- /scribe (not yet wired) ---
+    // --- /scribe ---
     if (hookInput.command === 'scribe') {
-      await respond(
-        '⚠️ **[scribe]** not yet implemented — coming in a future commit',
-      );
+      const usage = 'Usage: /scribe run | status | stop | resume';
+
+      if (action === 'status') {
+        const scribeJobs = rc.scribeQueue.getJobsSnapshot();
+        const running = scribeJobs.filter((j) => j.status === 'running');
+        const pending = scribeJobs.filter((j) => j.status === 'pending');
+        await respond(
+          `📋 **[scribe]** ${rc.control.pausedScribe ? '⏸ paused' : '▶ active'} — running=${running.length}, pending=${pending.length}` +
+            (running.length
+              ? `\nrunning: ${running.map((j) => `${j.key} (${j.sessionId ?? 'starting'})`).join(', ')}`
+              : ''),
+        );
+      } else if (action === 'run') {
+        const runKey = `scribe:${Date.now()}`;
+        rc.scribeQueue.enqueue(runKey, hookInput.sessionID);
+        await respond(`📝 **[scribe]** documentation audit queued: ${runKey}`);
+      } else if (action === 'stop') {
+        rc.control.pausedScribe = true;
+        persistPaused();
+        const dropped = rc.scribeQueue.clearPending();
+        const aborted = await rc.scribeQueue.abortRunning(rc.ctx);
+        await respond(
+          `🛑 **[scribe]** stopped. dropped=${dropped}, aborted=${aborted}`,
+        );
+      } else if (action === 'resume') {
+        rc.control.pausedScribe = false;
+        persistPaused();
+        await respond(`▶️ **[scribe]** resumed`);
+      } else {
+        await respond(usage);
+      }
       handled();
       return;
     }
