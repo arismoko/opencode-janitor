@@ -9,6 +9,7 @@
 
 import type { PluginInput } from '@opencode-ai/plugin';
 import { HunterStrategy } from '../review/strategies/hunter-strategy';
+import { InspectorStrategy } from '../review/strategies/inspector-strategy';
 import { JanitorStrategy } from '../review/strategies/janitor-strategy';
 import { log } from '../utils/logger';
 import { createAgentQueues } from './agent-runtime';
@@ -39,13 +40,18 @@ export async function bootstrapRuntime(
   const registry = new AgentRuntimeRegistry();
   registry.register(JanitorStrategy.createSpec(svc.suppressionStore));
   registry.register(HunterStrategy.createSpec());
+  registry.register(InspectorStrategy.createSpec());
 
-  const { janitorQueue, hunterQueue } = createAgentQueues(svc, registry);
+  const { janitorQueue, hunterQueue, inspectorQueue } = createAgentQueues(
+    svc,
+    registry,
+  );
 
   // Session ownership dispatcher — targeted event routing instead of broadcast
   const dispatcher = new SessionOwnershipDispatcher();
   janitorQueue.setDispatcher(dispatcher);
   hunterQueue.setDispatcher(dispatcher);
+  inspectorQueue.setDispatcher(dispatcher);
 
   // Forward-declare rcRef so closures created below can reference it.
   // By the time any closure executes (after start()), rcRef is assigned.
@@ -82,6 +88,7 @@ export async function bootstrapRuntime(
     historyStore: svc.historyStore,
     janitorQueue,
     hunterQueue,
+    inspectorQueue,
     dispatcher,
     detector,
     prDetector,
@@ -112,10 +119,13 @@ export async function bootstrapRuntime(
     prDetector?.stop();
     janitorQueue.shutdown();
     hunterQueue.shutdown();
+    inspectorQueue.shutdown();
     janitorQueue.clearPending();
     hunterQueue.clearPending();
+    inspectorQueue.clearPending();
     await janitorQueue.abortRunning(ctx);
     await hunterQueue.abortRunning(ctx);
+    await inspectorQueue.abortRunning(ctx);
     log('plugin runtime stopped: detectors halted');
   };
 

@@ -13,8 +13,9 @@ import { buildReviewPrompt } from '../review/prompt-builder';
 import { ReviewRunQueue } from '../review/review-run-queue';
 import { spawnReview } from '../review/runner';
 import { HunterStrategy } from '../review/strategies/hunter-strategy';
+import { InspectorStrategy } from '../review/strategies/inspector-strategy';
 import { JanitorStrategy } from '../review/strategies/janitor-strategy';
-import type { HunterResult, ReviewResult } from '../types';
+import type { HunterResult, InspectorResult, ReviewResult } from '../types';
 import { log } from '../utils/logger';
 import { extractHeadSha } from '../utils/review-key';
 import type { AgentRuntimeRegistry } from './agent-runtime-registry';
@@ -28,6 +29,7 @@ import type { Exec } from './runtime-types';
 export interface AgentQueues {
   janitorQueue: ReviewRunQueue<string, ReviewResult>;
   hunterQueue: ReviewRunQueue<PrContext, HunterResult>;
+  inspectorQueue: ReviewRunQueue<string, InspectorResult>;
 }
 
 // ---------------------------------------------------------------------------
@@ -116,5 +118,27 @@ export function createAgentQueues(
     log(`persisted reviewed PR key: ${key}`);
   });
 
-  return { janitorQueue, hunterQueue };
+  // Inspector
+  const inspectorSpec = registry.get<string>('inspector');
+  const inspectorStrategy = new InspectorStrategy();
+  const inspectorExecutor = createSpecExecutor(inspectorSpec, {
+    ctx,
+    config,
+    exec,
+    trackedSessions,
+    writeSessionMeta,
+    buildPrompt: buildReviewPrompt,
+    spawnReview,
+    extractKey: inspectorStrategy.extractKey.bind(inspectorStrategy),
+  });
+
+  const inspectorQueue = new ReviewRunQueue<string, InspectorResult>(
+    config,
+    inspectorExecutor,
+    inspectorStrategy,
+    inspectorSpec.queueTag,
+  );
+  inspectorQueue.setContext(ctx);
+
+  return { janitorQueue, hunterQueue, inspectorQueue };
 }

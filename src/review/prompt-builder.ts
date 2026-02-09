@@ -9,12 +9,12 @@ import type { ChangedFile } from '../types';
 export interface ReviewContext {
   /** Display label (e.g. SHA, PR key) */
   label: string;
-  /** Changed files in this review */
-  changedFiles: ChangedFile[];
-  /** Unified diff patch */
-  patch: string;
-  /** Whether the patch was truncated */
-  patchTruncated: boolean;
+  /** Changed files in this review (omit for repo-wide manual runs) */
+  changedFiles?: ChangedFile[];
+  /** Unified diff patch (omit for repo-wide manual runs) */
+  patch?: string;
+  /** Whether the patch was truncated (omit for repo-wide manual runs) */
+  patchTruncated?: boolean;
   /** Additional metadata lines injected into the CONTEXT section */
   metadata?: string[];
 }
@@ -42,8 +42,6 @@ export function buildReviewPrompt(
   context: ReviewContext,
   config: PromptConfig,
 ): string {
-  const filesStr = formatChangedFiles(context.changedFiles);
-
   const sections: string[] = [`# SCOPE`, `Review target: ${context.label}`];
 
   if (context.metadata?.length) {
@@ -54,21 +52,36 @@ export function buildReviewPrompt(
     `File patterns included: ${config.scopeInclude.join(', ')}`,
     `File patterns excluded: ${config.scopeExclude.join(', ')}`,
     `Maximum findings: ${config.maxFindings}`,
-    '',
-    `# REVIEW CONTEXT`,
-    `Changed files:`,
-    filesStr,
-    '',
-    `DIFF_TRUNCATED=${context.patchTruncated}`,
   );
 
-  if (context.patchTruncated) {
+  const hasDiff = context.changedFiles?.length || context.patch?.trim();
+
+  if (hasDiff) {
+    const filesStr = formatChangedFiles(context.changedFiles ?? []);
     sections.push(
-      '(Patch was truncated. Use your tools to inspect files directly for deeper evidence.)',
+      '',
+      `# REVIEW CONTEXT`,
+      `Changed files:`,
+      filesStr,
+      '',
+      `DIFF_TRUNCATED=${context.patchTruncated ?? false}`,
+    );
+
+    if (context.patchTruncated) {
+      sections.push(
+        '(Patch was truncated. Use your tools to inspect files directly for deeper evidence.)',
+      );
+    }
+
+    sections.push('', '```diff', context.patch ?? '', '```');
+  } else {
+    sections.push(
+      '',
+      '# REVIEW CONTEXT',
+      'No diff provided — this is a repo-wide analysis run.',
+      'Use your tools (glob, grep, read, lsp) to explore the codebase and identify issues.',
     );
   }
-
-  sections.push('', '```diff', context.patch, '```');
 
   if (config.suppressionsBlock) {
     sections.push(
