@@ -1,4 +1,5 @@
 import type { PluginInput } from '@opencode-ai/plugin';
+import type { TextPartInput } from '@opencode-ai/sdk';
 import { error, log } from '../utils/logger';
 
 export interface SpawnReviewOpts {
@@ -49,12 +50,12 @@ export async function spawnReview(
   // OpenCode resolves it from the agent registry and applies its model,
   // temperature, system prompt, and tool permissions.
   const body: {
-    parts: Array<{ type: 'text'; text: string }>;
+    parts: TextPartInput[];
     agent?: string;
     model?: { providerID: string; modelID: string };
   } = {
     agent: opts.agent,
-    parts: [{ type: 'text', text: opts.prompt }],
+    parts: [{ type: 'text' as const, text: opts.prompt }],
   };
 
   // Override model if explicitly configured (takes precedence over
@@ -75,7 +76,7 @@ export async function spawnReview(
   try {
     await ctx.client.session.promptAsync({
       path: { id: sessionId },
-      body: body as any,
+      body,
       query: { directory: ctx.directory },
     });
     log(`[runner] prompt sent to session: ${sessionId}`);

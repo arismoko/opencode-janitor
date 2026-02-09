@@ -11,7 +11,7 @@
  *   - src/hooks/event-hook.ts        (session completion/error/event logging)
  */
 
-import type { Plugin } from '@opencode-ai/plugin';
+import type { Hooks, Plugin } from '@opencode-ai/plugin';
 import { registerAgents } from './agents/registry';
 import { loadConfig } from './config/loader';
 import { createCommandHook } from './hooks/command-hook';
@@ -22,31 +22,13 @@ import { createJanitorAgent } from './review/janitor-agent';
 import { bootstrapRuntime } from './runtime/review-runtime';
 import { log } from './utils/logger';
 
-/** Plugin return shape — typed locally since the SDK Plugin type doesn't
- *  export a precise return interface for hooks we use. */
-interface JanitorPluginReturn {
-  name: string;
-  config?: (config: Record<string, unknown>) => Promise<void>;
-  'command.execute.before'?: (
-    input: { command: string; sessionID: string; arguments: string },
-    output: { parts: Array<{ type: string; text?: string }> },
-  ) => Promise<void>;
-  'tool.execute.after'?: (
-    input: { tool: string; sessionID: string; callID: string },
-    output: { title: string; output: string; metadata: unknown },
-  ) => Promise<void>;
-  event?: (input: {
-    event: { type: string; properties?: Record<string, unknown> };
-  }) => Promise<void>;
-}
-
 let stopActiveRuntime: (() => Promise<void>) | null = null;
 
 /** Best-effort toast — swallows errors so it never breaks init. */
 function toast(ctx: Parameters<Plugin>[0], message: string) {
   try {
-    (ctx.client as any).tui
-      ?.showToast?.({ body: { message, variant: 'info' } })
+    ctx.client.tui
+      .showToast({ body: { message, variant: 'info' as const } })
       .catch(() => {});
   } catch {
     // TUI may not be available
@@ -67,7 +49,7 @@ const TheJanitor: Plugin = async (ctx) => {
       ? 'no git repo found — inactive'
       : 'disabled by config';
     toast(ctx, `Janitor: ${reason}`);
-    return { name: 'the-janitor' } as JanitorPluginReturn;
+    return { name: 'the-janitor' } satisfies Hooks & { name: string };
   }
 
   const { rc, stop } = result;
@@ -85,7 +67,7 @@ const TheJanitor: Plugin = async (ctx) => {
     'command.execute.before': createCommandHook(rc),
     'tool.execute.after': createToolHook(rc),
     event: createEventHook(rc),
-  } as JanitorPluginReturn;
+  } satisfies Hooks & { name: string };
 };
 
 export default TheJanitor;

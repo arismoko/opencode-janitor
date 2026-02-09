@@ -2,6 +2,7 @@
  * Tool execution hook — accelerates commit/PR detection on git commands.
  */
 
+import type { Hooks } from '@opencode-ai/plugin';
 import type { RuntimeContext } from '../runtime/context';
 
 /**
@@ -13,10 +14,7 @@ import type { RuntimeContext } from '../runtime/context';
  */
 export function createToolHook(
   rc: RuntimeContext,
-): (
-  input: { tool: string; sessionID: string; callID: string },
-  output: { title: string; output: string; metadata: unknown },
-) => Promise<void> {
+): NonNullable<Hooks['tool.execute.after']> {
   return async (input, output) => {
     if (rc.runtime.disposed) return;
     if (input.tool !== 'Bash' && input.tool !== 'bash') return;

@@ -55,7 +55,7 @@ export async function deliverToast(
   }
 
   try {
-    await (ctx.client as any).tui?.showToast?.({
+    await ctx.client.tui.showToast({
       body: { message, variant: result.clean ? 'success' : 'warning' },
     });
   } catch {

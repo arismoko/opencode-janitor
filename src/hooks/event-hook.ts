@@ -9,6 +9,7 @@
 
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import type { Event } from '@opencode-ai/sdk';
 import type { RuntimeContext } from '../runtime/context';
 import { atomicWriteSync } from '../utils/atomic-write';
 import { appendEvent } from '../utils/event-log';
@@ -24,16 +25,17 @@ import { warn } from '../utils/logger';
  */
 export function createEventHook(
   rc: RuntimeContext,
-): (input: {
-  event: { type: string; properties?: Record<string, unknown> };
-}) => Promise<void> {
+): (input: { event: Event }) => Promise<void> {
   return async (input) => {
     if (rc.runtime.disposed) return;
     const { event } = input;
 
-    // Stream events for tracked sessions to JSONL
-    const eventSessionId = (event.properties?.sessionID ??
-      (event.properties?.part as { sessionID?: string })?.sessionID) as
+    // Stream events for tracked sessions to JSONL.
+    // Event is a discriminated union — extract sessionID generically for
+    // the best-effort logging path across all event types.
+    const props = event.properties as Record<string, unknown>;
+    const eventSessionId = (props.sessionID ??
+      (props.part as { sessionID?: string } | undefined)?.sessionID) as
       | string
       | undefined;
     if (eventSessionId && rc.trackedSessions.has(eventSessionId)) {
@@ -48,14 +50,12 @@ export function createEventHook(
 
     // Detect review session completion
     if (event.type === 'session.status') {
-      const props = event.properties as
-        | { status?: { type?: string }; sessionID?: string }
-        | undefined;
-      if (props?.status?.type === 'idle' && props?.sessionID) {
+      const { status, sessionID } = event.properties;
+      if (status.type === 'idle' && sessionID) {
         // Update session metadata to reflect completion
-        if (rc.trackedSessions.has(props.sessionID)) {
+        if (rc.trackedSessions.has(sessionID)) {
           try {
-            const metaPath = join(rc.stateDir, `${props.sessionID}.json`);
+            const metaPath = join(rc.stateDir, `${sessionID}.json`);
             const existing = JSON.parse(readFileSync(metaPath, 'utf-8'));
             existing.status = 'completed';
             existing.completedAt = Date.now();
@@ -68,16 +68,12 @@ export function createEventHook(
               },
             );
           }
-          rc.trackedSessions.delete(props.sessionID);
+          rc.trackedSessions.delete(sessionID);
         }
 
-        await rc.orchestrator.handleCompletion(
-          props.sessionID,
-          rc.ctx,
-          rc.config,
-        );
+        await rc.orchestrator.handleCompletion(sessionID, rc.ctx, rc.config);
         await rc.hunterOrchestrator.handleCompletion(
-          props.sessionID,
+          sessionID,
           rc.ctx,
           rc.config,
         );
@@ -88,39 +84,37 @@ export function createEventHook(
     // BUG FIX: handleFailure calls are OUTSIDE the trackedSessions guard.
     // If tracking diverges, the queue slot is still released.
     if (event.type === 'session.error') {
-      const props = event.properties as
-        | { error?: { message?: string }; sessionID?: string }
-        | undefined;
+      const { sessionID, error: sessionError } = event.properties;
 
-      if (props?.sessionID) {
+      if (sessionID) {
+        const errorMessage = sessionError
+          ? 'message' in sessionError.data
+            ? String(sessionError.data.message)
+            : sessionError.name
+          : 'unknown error';
+
         // Update metadata if we were tracking this session
-        if (rc.trackedSessions.has(props.sessionID)) {
+        if (rc.trackedSessions.has(sessionID)) {
           try {
-            const metaPath = join(rc.stateDir, `${props.sessionID}.json`);
+            const metaPath = join(rc.stateDir, `${sessionID}.json`);
             const existing = JSON.parse(readFileSync(metaPath, 'utf-8'));
             existing.status = 'failed';
             existing.completedAt = Date.now();
-            existing.error = props.error?.message ?? 'unknown error';
+            existing.error = errorMessage;
             atomicWriteSync(metaPath, JSON.stringify(existing, null, 2));
           } catch (err) {
             warn('[session-event] failed to update failed session metadata', {
               error: String(err),
             });
           }
-          rc.trackedSessions.delete(props.sessionID);
+          rc.trackedSessions.delete(sessionID);
         }
 
         // Always forward to queue handlers — they use their own
         // sessionToKey map to determine ownership. This ensures
         // queue slots are released even if trackedSessions diverges.
-        rc.orchestrator.handleFailure(
-          props.sessionID,
-          props.error?.message ?? 'unknown error',
-        );
-        rc.hunterOrchestrator.handleFailure(
-          props.sessionID,
-          props.error?.message ?? 'unknown error',
-        );
+        rc.orchestrator.handleFailure(sessionID, errorMessage);
+        rc.hunterOrchestrator.handleFailure(sessionID, errorMessage);
       }
     }
   };

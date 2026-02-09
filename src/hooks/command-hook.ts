@@ -9,6 +9,7 @@
  * - review [pr#]: queue PR/branch review
  */
 
+import type { Part } from '@opencode-ai/sdk';
 import { getWorkspaceCommitContext } from '../git/commit-resolver';
 import { getPrByNumberFromGh, isGhAvailable } from '../git/gh-pr';
 import {
@@ -27,7 +28,7 @@ export function createCommandHook(
   rc: RuntimeContext,
 ): (
   hookInput: { command: string; sessionID: string; arguments: string },
-  _output: { parts: Array<{ type: string; text?: string }> },
+  _output: { parts: Part[] },
 ) => Promise<void> {
   /** Check if a hunter review is already in-flight for a given head SHA. */
   const hasHunterHeadInFlight = (headSha: string): boolean => {

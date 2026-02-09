@@ -1,4 +1,5 @@
 import type { PluginInput } from '@opencode-ai/plugin';
+import type { Message, Part } from '@opencode-ai/sdk';
 import type { JanitorConfig } from '../config/schema';
 import { getErrorMessage, log, warn } from '../utils/logger';
 import { notifyError } from '../utils/notifier';
@@ -368,14 +369,14 @@ export class ReviewRunQueue<TContext, TResult> {
       query: { directory: ctx.directory },
     });
     const messages = (messagesResult.data ?? []) as Array<{
-      info?: { role: string };
-      parts?: Array<{ type: string; text?: string }>;
+      info: Message;
+      parts: Part[];
     }>;
 
     const assistantTexts: string[] = [];
     for (const msg of messages) {
-      if (msg.info?.role !== 'assistant') continue;
-      for (const part of msg.parts ?? []) {
+      if (msg.info.role !== 'assistant') continue;
+      for (const part of msg.parts) {
         if (part.type === 'text' && part.text) {
           assistantTexts.push(part.text);
         }

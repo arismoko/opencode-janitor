@@ -7,6 +7,7 @@
  * the config hook is ignored by the plugin system).
  */
 
+import type { Config } from '@opencode-ai/sdk';
 import { log } from '../utils/logger';
 
 export interface AgentDefinition {
@@ -21,12 +22,9 @@ export interface AgentDefinition {
  */
 export function registerAgents(
   agents: AgentDefinition[],
-): (opencodeConfig: Record<string, unknown>) => Promise<void> {
-  return async (opencodeConfig: Record<string, unknown>) => {
-    const agentRegistry = (opencodeConfig.agent ?? {}) as Record<
-      string,
-      unknown
-    >;
+): (opencodeConfig: Config) => Promise<void> {
+  return async (opencodeConfig: Config) => {
+    const agentRegistry = opencodeConfig.agent ?? {};
 
     for (const agent of agents) {
       agentRegistry[agent.name] = {
@@ -35,10 +33,7 @@ export function registerAgents(
       };
     }
 
-    const commands = (opencodeConfig.command ?? {}) as Record<
-      string,
-      { description?: string; template?: string }
-    >;
+    const commands = opencodeConfig.command ?? {};
     commands.janitor = {
       description:
         'Janitor control: /janitor status|stop|resume [janitor|hunter|all], /janitor clean, /janitor review [pr#]',
