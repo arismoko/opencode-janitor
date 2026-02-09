@@ -31,10 +31,10 @@ export function buildSuppressionsBlock(
 
   for (const s of active) {
     const suffix = suffix2(s.original.location);
-    // Extract shape hash from scopedKey (format: "category|filename|shapeHash")
+    // Extract shape hash from scopedKey (format: "domain|filename|shapeHash")
     const shape = s.scopedKey.split('|')[2] ?? '';
     const reason = s.reason ?? s.original.prescription;
-    const line = `${s.original.category}|${suffix}|${shape}|reason: ${reason}`;
+    const line = `${s.original.domain}|${suffix}|${shape}|reason: ${reason}`;
     const lineBytes = Buffer.byteLength(line + '\n');
 
     if (budget - lineBytes < 0) break;

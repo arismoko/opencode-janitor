@@ -57,7 +57,7 @@ export function buildHistorySection(data: EnrichmentData): string {
     lines.push('', '### Persistent Findings', '');
     for (const a of persistent) {
       lines.push(
-        `- **${a.finding.category}** in \`${a.finding.location}\` — seen in ${a.streak} consecutive reviews`,
+        `- **${a.finding.domain}** in \`${a.finding.location}\` — seen in ${a.streak} consecutive reviews`,
       );
     }
   }
@@ -70,7 +70,7 @@ export function buildHistorySection(data: EnrichmentData): string {
     lines.push('', '### Regressions', '');
     for (const a of regressions) {
       lines.push(
-        `- **${a.finding.category}** in \`${a.finding.location}\` — was resolved, now regressed`,
+        `- **${a.finding.domain}** in \`${a.finding.location}\` — was resolved, now regressed`,
       );
     }
   }

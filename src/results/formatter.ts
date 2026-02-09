@@ -39,7 +39,7 @@ export function formatReport(
   const findingSections = result.findings.map((f, i) => {
     return [
       '',
-      `### ${i + 1}. ${f.category} — ${summarizeLocation(f.location)}`,
+      `### ${i + 1}. ${f.domain} — ${summarizeLocation(f.location)}`,
       '',
       `**Location**: \`${f.location}\``,
       `**Evidence**: ${f.evidence}`,

@@ -1,11 +1,13 @@
 import type { PluginInput } from '@opencode-ai/plugin';
 import type { JanitorConfig } from '../config/schema';
 import type { PrContext } from '../git/pr-context-resolver';
+import { parseAgentOutput } from '../results/agent-output-codec';
 import { formatReviewerReport } from '../results/reviewer-formatter';
-import { parseReviewerOutput } from '../results/reviewer-parser';
 import { deliverReviewerToFile } from '../results/sinks/reviewer-file-sink';
 import { deliverReviewerToSession } from '../results/sinks/reviewer-session-sink';
 import { deliverReviewerToast } from '../results/sinks/reviewer-toast-sink';
+import { HunterOutput as HunterOutputSchema } from '../schemas/finding';
+import type { ReviewerResult } from '../types';
 import { log } from '../utils/logger';
 import { extractWorkspaceHeadFromKey } from '../utils/review-key';
 import { type BaseJob, BaseOrchestrator } from './base-orchestrator';
@@ -13,9 +15,6 @@ import { type BaseJob, BaseOrchestrator } from './base-orchestrator';
 type ReviewerExecutor = (context: PrContext) => Promise<string>;
 
 type GhPostReview = (prNumber: number, body: string) => Promise<boolean>;
-
-/** Parsed reviewer output shape (imported from types). */
-import type { ReviewerResult } from '../types';
 
 /**
  * Comprehensive code reviewer orchestrator for PR-level reviews.
@@ -60,10 +59,22 @@ export class ReviewerOrchestrator extends BaseOrchestrator<
   ): Promise<void> {
     const rawOutput = await this.extractAssistantOutput(sessionId, ctx);
     const resultId = extractWorkspaceHeadFromKey(job.key);
-    const { result, meta } = parseReviewerOutput(rawOutput, resultId);
+    const { output, meta } = parseAgentOutput(rawOutput, HunterOutputSchema);
     if (meta.status !== 'ok') {
       throw new Error(`Reviewer parse failed (${meta.status}): ${meta.error}`);
     }
+    const result: ReviewerResult = {
+      id: resultId,
+      findings: output.findings.map((f) => ({
+        location: f.location,
+        severity: f.severity,
+        domain: f.domain as ReviewerResult['findings'][0]['domain'],
+        evidence: f.evidence,
+        prescription: f.prescription,
+      })),
+      clean: output.findings.length === 0,
+      raw: rawOutput,
+    };
     const report = formatReviewerReport(result);
 
     job.completedAt = new Date();

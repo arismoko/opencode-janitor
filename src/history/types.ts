@@ -21,7 +21,7 @@ export interface ReviewRecord {
   findings: Array<{
     exactKey: string;
     scopedKey: string;
-    category: string;
+    domain: string;
     location: string;
   }>;
   findingCount: number;
@@ -32,7 +32,7 @@ export interface ReviewRecord {
 export interface FindingLedgerEntry {
   exactKey: string;
   scopedKey: string;
-  category: string;
+  domain: string;
   location: string;
   firstSeenSha: string;
   lastSeenSha: string;

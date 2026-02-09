@@ -19,9 +19,9 @@ export async function deliverToast(
     message = `Janitor: No P0 issues in ${shortSha} ✓`;
   } else {
     const count = result.findings.length;
-    const categories = [
-      ...new Set(result.findings.map((f) => f.category)),
-    ].join(', ');
+    const categories = [...new Set(result.findings.map((f) => f.domain))].join(
+      ', ',
+    );
     message = `Janitor: ${count} P0 finding${count === 1 ? '' : 's'} in ${shortSha} (${categories})`;
   }
 

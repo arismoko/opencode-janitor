@@ -2,7 +2,7 @@ import type { ReviewRecord } from './types';
 
 export type TrendDirection = 'improving' | 'stable' | 'worsening';
 
-export interface CategoryTrend {
+export interface DomainTrend {
   total: number;
   avg: number;
   trend: TrendDirection;
@@ -11,7 +11,7 @@ export interface CategoryTrend {
 export interface TrendData {
   reviewCount: number;
   avgFindings: number;
-  byCategory: Record<string, CategoryTrend>;
+  byDomain: Record<string, DomainTrend>;
   overallTrend: TrendDirection;
 }
 
@@ -24,7 +24,7 @@ export function computeTrends(
     return {
       reviewCount: window.length,
       avgFindings: window[0]?.findingCount ?? 0,
-      byCategory: {},
+      byDomain: {},
       overallTrend: 'stable',
     };
   }
@@ -36,24 +36,22 @@ export function computeTrends(
   const avgFirst = average(firstHalf.map((r) => r.findingCount));
   const avgSecond = average(secondHalf.map((r) => r.findingCount));
 
-  const byCategory: TrendData['byCategory'] = {};
-  const categories = new Set(
-    window.flatMap((r) => r.findings.map((f) => f.category)),
+  const byDomain: TrendData['byDomain'] = {};
+  const domains = new Set(
+    window.flatMap((r) => r.findings.map((f) => f.domain)),
   );
 
-  for (const cat of categories) {
+  for (const cat of domains) {
     const catFirstAvg = average(
-      firstHalf.map((r) => r.findings.filter((f) => f.category === cat).length),
+      firstHalf.map((r) => r.findings.filter((f) => f.domain === cat).length),
     );
     const catSecondAvg = average(
-      secondHalf.map(
-        (r) => r.findings.filter((f) => f.category === cat).length,
-      ),
+      secondHalf.map((r) => r.findings.filter((f) => f.domain === cat).length),
     );
 
-    byCategory[cat] = {
+    byDomain[cat] = {
       total: window.reduce(
-        (sum, r) => sum + r.findings.filter((f) => f.category === cat).length,
+        (sum, r) => sum + r.findings.filter((f) => f.domain === cat).length,
         0,
       ),
       avg: catSecondAvg,
@@ -64,7 +62,7 @@ export function computeTrends(
   return {
     reviewCount: window.length,
     avgFindings: avgSecond,
-    byCategory,
+    byDomain,
     overallTrend: trendDirection(avgFirst, avgSecond),
   };
 }

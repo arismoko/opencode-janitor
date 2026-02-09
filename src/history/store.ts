@@ -128,7 +128,7 @@ export class HistoryStore {
           entries.set(f.exactKey, {
             exactKey: f.exactKey,
             scopedKey: f.scopedKey,
-            category: f.category,
+            domain: f.domain,
             location: f.location,
             firstSeenSha: review.sha,
             lastSeenSha: review.sha,
