@@ -160,7 +160,7 @@ export async function bootstrapRuntime(
   const janitorStrategy = new JanitorStrategy(suppressionStore, historyStore);
   const orchestrator = new ReviewRunQueue<string, ReviewResult>(
     config,
-    async (runKey) => {
+    async (runKey, parentSessionId) => {
       const workspace = runKey.startsWith('workspace:');
       const commit = workspace
         ? await getWorkspaceCommitContext(config, exec)
@@ -203,6 +203,7 @@ export async function bootstrapRuntime(
         title: `[janitor-run] ${runKey}`,
         agent: 'janitor',
         modelId: config.agents.janitor.modelId ?? config.model.id,
+        parentID: parentSessionId,
       });
       trackedSessions.add(sessionId);
       writeSessionMeta(sessionId, {
@@ -234,7 +235,7 @@ export async function bootstrapRuntime(
   );
   const hunterOrchestrator = new ReviewRunQueue<PrContext, HunterResult>(
     config,
-    async (prContext: PrContext) => {
+    async (prContext: PrContext, parentSessionId?: string) => {
       const id = prContext.number ? `PR #${prContext.number}` : prContext.key;
       const prompt = buildReviewPrompt(
         {
@@ -260,6 +261,7 @@ export async function bootstrapRuntime(
         title: `[hunter-run] ${prContext.key}`,
         agent: 'bug-hunter',
         modelId: config.agents.hunter.modelId ?? config.model.id,
+        parentID: parentSessionId,
       });
       trackedSessions.add(sessionId);
       writeSessionMeta(sessionId, {

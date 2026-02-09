@@ -53,7 +53,7 @@ export class JanitorStrategy implements ReviewStrategy<string, ReviewResult> {
 
     await this.deliverResults(
       result,
-      job.deliverySessionId,
+      job.parentSessionId,
       ctx,
       config,
       enrichment,
@@ -63,7 +63,7 @@ export class JanitorStrategy implements ReviewStrategy<string, ReviewResult> {
 
   private async deliverResults(
     result: ReviewResult,
-    deliverySessionId: string | undefined,
+    parentSessionId: string | undefined,
     ctx: PluginInput,
     config: JanitorConfig,
     enrichment?: EnrichmentData,
@@ -80,8 +80,8 @@ export class JanitorStrategy implements ReviewStrategy<string, ReviewResult> {
       });
     }
 
-    if (config.delivery.sessionMessage && deliverySessionId && !result.clean) {
-      await deliverToSession(ctx, deliverySessionId, report, {
+    if (config.delivery.sessionMessage && parentSessionId && !result.clean) {
+      await deliverToSession(ctx, parentSessionId, report, {
         label: 'Janitor Review Complete',
         enrichment,
         noReply: config.delivery.noReply,

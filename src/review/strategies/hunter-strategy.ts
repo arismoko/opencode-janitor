@@ -81,7 +81,7 @@ export class HunterStrategy implements ReviewStrategy<PrContext, HunterResult> {
       await deliverToast(ctx, result, { label: 'Bug Hunt', shortId });
     }
 
-    if (delivery.sessionMessage && job.deliverySessionId && !result.clean) {
+    if (delivery.sessionMessage && job.parentSessionId && !result.clean) {
       const willPostPr =
         delivery.prComment &&
         config.pr.postWithGh &&
@@ -89,7 +89,7 @@ export class HunterStrategy implements ReviewStrategy<PrContext, HunterResult> {
         typeof job.context.number === 'number';
 
       if (!willPostPr) {
-        await deliverToSession(ctx, job.deliverySessionId, report, {
+        await deliverToSession(ctx, job.parentSessionId, report, {
           label: 'Bug Hunt Complete',
           noReply: delivery.noReply,
         });

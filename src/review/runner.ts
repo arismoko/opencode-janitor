@@ -10,6 +10,8 @@ export interface SpawnReviewOpts {
   agent: string;
   /** Optional model override (provider/model format) */
   modelId?: string;
+  /** Parent session ID for lineage tracking */
+  parentID?: string;
 }
 
 /**
@@ -31,6 +33,7 @@ export async function spawnReview(
   const session = await ctx.client.session.create({
     body: {
       title: opts.title,
+      parentID: opts.parentID,
     },
     query: { directory: ctx.directory },
   });

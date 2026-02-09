@@ -7,7 +7,7 @@ import { notifyError } from '../utils/notifier';
 export interface BaseJob<TContext, TResult> {
   key: string;
   context: TContext;
-  deliverySessionId?: string;
+  parentSessionId?: string;
   sessionId?: string;
   status:
     | 'pending'
@@ -43,7 +43,10 @@ export interface ReviewStrategy<TContext, TResult> {
   ): Promise<void>;
 }
 
-type Executor<TContext> = (context: TContext) => Promise<string>;
+type Executor<TContext> = (
+  context: TContext,
+  parentSessionId?: string,
+) => Promise<string>;
 
 /**
  * Concrete review queue managing the lifecycle of review jobs.
@@ -94,7 +97,7 @@ export class ReviewRunQueue<TContext, TResult> {
       | 'key'
       | 'status'
       | 'sessionId'
-      | 'deliverySessionId'
+      | 'parentSessionId'
       | 'enqueuedAt'
       | 'startedAt'
     >
@@ -103,7 +106,7 @@ export class ReviewRunQueue<TContext, TResult> {
       key: job.key,
       status: job.status,
       sessionId: job.sessionId,
-      deliverySessionId: job.deliverySessionId,
+      parentSessionId: job.parentSessionId,
       enqueuedAt: job.enqueuedAt,
       startedAt: job.startedAt,
     }));
@@ -158,7 +161,7 @@ export class ReviewRunQueue<TContext, TResult> {
    * Enqueue a context for review.
    * Applies burst coalescing if dropIntermediate is enabled.
    */
-  enqueue(context: TContext, deliverySessionId?: string): void {
+  enqueue(context: TContext, parentSessionId?: string): void {
     if (this.halted) {
       log(`[${this.tag}] enqueue ignored while halted`);
       return;
@@ -175,7 +178,7 @@ export class ReviewRunQueue<TContext, TResult> {
     const job: BaseJob<TContext, TResult> = {
       key,
       context,
-      deliverySessionId,
+      parentSessionId,
       status: 'pending',
       enqueuedAt: new Date(),
     };
@@ -218,7 +221,7 @@ export class ReviewRunQueue<TContext, TResult> {
       job.startedAt = new Date();
 
       try {
-        const sessionId = await this.executor(job.context);
+        const sessionId = await this.executor(job.context, job.parentSessionId);
 
         if (job.cancelRequested) {
           if (this.ctx) {
@@ -254,10 +257,10 @@ export class ReviewRunQueue<TContext, TResult> {
         warn(`[${this.tag}] review failed to start: ${key} — ${job.error}`);
 
         // Surface the error to the user in their originating session
-        if (this.ctx && job.deliverySessionId) {
+        if (this.ctx && job.parentSessionId) {
           notifyError(
             this.ctx,
-            job.deliverySessionId,
+            job.parentSessionId,
             `Review failed for ${this.strategy.errorLabel(key)}`,
             err,
           ).catch(() => {}); // fire-and-forget
@@ -296,9 +299,6 @@ export class ReviewRunQueue<TContext, TResult> {
     log(`[${this.tag}] review completed: ${key}`);
 
     try {
-      if (!job.deliverySessionId) {
-        job.deliverySessionId = await this.resolveLatestRootSessionId(ctx);
-      }
       await this.strategy.onJobCompleted(
         job,
         sessionId,
@@ -314,10 +314,10 @@ export class ReviewRunQueue<TContext, TResult> {
       warn(`[${this.tag}] result extraction failed: ${key} — ${job.error}`);
 
       // Surface extraction failure to the user in their originating session
-      if (this.ctx && job.deliverySessionId) {
+      if (this.ctx && job.parentSessionId) {
         notifyError(
           this.ctx,
-          job.deliverySessionId,
+          job.parentSessionId,
           `Failed to extract review results for ${this.strategy.errorLabel(key)}`,
           err,
         ).catch(() => {}); // fire-and-forget
@@ -383,35 +383,5 @@ export class ReviewRunQueue<TContext, TResult> {
     }
 
     return assistantTexts.join('\n\n');
-  }
-
-  private async resolveLatestRootSessionId(
-    ctx: PluginInput,
-  ): Promise<string | undefined> {
-    try {
-      const result = await ctx.client.session.list({
-        query: {
-          directory: ctx.directory,
-        },
-      });
-      const sessions = ((result as { data?: unknown[] }).data ?? []) as Array<{
-        id?: string;
-        title?: string;
-        parentID?: string;
-        time?: { updated?: number };
-      }>;
-      const root = sessions
-        .filter(
-          (session) =>
-            session.id &&
-            !session.parentID &&
-            !session.title?.startsWith('[janitor-run] ') &&
-            !session.title?.startsWith('[hunter-run] '),
-        )
-        .sort((a, b) => (b.time?.updated ?? 0) - (a.time?.updated ?? 0))[0];
-      return root?.id;
-    } catch {
-      return undefined;
-    }
   }
 }
