@@ -47,6 +47,8 @@ export async function bootstrapRuntime(
   const { janitorQueue, hunterQueue, inspectorQueue, scribeQueue } =
     createAgentQueues(svc, registry);
 
+  const queues = { janitorQueue, hunterQueue, inspectorQueue, scribeQueue };
+
   // Session ownership dispatcher — targeted event routing instead of broadcast
   const dispatcher = new SessionOwnershipDispatcher();
   janitorQueue.setDispatcher(dispatcher);
@@ -58,15 +60,10 @@ export async function bootstrapRuntime(
   // By the time any closure executes (after start()), rcRef is assigned.
   let rcRef: RuntimeContext;
 
-  const { detector, prDetector } = createDetectors(
-    svc,
-    janitorQueue,
-    hunterQueue,
-    () => rcRef,
-  );
+  const { detector, prDetector } = createDetectors(svc, queues, () => rcRef);
 
   // Pre-seed processed SHAs
-  if (svc.janitorCommitEnabled) {
+  if (svc.agentTriggers.janitor.commit) {
     for (const sha of svc.previouslyProcessed) {
       detector.markProcessed(sha);
     }
@@ -99,10 +96,7 @@ export async function bootstrapRuntime(
     runtime: svc.runtime,
     ghAvailableAtStartup: svc.ghAvailableAtStartup,
     branchPushPending: false,
-    janitorCommitEnabled: svc.janitorCommitEnabled,
-    janitorPrEnabled: svc.janitorPrEnabled,
-    hunterCommitEnabled: svc.hunterCommitEnabled,
-    hunterPrEnabled: svc.hunterPrEnabled,
+    agentTriggers: svc.agentTriggers,
     anyCommitReviews: svc.anyCommitReviews,
     anyPrReviews: svc.anyPrReviews,
     writeSessionMeta: svc.writeSessionMeta,

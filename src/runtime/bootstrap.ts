@@ -17,6 +17,9 @@ import { ensureStateDir, resolveStateDir } from '../utils/state-dir';
 import { createExec } from './context';
 import type { AgentControl, Exec, RuntimeFlag } from './runtime-types';
 
+export type AgentName = 'janitor' | 'hunter' | 'inspector' | 'scribe';
+export type AgentTriggers = Record<AgentName, { commit: boolean; pr: boolean }>;
+
 type TriggerMode = 'commit' | 'pr' | 'both' | 'manual' | 'never';
 
 function triggerMatches(trigger: TriggerMode, mode: 'commit' | 'pr'): boolean {
@@ -39,10 +42,7 @@ export interface BootstrapServices {
   ghAvailableAtStartup: boolean;
   previouslyProcessed: string[];
   previouslyProcessedPrKeys: string[];
-  janitorCommitEnabled: boolean;
-  janitorPrEnabled: boolean;
-  hunterCommitEnabled: boolean;
-  hunterPrEnabled: boolean;
+  agentTriggers: AgentTriggers;
   anyCommitReviews: boolean;
   anyPrReviews: boolean;
   writeSessionMeta: (
@@ -82,21 +82,43 @@ export async function bootstrapServices(
     return null;
   }
 
-  const janitorCommitEnabled =
-    config.agents.janitor.enabled &&
-    triggerMatches(config.agents.janitor.trigger, 'commit');
-  const janitorPrEnabled =
-    config.agents.janitor.enabled &&
-    triggerMatches(config.agents.janitor.trigger, 'pr');
-  const hunterCommitEnabled =
-    config.agents.hunter.enabled &&
-    triggerMatches(config.agents.hunter.trigger, 'commit');
-  const hunterPrEnabled =
-    config.agents.hunter.enabled &&
-    triggerMatches(config.agents.hunter.trigger, 'pr');
+  const agentTriggers: AgentTriggers = {
+    janitor: {
+      commit:
+        config.agents.janitor.enabled &&
+        triggerMatches(config.agents.janitor.trigger, 'commit'),
+      pr:
+        config.agents.janitor.enabled &&
+        triggerMatches(config.agents.janitor.trigger, 'pr'),
+    },
+    hunter: {
+      commit:
+        config.agents.hunter.enabled &&
+        triggerMatches(config.agents.hunter.trigger, 'commit'),
+      pr:
+        config.agents.hunter.enabled &&
+        triggerMatches(config.agents.hunter.trigger, 'pr'),
+    },
+    inspector: {
+      commit:
+        config.agents.inspector.enabled &&
+        triggerMatches(config.agents.inspector.trigger, 'commit'),
+      pr:
+        config.agents.inspector.enabled &&
+        triggerMatches(config.agents.inspector.trigger, 'pr'),
+    },
+    scribe: {
+      commit:
+        config.agents.scribe.enabled &&
+        triggerMatches(config.agents.scribe.trigger, 'commit'),
+      pr:
+        config.agents.scribe.enabled &&
+        triggerMatches(config.agents.scribe.trigger, 'pr'),
+    },
+  };
 
-  const anyCommitReviews = janitorCommitEnabled || hunterCommitEnabled;
-  const anyPrReviews = janitorPrEnabled || hunterPrEnabled;
+  const anyCommitReviews = Object.values(agentTriggers).some((t) => t.commit);
+  const anyPrReviews = Object.values(agentTriggers).some((t) => t.pr);
 
   const ghAvailableAtStartup = anyPrReviews ? await isGhAvailable(exec) : false;
   if (anyPrReviews && !ghAvailableAtStartup) {
@@ -166,10 +188,7 @@ export async function bootstrapServices(
     ghAvailableAtStartup,
     previouslyProcessed,
     previouslyProcessedPrKeys,
-    janitorCommitEnabled,
-    janitorPrEnabled,
-    hunterCommitEnabled,
-    hunterPrEnabled,
+    agentTriggers,
     anyCommitReviews,
     anyPrReviews,
     writeSessionMeta,

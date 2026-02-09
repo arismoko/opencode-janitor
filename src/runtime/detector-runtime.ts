@@ -7,10 +7,9 @@ import { getCommitContext } from '../git/commit-resolver';
 import { getCurrentPrFromGh } from '../git/gh-pr';
 import { getPrContext, type PrContext } from '../git/pr-context-resolver';
 import { PrDetector } from '../git/pr-detector';
-import type { ReviewRunQueue } from '../review/review-run-queue';
-import type { HunterResult, ReviewResult } from '../types';
 import { log, warn } from '../utils/logger';
 import { branchKey, commitKey, prKey } from '../utils/review-key';
+import type { AgentQueues } from './agent-runtime';
 import type { BootstrapServices } from './bootstrap';
 import type { RuntimeContext } from './context';
 
@@ -28,8 +27,7 @@ export interface Detectors {
  */
 export function createDetectors(
   svc: BootstrapServices,
-  janitorQueue: ReviewRunQueue<string, ReviewResult>,
-  hunterQueue: ReviewRunQueue<PrContext, HunterResult>,
+  queues: AgentQueues,
   getRcRef: () => RuntimeContext,
 ): Detectors {
   const {
@@ -40,12 +38,11 @@ export function createDetectors(
     control,
     runtime,
     ghAvailableAtStartup,
-    janitorCommitEnabled,
-    janitorPrEnabled,
-    hunterCommitEnabled,
-    hunterPrEnabled,
+    agentTriggers,
     anyPrReviews,
   } = svc;
+
+  const { janitorQueue, hunterQueue } = queues;
 
   // Commit detector
   const detector = new CommitDetector(
@@ -68,14 +65,14 @@ export function createDetectors(
         return;
       }
 
-      if (janitorCommitEnabled) {
+      if (agentTriggers.janitor.commit) {
         if (!control.pausedJanitor) {
           if (runtime.disposed) return;
           janitorQueue.enqueue(sha);
         }
       }
 
-      if (hunterCommitEnabled) {
+      if (agentTriggers.hunter.commit) {
         if (control.pausedHunter) {
           return;
         }
@@ -192,11 +189,11 @@ export function createDetectors(
             store.addPrKey(prContext.key);
           }
 
-          if (janitorPrEnabled) {
+          if (agentTriggers.janitor.pr) {
             if (!control.pausedJanitor) {
               if (runtime.disposed) return;
               if (
-                janitorCommitEnabled &&
+                agentTriggers.janitor.commit &&
                 store.hasProcessedSha(prContext.headSha)
               ) {
                 log(
@@ -208,7 +205,7 @@ export function createDetectors(
             }
           }
 
-          if (hunterPrEnabled) {
+          if (agentTriggers.hunter.pr) {
             if (!control.pausedHunter) {
               if (runtime.disposed) return;
               if (hunterQueue.hasHeadInFlight(prContext.headSha)) {
