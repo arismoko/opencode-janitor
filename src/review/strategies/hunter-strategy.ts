@@ -6,6 +6,11 @@ import { renderReport } from '../../results/report-renderer';
 import { deliverToFile } from '../../results/sinks/file-sink';
 import { deliverToSession } from '../../results/sinks/session-sink';
 import { deliverToast } from '../../results/sinks/toast-sink';
+import type {
+  AgentRuntimeSpec,
+  PreparedContext,
+} from '../../runtime/agent-runtime-spec';
+import type { Exec } from '../../runtime/context';
 import { HunterOutput as HunterOutputSchema } from '../../schemas/finding';
 import type { HunterResult } from '../../types';
 import { log } from '../../utils/logger';
@@ -16,6 +21,41 @@ type GhPostReview = (prNumber: number, body: string) => Promise<boolean>;
 
 export class HunterStrategy implements ReviewStrategy<PrContext, HunterResult> {
   constructor(private readonly postGhReview?: GhPostReview) {}
+
+  /**
+   * Create the hunter agent runtime spec.
+   * Centralizes hunter-specific context resolution as strategy-owned data.
+   */
+  static createSpec(): AgentRuntimeSpec<PrContext> {
+    return {
+      agent: 'bug-hunter',
+      queueTag: 'hunter-orchestrator',
+      resolveModelId: (config) =>
+        config.agents.hunter.modelId ?? config.model.id,
+
+      async prepareReviewContext(
+        prContext: PrContext,
+        _config: JanitorConfig,
+        _exec: Exec,
+      ): Promise<PreparedContext> {
+        return {
+          reviewContext: {
+            label: prContext.number ? `PR #${prContext.number}` : prContext.key,
+            changedFiles: prContext.changedFiles,
+            patch: prContext.patch,
+            patchTruncated: prContext.patchTruncated,
+            metadata: [
+              `Base: ${prContext.baseRef}`,
+              `Head: ${prContext.headRef}`,
+              `Head SHA: ${prContext.headSha}`,
+            ],
+          },
+        };
+      },
+
+      sessionTitle: (prContext) => `[hunter-run] ${prContext.key}`,
+    };
+  }
 
   extractKey(context: PrContext): string {
     return context.key;

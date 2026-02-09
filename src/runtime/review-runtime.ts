@@ -8,8 +8,11 @@
  */
 
 import type { PluginInput } from '@opencode-ai/plugin';
+import { HunterStrategy } from '../review/strategies/hunter-strategy';
+import { JanitorStrategy } from '../review/strategies/janitor-strategy';
 import { log } from '../utils/logger';
 import { createAgentQueues } from './agent-runtime';
+import { AgentRuntimeRegistry } from './agent-runtime-registry';
 import { bootstrapServices } from './bootstrap';
 import type { RuntimeContext } from './context';
 import { createDetectors } from './detector-runtime';
@@ -31,7 +34,12 @@ export async function bootstrapRuntime(
   const svc = await bootstrapServices(ctx);
   if (!svc) return null;
 
-  const { orchestrator, hunterOrchestrator } = createAgentQueues(svc);
+  // Build agent runtime registry — each strategy owns its spec
+  const registry = new AgentRuntimeRegistry();
+  registry.register(JanitorStrategy.createSpec(svc.suppressionStore));
+  registry.register(HunterStrategy.createSpec());
+
+  const { orchestrator, hunterOrchestrator } = createAgentQueues(svc, registry);
 
   // Forward-declare rcRef so closures created below can reference it.
   // By the time any closure executes (after start()), rcRef is assigned.

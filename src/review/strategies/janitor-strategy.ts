@@ -1,5 +1,9 @@
 import type { PluginInput } from '@opencode-ai/plugin';
 import type { JanitorConfig } from '../../config/schema';
+import {
+  getCommitContext,
+  getWorkspaceCommitContext,
+} from '../../git/commit-resolver';
 import type { EnrichmentData } from '../../history/enrichment';
 import type { HistoryStore } from '../../history/store';
 import { formatReport } from '../../results/formatter';
@@ -7,6 +11,12 @@ import { processReviewOutput } from '../../results/pipeline';
 import { deliverToFile } from '../../results/sinks/file-sink';
 import { deliverToSession } from '../../results/sinks/session-sink';
 import { deliverToast } from '../../results/sinks/toast-sink';
+import type {
+  AgentRuntimeSpec,
+  PreparedContext,
+} from '../../runtime/agent-runtime-spec';
+import type { Exec } from '../../runtime/context';
+import { buildSuppressionsBlock } from '../../suppressions/prompt';
 import type { SuppressionStore } from '../../suppressions/store';
 import type { ReviewResult } from '../../types';
 import { extractWorkspaceHeadFromKey } from '../../utils/review-key';
@@ -17,6 +27,62 @@ export class JanitorStrategy implements ReviewStrategy<string, ReviewResult> {
     private readonly suppressionStore: SuppressionStore,
     private readonly historyStore: HistoryStore,
   ) {}
+
+  /**
+   * Create the janitor agent runtime spec.
+   * Centralizes janitor-specific context resolution as strategy-owned data.
+   */
+  static createSpec(
+    suppressionStore: SuppressionStore,
+  ): AgentRuntimeSpec<string> {
+    return {
+      agent: 'janitor',
+      queueTag: 'orchestrator',
+      resolveModelId: (config) =>
+        config.agents.janitor.modelId ?? config.model.id,
+
+      async prepareReviewContext(
+        runKey: string,
+        config: JanitorConfig,
+        exec: Exec,
+      ): Promise<PreparedContext> {
+        const workspace = runKey.startsWith('workspace:');
+        const commit = workspace
+          ? await getWorkspaceCommitContext(config, exec)
+          : await getCommitContext(runKey, config, exec);
+
+        if (!commit.patch.trim() && commit.changedFiles.length === 0) {
+          throw new Error(
+            `Empty commit context for ${commit.sha.slice(0, 8)} — no patch or changed files`,
+          );
+        }
+
+        const suppressionsBlock = config.suppressions?.enabled
+          ? buildSuppressionsBlock(
+              suppressionStore.getActive(),
+              config.suppressions?.maxPromptBytes,
+            )
+          : '';
+
+        return {
+          reviewContext: {
+            label: `${commit.sha.slice(0, 8)} — ${commit.subject}`,
+            changedFiles: commit.changedFiles,
+            patch: commit.patch,
+            patchTruncated: commit.patchTruncated,
+            metadata: [
+              `SHA: ${commit.sha}`,
+              `Subject: ${commit.subject}`,
+              `Parents: ${commit.parents.join(' ')}`,
+            ],
+          },
+          suppressionsBlock,
+        };
+      },
+
+      sessionTitle: (runKey) => `[janitor-run] ${runKey}`,
+    };
+  }
 
   extractKey(sha: string): string {
     return sha;
