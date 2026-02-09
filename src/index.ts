@@ -31,7 +31,6 @@ import { createJanitorAgent } from './review/janitor-agent';
 import { buildReviewPrompt } from './review/prompt-builder';
 import { ReviewRunQueue } from './review/review-run-queue';
 import { createReviewerAgent } from './review/reviewer-agent';
-import { buildReviewerPrompt } from './review/reviewer-prompt-builder';
 import { spawnReview } from './review/runner';
 import { JanitorStrategy } from './review/strategies/janitor-strategy';
 import { ReviewerStrategy } from './review/strategies/reviewer-strategy';
@@ -240,15 +239,25 @@ const TheJanitor: Plugin = async (ctx) => {
             config.suppressions?.maxPromptBytes,
           )
         : '';
-      const prompt = buildReviewPrompt(commit, {
-        categories: Object.entries(config.categories)
-          .filter(([, v]) => v)
-          .map(([k]) => k),
-        maxFindings: config.model.maxFindings,
-        scopeInclude: config.scope.include,
-        scopeExclude: config.scope.exclude,
-        suppressionsBlock,
-      });
+      const prompt = buildReviewPrompt(
+        {
+          label: `${commit.sha.slice(0, 8)} — ${commit.subject}`,
+          changedFiles: commit.changedFiles,
+          patch: commit.patch,
+          patchTruncated: commit.patchTruncated,
+          metadata: [
+            `SHA: ${commit.sha}`,
+            `Subject: ${commit.subject}`,
+            `Parents: ${commit.parents.join(' ')}`,
+          ],
+        },
+        {
+          maxFindings: config.model.maxFindings,
+          scopeInclude: config.scope.include,
+          scopeExclude: config.scope.exclude,
+          suppressionsBlock,
+        },
+      );
 
       const sessionId = await spawnReview(ctx, {
         prompt,
@@ -292,10 +301,25 @@ const TheJanitor: Plugin = async (ctx) => {
   >(
     config,
     async (prContext: PrContext) => {
-      const prompt = buildReviewerPrompt(prContext, {
-        scopeInclude: config.scope.include,
-        scopeExclude: config.scope.exclude,
-      });
+      const id = prContext.number ? `PR #${prContext.number}` : prContext.key;
+      const prompt = buildReviewPrompt(
+        {
+          label: id,
+          changedFiles: prContext.changedFiles,
+          patch: prContext.patch,
+          patchTruncated: prContext.patchTruncated,
+          metadata: [
+            `Base: ${prContext.baseRef}`,
+            `Head: ${prContext.headRef}`,
+            `Head SHA: ${prContext.headSha}`,
+          ],
+        },
+        {
+          maxFindings: config.model.maxFindings,
+          scopeInclude: config.scope.include,
+          scopeExclude: config.scope.exclude,
+        },
+      );
 
       const sessionId = await spawnReview(ctx, {
         prompt,

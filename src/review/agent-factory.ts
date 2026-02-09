@@ -1,3 +1,4 @@
+import { toJSONSchema } from 'zod';
 import type { JanitorConfig } from '../config/schema';
 import type { AgentProfile } from './agent-profiles';
 import { resolveAgentModel } from './agent-profiles';
@@ -34,35 +35,21 @@ const REVIEW_AGENT_PERMISSIONS: Record<string, string> = {
  *
  * Structure:
  *   1. Role preamble
- *   2. Output format with JSON schema reference
+ *   2. Output schema (machine-generated from Zod via toJSONSchema)
  *   3. Extra rules
  */
-function buildPromptFromProfile(
-  profile: AgentProfile,
-  config: JanitorConfig,
-): string {
-  const maxFindings = config.model.maxFindings;
-  const domainStr = profile.domains.join(' | ');
+function buildPromptFromProfile(profile: AgentProfile): string {
+  const jsonSchema = toJSONSchema(profile.outputSchema);
 
   const sections = [
     profile.role,
     '',
-    `Maximum findings per review: ${maxFindings}`,
-    '',
     'You MUST output ONLY valid JSON — no prose, no markdown, no explanation outside the JSON.',
     '',
-    `Output schema (strict):`,
-    `{`,
-    `  "findings": [`,
-    `    {`,
-    `      "location": "file:line",`,
-    `      "severity": "P0|P1|P2|P3",`,
-    `      "domain": "${domainStr}",`,
-    `      "evidence": "concrete proof of the issue",`,
-    `      "prescription": "exact action to fix"`,
-    `    }`,
-    `  ]`,
-    `}`,
+    'Output JSON Schema (strict — your output must validate against this):',
+    '```json',
+    JSON.stringify(jsonSchema, null, 2),
+    '```',
     '',
     'If no issues found, output exactly: {"findings": []}',
   ];
@@ -93,7 +80,7 @@ export function createAgentDefinition(
       model,
       variant,
       temperature: 0.1,
-      prompt: buildPromptFromProfile(profile, config),
+      prompt: buildPromptFromProfile(profile),
       mode: 'primary',
       permission: REVIEW_AGENT_PERMISSIONS,
     },
