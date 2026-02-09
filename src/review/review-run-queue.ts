@@ -4,6 +4,7 @@ import type { JanitorConfig } from '../config/schema';
 import type { SessionOwnershipDispatcher } from '../runtime/session-ownership-dispatcher';
 import { getErrorMessage, log, warn } from '../utils/logger';
 import { notifyError } from '../utils/notifier';
+import { extractHeadSha } from '../utils/review-key';
 
 /** Shared job lifecycle fields used by both review strategies. */
 export interface BaseJob<TContext, TResult> {
@@ -118,6 +119,21 @@ export class ReviewRunQueue<TContext, TResult> {
       enqueuedAt: job.enqueuedAt,
       startedAt: job.startedAt,
     }));
+  }
+
+  /** Check if any active job targets the given head SHA. */
+  hasHeadInFlight(headSha: string): boolean {
+    for (const job of this.jobs.values()) {
+      if (
+        job.status !== 'pending' &&
+        job.status !== 'starting' &&
+        job.status !== 'running'
+      ) {
+        continue;
+      }
+      if (extractHeadSha(job.key) === headSha) return true;
+    }
+    return false;
   }
 
   /** Drop all pending jobs from the queue. Running jobs are untouched. */

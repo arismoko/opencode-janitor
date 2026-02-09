@@ -19,7 +19,7 @@ import {
 } from '../git/pr-context-resolver';
 import type { CommandHookContext } from '../runtime/context';
 import { injectMessage } from '../utils/notifier';
-import { extractHeadSha, workspaceKey } from '../utils/review-key';
+import { workspaceKey } from '../utils/review-key';
 
 /**
  * Create the command.execute.before hook handler.
@@ -30,20 +30,6 @@ export function createCommandHook(
   hookInput: { command: string; sessionID: string; arguments: string },
   _output: { parts: Part[] },
 ) => Promise<void> {
-  /** Check if a hunter review is already in-flight for a given head SHA. */
-  const hasHunterHeadInFlight = (headSha: string): boolean => {
-    return rc.hunterQueue.getJobsSnapshot().some((job) => {
-      if (
-        job.status !== 'pending' &&
-        job.status !== 'starting' &&
-        job.status !== 'running'
-      ) {
-        return false;
-      }
-      return extractHeadSha(job.key) === headSha;
-    });
-  };
-
   return async (hookInput, _output) => {
     if (rc.runtime.disposed) return;
     if (hookInput.command !== 'janitor') return;
@@ -206,7 +192,7 @@ export function createCommandHook(
         return;
       }
 
-      if (hasHunterHeadInFlight(prContext.headSha)) {
+      if (rc.hunterQueue.hasHeadInFlight(prContext.headSha)) {
         await respond(
           `🔍 **[Janitor Control]** review skipped: in-flight ${prContext.headSha.slice(0, 8)}`,
         );

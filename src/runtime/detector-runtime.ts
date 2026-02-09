@@ -10,12 +10,7 @@ import { PrDetector } from '../git/pr-detector';
 import type { ReviewRunQueue } from '../review/review-run-queue';
 import type { HunterResult, ReviewResult } from '../types';
 import { log, warn } from '../utils/logger';
-import {
-  branchKey,
-  commitKey,
-  extractHeadSha,
-  prKey,
-} from '../utils/review-key';
+import { branchKey, commitKey, prKey } from '../utils/review-key';
 import type { BootstrapServices } from './bootstrap';
 import type { RuntimeContext } from './context';
 
@@ -52,19 +47,6 @@ export function createDetectors(
     anyPrReviews,
   } = svc;
 
-  const hasHunterHeadInFlight = (headSha: string): boolean => {
-    return hunterQueue.getJobsSnapshot().some((job) => {
-      if (
-        job.status !== 'pending' &&
-        job.status !== 'starting' &&
-        job.status !== 'running'
-      ) {
-        return false;
-      }
-      return extractHeadSha(job.key) === headSha;
-    });
-  };
-
   // Commit detector
   const detector = new CommitDetector(
     async () => {
@@ -90,7 +72,7 @@ export function createDetectors(
           return;
         }
         if (runtime.disposed) return;
-        if (hasHunterHeadInFlight(sha)) {
+        if (hunterQueue.hasHeadInFlight(sha)) {
           log(
             `[hunter] skipping commit-triggered in-flight duplicate: ${sha.slice(0, 8)}`,
           );
@@ -222,7 +204,7 @@ export function createDetectors(
           if (hunterPrEnabled) {
             if (!control.pausedHunter) {
               if (runtime.disposed) return;
-              if (hasHunterHeadInFlight(prContext.headSha)) {
+              if (hunterQueue.hasHeadInFlight(prContext.headSha)) {
                 log(
                   `[hunter] skipping PR-triggered in-flight duplicate: ${prContext.headSha.slice(0, 8)}`,
                 );
