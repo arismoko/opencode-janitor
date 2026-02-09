@@ -122,39 +122,37 @@ export class HunterStrategy implements ReviewStrategy<PrContext, HunterResult> {
       await deliverToast(ctx, result, { label: 'Bug Hunt', shortId });
     }
 
-    if (delivery.sessionMessage && job.parentSessionId && !result.clean) {
-      const willPostPr =
-        delivery.prComment &&
-        config.pr.postWithGh &&
-        this.postGhReview &&
-        typeof job.context.number === 'number';
+    // File report is always written as a durable fallback
+    await deliverToFile(report, {
+      fileId: shortId,
+      reportDir: delivery.reportDir,
+      workspaceDir: ctx.directory,
+    });
 
-      if (!willPostPr) {
-        await deliverToSession(ctx, job.parentSessionId, report, {
-          label: 'Bug Hunt Complete',
-          noReply: delivery.noReply,
-        });
-      }
-    }
-
-    if (delivery.reportFile) {
-      await deliverToFile(report, {
-        fileId: shortId,
-        reportDir: delivery.reportDir,
-        workspaceDir: ctx.directory,
-      });
-    }
-
+    // Attempt PR comment first; fall back to session delivery on failure
+    let postedPr = false;
     if (
       delivery.prComment &&
       config.pr.postWithGh &&
       this.postGhReview &&
       typeof job.context.number === 'number'
     ) {
-      const posted = await this.postGhReview(job.context.number, report);
-      if (posted) {
+      postedPr = await this.postGhReview(job.context.number, report);
+      if (postedPr) {
         log(`[hunter-strategy] posted GH review for PR #${job.context.number}`);
       }
+    }
+
+    if (
+      !postedPr &&
+      delivery.sessionMessage &&
+      job.parentSessionId &&
+      !result.clean
+    ) {
+      await deliverToSession(ctx, job.parentSessionId, report, {
+        label: 'Bug Hunt Complete',
+        noReply: delivery.noReply,
+      });
     }
   }
 }

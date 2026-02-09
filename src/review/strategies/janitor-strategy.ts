@@ -155,13 +155,12 @@ export class JanitorStrategy implements ReviewStrategy<string, ReviewResult> {
       });
     }
 
-    if (config.delivery.reportFile) {
-      await deliverToFile(report, {
-        fileId: shortSha,
-        reportDir: config.delivery.reportDir,
-        workspaceDir: ctx.directory,
-        enrichment,
-      });
-    }
+    // File report is always written as a durable fallback
+    await deliverToFile(report, {
+      fileId: shortSha,
+      reportDir: config.delivery.reportDir,
+      workspaceDir: ctx.directory,
+      enrichment,
+    });
   }
 }

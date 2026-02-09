@@ -9,6 +9,7 @@ import { join, resolve, sep } from 'node:path';
 import type { EnrichmentData } from '../../history/enrichment';
 import { buildHistorySection } from '../../history/enrichment';
 import { log, warn } from '../../utils/logger';
+import { ensureJanitorGitignore } from '../../utils/state-dir';
 
 export interface FileDeliveryOptions {
   /** Short identifier used as filename (e.g. sha, pr id) */
@@ -41,6 +42,9 @@ export async function deliverToFile(
       warn(`[file-sink] reportDir escapes workspace: ${opts.reportDir}`);
       return;
     }
+
+    // Ensure .janitor/.gitignore exists so artifacts are never committed
+    ensureJanitorGitignore(opts.workspaceDir);
 
     // Ensure directory exists
     if (!existsSync(absDir)) {

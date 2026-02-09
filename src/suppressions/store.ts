@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { atomicWriteSync } from '../utils/atomic-write';
 import { getErrorMessage, warn } from '../utils/logger';
+import { ensureJanitorGitignore } from '../utils/state-dir';
 import { isExpired } from './matcher';
 import { SuppressionsFileSchema } from './schema';
 import type { Suppression, SuppressionsFile } from './types';
@@ -17,6 +18,7 @@ export class SuppressionStore {
   constructor(workspaceDir: string, opts?: { maxEntries?: number }) {
     this.filePath = join(workspaceDir, '.janitor', 'suppressions.json');
     this.maxEntries = opts?.maxEntries ?? MAX_SUPPRESSIONS;
+    ensureJanitorGitignore(workspaceDir);
     this.load();
   }
 

@@ -129,13 +129,12 @@ export class InspectorStrategy
       });
     }
 
-    if (delivery.reportFile) {
-      await deliverToFile(report, {
-        fileId: shortId,
-        reportDir: '.janitor/inspector-reports',
-        workspaceDir: ctx.directory,
-      });
-    }
+    // File report is always written as a durable fallback
+    await deliverToFile(report, {
+      fileId: shortId,
+      reportDir: '.janitor/inspector-reports',
+      workspaceDir: ctx.directory,
+    });
 
     log(
       `[inspector-strategy] delivered results: ${result.findings.length} findings`,

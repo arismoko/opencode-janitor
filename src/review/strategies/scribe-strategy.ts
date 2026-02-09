@@ -134,13 +134,12 @@ export class ScribeStrategy implements ReviewStrategy<string, ScribeResult> {
       });
     }
 
-    if (delivery.reportFile) {
-      await deliverToFile(report, {
-        fileId: shortId,
-        reportDir: '.janitor/scribe-reports',
-        workspaceDir: ctx.directory,
-      });
-    }
+    // File report is always written as a durable fallback
+    await deliverToFile(report, {
+      fileId: shortId,
+      reportDir: '.janitor/scribe-reports',
+      workspaceDir: ctx.directory,
+    });
 
     log(
       `[scribe-strategy] delivered results: ${result.findings.length} findings`,

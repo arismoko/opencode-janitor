@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { atomicWriteSync } from '../utils/atomic-write';
 import { warn } from '../utils/logger';
+import { ensureJanitorGitignore } from '../utils/state-dir';
 import { HistoryFileSchema } from './schema';
 import type { FindingLedgerEntry, HistoryFile, ReviewRecord } from './types';
 
@@ -22,6 +23,7 @@ export class HistoryStore {
     this.filePath = join(workspaceDir, '.janitor', 'history.json');
     this.maxReviews = opts?.maxReviews ?? DEFAULT_MAX_REVIEWS;
     this.maxBytes = opts?.maxBytes ?? DEFAULT_MAX_BYTES;
+    ensureJanitorGitignore(workspaceDir);
     this.load();
   }
 

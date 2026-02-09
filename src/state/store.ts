@@ -3,6 +3,7 @@ import { dirname, join } from 'node:path';
 import { atomicWriteSync } from '../utils/atomic-write';
 import { evictOldest, MAX_PROCESSED } from '../utils/eviction';
 import { log, warn } from '../utils/logger';
+import { ensureJanitorGitignore } from '../utils/state-dir';
 
 const STATE_FILE = '.janitor/state.json';
 
@@ -32,6 +33,7 @@ export class RuntimeStateStore {
 
   constructor(workspaceDir: string) {
     this.statePath = join(workspaceDir, STATE_FILE);
+    ensureJanitorGitignore(workspaceDir);
     this.load();
   }
 
