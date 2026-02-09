@@ -8,7 +8,12 @@ import { getCurrentPrFromGh } from '../git/gh-pr';
 import { getPrContext, type PrContext } from '../git/pr-context-resolver';
 import { PrDetector } from '../git/pr-detector';
 import { log, warn } from '../utils/logger';
-import { branchKey, commitKey, prKey } from '../utils/review-key';
+import {
+  branchKey,
+  commitKey,
+  parseReviewKey,
+  prKey,
+} from '../utils/review-key';
 import type { AgentQueues } from './agent-runtime';
 import type { BootstrapServices } from './bootstrap';
 import type { RuntimeContext } from './context';
@@ -149,9 +154,10 @@ export function createDetectors(
 
           let prContext: PrContext;
 
-          if (key.startsWith('pr:')) {
-            const [, prNumStr, detectedSha] = key.split(':');
-            const detectedPrNum = Number(prNumStr);
+          const parsed = parseReviewKey(key);
+
+          if (parsed?.type === 'pr') {
+            const { number: detectedPrNum, headSha: detectedSha } = parsed;
 
             const ghPr = await getCurrentPrFromGh(exec);
             if (!ghPr) {
