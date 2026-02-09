@@ -5,22 +5,27 @@ import { warn } from '../../utils/logger';
 import { injectMessage } from '../../utils/notifier';
 
 /**
- * Deliver a full markdown report into the current session.
+ * Deliver a full markdown report into a session.
  *
- * When `noReply` is false (default), the parent session's agent can
- * act on the findings. Set `noReply: true` in config to suppress.
+ * Unified sink replacing both `deliverToSession` and `deliverReviewerToSession`.
+ * When `noReply` is false (default), the parent session's agent can act on findings.
  */
 export async function deliverToSession(
   ctx: PluginInput,
   sessionId: string,
   report: string,
-  opts?: { enrichment?: EnrichmentData; noReply?: boolean },
+  opts?: {
+    label?: string;
+    enrichment?: EnrichmentData;
+    noReply?: boolean;
+  },
 ): Promise<void> {
   if (!sessionId) {
     warn('[session-sink] no session ID provided');
     return;
   }
 
+  const label = opts?.label ?? 'Review Complete';
   const historySection = opts?.enrichment
     ? buildHistorySection(opts.enrichment)
     : '';
@@ -28,7 +33,7 @@ export async function deliverToSession(
   await injectMessage(
     ctx,
     sessionId,
-    `📋 **[Janitor Review Complete]**\n\n${report}${historySection}`,
+    `📋 **[${label}]**\n\n${report}${historySection}`,
     opts?.noReply ?? false,
   );
 }

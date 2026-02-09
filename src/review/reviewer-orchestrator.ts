@@ -3,9 +3,9 @@ import type { JanitorConfig } from '../config/schema';
 import type { PrContext } from '../git/pr-context-resolver';
 import { parseAgentOutput } from '../results/agent-output-codec';
 import { renderReport } from '../results/report-renderer';
-import { deliverReviewerToFile } from '../results/sinks/reviewer-file-sink';
-import { deliverReviewerToSession } from '../results/sinks/reviewer-session-sink';
-import { deliverReviewerToast } from '../results/sinks/reviewer-toast-sink';
+import { deliverToFile } from '../results/sinks/file-sink';
+import { deliverToSession } from '../results/sinks/session-sink';
+import { deliverToast } from '../results/sinks/toast-sink';
 import { HunterOutput as HunterOutputSchema } from '../schemas/finding';
 import type { ReviewerResult } from '../types';
 import { log } from '../utils/logger';
@@ -75,9 +75,10 @@ export class ReviewerOrchestrator extends BaseOrchestrator<
       clean: output.findings.length === 0,
       raw: rawOutput,
     };
+    const shortId = resultId.slice(0, 12);
     const report = renderReport(result.findings, result.clean, {
       title: 'Reviewer Report',
-      shortId: resultId.slice(0, 12),
+      shortId,
       findingLabel: 'issue',
       showSeverityDomain: true,
     });
@@ -85,7 +86,7 @@ export class ReviewerOrchestrator extends BaseOrchestrator<
     job.completedAt = new Date();
     job.result = result;
 
-    await this.deliverResults(result, report, job, ctx, config);
+    await this.deliverResults(result, report, shortId, job, ctx, config);
 
     // Persist key only after successful extraction + delivery
     this.onReviewCompleted?.(job.key);
@@ -94,6 +95,7 @@ export class ReviewerOrchestrator extends BaseOrchestrator<
   private async deliverResults(
     result: ReviewerResult,
     report: string,
+    shortId: string,
     job: BaseJob<PrContext, ReviewerResult>,
     ctx: PluginInput,
     config: JanitorConfig,
@@ -101,7 +103,10 @@ export class ReviewerOrchestrator extends BaseOrchestrator<
     const delivery = config.delivery.reviewer;
 
     if (delivery.toast) {
-      await deliverReviewerToast(ctx, result);
+      await deliverToast(ctx, result, {
+        label: 'Code Review',
+        shortId,
+      });
     }
 
     if (delivery.sessionMessage && job.deliverySessionId && !result.clean) {
@@ -114,22 +119,19 @@ export class ReviewerOrchestrator extends BaseOrchestrator<
         typeof job.context.number === 'number';
 
       if (!willPostPr) {
-        await deliverReviewerToSession(
-          ctx,
-          job.deliverySessionId,
-          report,
-          delivery.noReply,
-        );
+        await deliverToSession(ctx, job.deliverySessionId, report, {
+          label: 'Code Review Complete',
+          noReply: delivery.noReply,
+        });
       }
     }
 
     if (delivery.reportFile) {
-      await deliverReviewerToFile(
-        result,
-        report,
-        delivery.reportDir,
-        ctx.directory,
-      );
+      await deliverToFile(report, {
+        fileId: shortId,
+        reportDir: delivery.reportDir,
+        workspaceDir: ctx.directory,
+      });
     }
 
     if (

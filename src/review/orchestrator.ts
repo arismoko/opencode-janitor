@@ -96,26 +96,31 @@ export class ReviewOrchestrator extends BaseOrchestrator<string, ReviewResult> {
     suppressedCount?: number,
   ): Promise<void> {
     const report = formatReport(result, suppressedCount);
+    const shortSha = result.sha.slice(0, 7);
 
     if (config.delivery.toast) {
-      await deliverToast(ctx, result, enrichment);
+      await deliverToast(ctx, result, {
+        label: 'Janitor',
+        shortId: shortSha,
+        enrichment,
+      });
     }
 
     if (config.delivery.sessionMessage && deliverySessionId && !result.clean) {
       await deliverToSession(ctx, deliverySessionId, report, {
+        label: 'Janitor Review Complete',
         enrichment,
         noReply: config.delivery.noReply,
       });
     }
 
     if (config.delivery.reportFile) {
-      await deliverToFile(
-        result,
-        report,
-        config.delivery.reportDir,
-        ctx.directory,
+      await deliverToFile(report, {
+        fileId: shortSha,
+        reportDir: config.delivery.reportDir,
+        workspaceDir: ctx.directory,
         enrichment,
-      );
+      });
     }
   }
 }
