@@ -18,7 +18,9 @@ import { createCommandHook } from './hooks/command-hook';
 import { createEventHook } from './hooks/event-hook';
 import { createToolHook } from './hooks/tool-hook';
 import { createHunterAgent } from './review/hunter-agent';
+import { createInspectorAgent } from './review/inspector-agent';
 import { createJanitorAgent } from './review/janitor-agent';
+import { createScribeAgent } from './review/scribe-agent';
 import { bootstrapRuntime } from './runtime/review-runtime';
 import { log } from './utils/logger';
 
@@ -58,12 +60,19 @@ const TheJanitor: Plugin = async (ctx) => {
   const config = rc.config;
   const janitorAgent = createJanitorAgent(config);
   const hunterAgent = createHunterAgent(config);
+  const inspectorAgent = createInspectorAgent(config);
+  const scribeAgent = createScribeAgent(config);
 
   toast(ctx, 'Janitor: watchers active');
 
   return {
     name: 'the-janitor',
-    config: registerAgents([janitorAgent, hunterAgent]),
+    config: registerAgents([
+      janitorAgent,
+      hunterAgent,
+      inspectorAgent,
+      scribeAgent,
+    ]),
     'command.execute.before': createCommandHook(rc),
     'tool.execute.after': createToolHook(rc),
     event: createEventHook(rc),
