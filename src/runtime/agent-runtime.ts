@@ -26,8 +26,8 @@ import type { BootstrapServices } from './bootstrap';
 import type { Exec } from './context';
 
 export interface AgentQueues {
-  orchestrator: ReviewRunQueue<string, ReviewResult>;
-  hunterOrchestrator: ReviewRunQueue<PrContext, HunterResult>;
+  janitorQueue: ReviewRunQueue<string, ReviewResult>;
+  hunterQueue: ReviewRunQueue<PrContext, HunterResult>;
 }
 
 // ---------------------------------------------------------------------------
@@ -66,19 +66,19 @@ export function createAgentQueues(
     extractKey: janitorStrategy.extractKey.bind(janitorStrategy),
   });
 
-  const orchestrator = new ReviewRunQueue<string, ReviewResult>(
+  const janitorQueue = new ReviewRunQueue<string, ReviewResult>(
     config,
     janitorExecutor,
     janitorStrategy,
     janitorSpec.queueTag,
   );
 
-  orchestrator.onCompleted((sha) => {
+  janitorQueue.onCompleted((sha) => {
     if (sha.startsWith('workspace:')) return;
     store.add(sha);
     log(`persisted reviewed commit: ${sha}`);
   });
-  orchestrator.setContext(ctx);
+  janitorQueue.setContext(ctx);
 
   // Hunter
   const hunterSpec = registry.get<PrContext>('bug-hunter');
@@ -99,14 +99,14 @@ export function createAgentQueues(
     extractKey: hunterStrategy.extractKey.bind(hunterStrategy),
   });
 
-  const hunterOrchestrator = new ReviewRunQueue<PrContext, HunterResult>(
+  const hunterQueue = new ReviewRunQueue<PrContext, HunterResult>(
     config,
     hunterExecutor,
     hunterStrategy,
     hunterSpec.queueTag,
   );
-  hunterOrchestrator.setContext(ctx);
-  hunterOrchestrator.onCompleted((key: string) => {
+  hunterQueue.setContext(ctx);
+  hunterQueue.onCompleted((key: string) => {
     if (key.startsWith('workspace:')) return;
     store.addPrKey(key);
     const headSha = extractHeadSha(key);
@@ -116,5 +116,5 @@ export function createAgentQueues(
     log(`persisted reviewed PR key: ${key}`);
   });
 
-  return { orchestrator, hunterOrchestrator };
+  return { janitorQueue, hunterQueue };
 }

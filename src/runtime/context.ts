@@ -52,8 +52,8 @@ export type EventHookContext = Pick<
   | 'runtime'
   | 'trackedSessions'
   | 'stateDir'
-  | 'orchestrator'
-  | 'hunterOrchestrator'
+  | 'janitorQueue'
+  | 'hunterQueue'
 >;
 
 /** Projection for tool-hook: detection acceleration */
@@ -77,8 +77,8 @@ export type CommandHookContext = Pick<
   | 'runtime'
   | 'control'
   | 'store'
-  | 'orchestrator'
-  | 'hunterOrchestrator'
+  | 'janitorQueue'
+  | 'hunterQueue'
 >;
 
 /**

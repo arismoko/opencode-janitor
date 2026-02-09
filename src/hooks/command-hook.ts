@@ -32,7 +32,7 @@ export function createCommandHook(
 ) => Promise<void> {
   /** Check if a hunter review is already in-flight for a given head SHA. */
   const hasHunterHeadInFlight = (headSha: string): boolean => {
-    return rc.hunterOrchestrator.getJobsSnapshot().some((job) => {
+    return rc.hunterQueue.getJobsSnapshot().some((job) => {
       if (
         job.status !== 'pending' &&
         job.status !== 'starting' &&
@@ -64,8 +64,8 @@ export function createCommandHook(
       injectMessage(rc.ctx, hookInput.sessionID, text, true);
 
     const renderJobs = () => {
-      const janitorJobs = rc.orchestrator.getJobsSnapshot();
-      const hunterJobs = rc.hunterOrchestrator.getJobsSnapshot();
+      const janitorJobs = rc.janitorQueue.getJobsSnapshot();
+      const hunterJobs = rc.hunterQueue.getJobsSnapshot();
       const janitorRunning = janitorJobs.filter((j) => j.status === 'running');
       const janitorPending = janitorJobs.filter((j) => j.status === 'pending');
       const hunterRunning = hunterJobs.filter((j) => j.status === 'running');
@@ -107,12 +107,12 @@ export function createCommandHook(
       let dropped = 0;
       let aborted = 0;
       if (targetJanitor) {
-        dropped += rc.orchestrator.clearPending();
-        aborted += await rc.orchestrator.abortRunning(rc.ctx);
+        dropped += rc.janitorQueue.clearPending();
+        aborted += await rc.janitorQueue.abortRunning(rc.ctx);
       }
       if (targetHunter) {
-        dropped += rc.hunterOrchestrator.clearPending();
-        aborted += await rc.hunterOrchestrator.abortRunning(rc.ctx);
+        dropped += rc.hunterQueue.clearPending();
+        aborted += await rc.hunterQueue.abortRunning(rc.ctx);
       }
 
       await respond(
@@ -153,7 +153,7 @@ export function createCommandHook(
         return;
       }
       const runKey = workspaceKey(branch, headSha);
-      rc.orchestrator.enqueue(runKey, hookInput.sessionID);
+      rc.janitorQueue.enqueue(runKey, hookInput.sessionID);
       await respond(`🧼 **[Janitor Control]** clean queued: ${runKey}`);
     };
 
@@ -213,7 +213,7 @@ export function createCommandHook(
         return;
       }
 
-      rc.hunterOrchestrator.enqueue(prContext, hookInput.sessionID);
+      rc.hunterQueue.enqueue(prContext, hookInput.sessionID);
       await respond(`🔍 **[Janitor Control]** review queued: ${prContext.key}`);
     };
 

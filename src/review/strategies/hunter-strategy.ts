@@ -29,7 +29,7 @@ export class HunterStrategy implements ReviewStrategy<PrContext, HunterResult> {
   static createSpec(): AgentRuntimeSpec<PrContext> {
     return {
       agent: 'bug-hunter',
-      queueTag: 'hunter-orchestrator',
+      queueTag: 'hunter',
       resolveModelId: (config) =>
         config.agents.hunter.modelId ?? config.model.id,
 

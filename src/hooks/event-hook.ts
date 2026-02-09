@@ -71,8 +71,8 @@ export function createEventHook(
           rc.trackedSessions.delete(sessionID);
         }
 
-        await rc.orchestrator.handleCompletion(sessionID, rc.ctx, rc.config);
-        await rc.hunterOrchestrator.handleCompletion(
+        await rc.janitorQueue.handleCompletion(sessionID, rc.ctx, rc.config);
+        await rc.hunterQueue.handleCompletion(
           sessionID,
           rc.ctx,
           rc.config,
@@ -113,8 +113,8 @@ export function createEventHook(
         // Always forward to queue handlers — they use their own
         // sessionToKey map to determine ownership. This ensures
         // queue slots are released even if trackedSessions diverges.
-        rc.orchestrator.handleFailure(sessionID, errorMessage);
-        rc.hunterOrchestrator.handleFailure(sessionID, errorMessage);
+        rc.janitorQueue.handleFailure(sessionID, errorMessage);
+        rc.hunterQueue.handleFailure(sessionID, errorMessage);
       }
     }
   };

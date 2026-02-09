@@ -23,7 +23,7 @@ import type { Exec } from './context';
 export interface AgentRuntimeSpec<TContext> {
   /** Agent name registered in the config hook (e.g. 'janitor', 'bug-hunter') */
   readonly agent: string;
-  /** Queue tag for logging (e.g. 'orchestrator', 'hunter-orchestrator') */
+  /** Queue tag for logging (e.g. 'janitor', 'hunter') */
   readonly queueTag: string;
   /** Resolve the model ID for this agent from config */
   resolveModelId(config: JanitorConfig): string | undefined;

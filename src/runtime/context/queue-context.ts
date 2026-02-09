@@ -7,6 +7,6 @@ import type { ReviewRunQueue } from '../../review/review-run-queue';
 import type { HunterResult, ReviewResult } from '../../types';
 
 export interface QueueContext {
-  orchestrator: ReviewRunQueue<string, ReviewResult>;
-  hunterOrchestrator: ReviewRunQueue<PrContext, HunterResult>;
+  janitorQueue: ReviewRunQueue<string, ReviewResult>;
+  hunterQueue: ReviewRunQueue<PrContext, HunterResult>;
 }

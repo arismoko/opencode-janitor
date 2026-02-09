@@ -39,7 +39,7 @@ export async function bootstrapRuntime(
   registry.register(JanitorStrategy.createSpec(svc.suppressionStore));
   registry.register(HunterStrategy.createSpec());
 
-  const { orchestrator, hunterOrchestrator } = createAgentQueues(svc, registry);
+  const { janitorQueue, hunterQueue } = createAgentQueues(svc, registry);
 
   // Forward-declare rcRef so closures created below can reference it.
   // By the time any closure executes (after start()), rcRef is assigned.
@@ -47,8 +47,8 @@ export async function bootstrapRuntime(
 
   const { detector, prDetector } = createDetectors(
     svc,
-    orchestrator,
-    hunterOrchestrator,
+    janitorQueue,
+    hunterQueue,
     () => rcRef,
   );
 
@@ -74,8 +74,8 @@ export async function bootstrapRuntime(
     store: svc.store,
     suppressionStore: svc.suppressionStore,
     historyStore: svc.historyStore,
-    orchestrator,
-    hunterOrchestrator,
+    janitorQueue,
+    hunterQueue,
     detector,
     prDetector,
     trackedSessions: svc.trackedSessions,
@@ -103,12 +103,12 @@ export async function bootstrapRuntime(
     svc.runtime.disposed = true;
     detector.stop();
     prDetector?.stop();
-    orchestrator.shutdown();
-    hunterOrchestrator.shutdown();
-    orchestrator.clearPending();
-    hunterOrchestrator.clearPending();
-    await orchestrator.abortRunning(ctx);
-    await hunterOrchestrator.abortRunning(ctx);
+    janitorQueue.shutdown();
+    hunterQueue.shutdown();
+    janitorQueue.clearPending();
+    hunterQueue.clearPending();
+    await janitorQueue.abortRunning(ctx);
+    await hunterQueue.abortRunning(ctx);
     log('plugin runtime stopped: detectors halted');
   };
 

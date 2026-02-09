@@ -33,8 +33,8 @@ export interface Detectors {
  */
 export function createDetectors(
   svc: BootstrapServices,
-  orchestrator: ReviewRunQueue<string, ReviewResult>,
-  hunterOrchestrator: ReviewRunQueue<PrContext, HunterResult>,
+  janitorQueue: ReviewRunQueue<string, ReviewResult>,
+  hunterQueue: ReviewRunQueue<PrContext, HunterResult>,
   getRcRef: () => RuntimeContext,
 ): Detectors {
   const {
@@ -53,7 +53,7 @@ export function createDetectors(
   } = svc;
 
   const hasHunterHeadInFlight = (headSha: string): boolean => {
-    return hunterOrchestrator.getJobsSnapshot().some((job) => {
+    return hunterQueue.getJobsSnapshot().some((job) => {
       if (
         job.status !== 'pending' &&
         job.status !== 'starting' &&
@@ -81,7 +81,7 @@ export function createDetectors(
       if (janitorCommitEnabled) {
         if (!control.pausedJanitor) {
           if (runtime.disposed) return;
-          orchestrator.enqueue(sha);
+          janitorQueue.enqueue(sha);
         }
       }
 
@@ -107,7 +107,7 @@ export function createDetectors(
         if (!commit.patch.trim() && commit.changedFiles.length === 0) {
           warn(`[hunter] skipping empty commit context: ${sha.slice(0, 8)}`);
         } else {
-          hunterOrchestrator.enqueue({
+          hunterQueue.enqueue({
             key: commitKey(sha),
             headSha: sha,
             baseRef: commit.parents[0] ?? config.pr.baseBranch,
@@ -214,7 +214,7 @@ export function createDetectors(
                   `[janitor] skipping PR-triggered duplicate for processed SHA: ${prContext.headSha.slice(0, 8)}`,
                 );
               } else {
-                orchestrator.enqueue(prContext.headSha);
+                janitorQueue.enqueue(prContext.headSha);
               }
             }
           }
@@ -234,7 +234,7 @@ export function createDetectors(
                 );
                 return;
               }
-              hunterOrchestrator.enqueue(prContext);
+              hunterQueue.enqueue(prContext);
             }
           }
         },

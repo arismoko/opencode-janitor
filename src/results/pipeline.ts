@@ -42,7 +42,7 @@ export interface PipelineDeps {
  * Process raw review output through the full post-processing pipeline.
  *
  * This is the single entry point that replaces direct parseReviewOutput
- * calls in the orchestrator. The flow:
+ * calls in the queue. The flow:
  *
  *   raw text → parse → suppress → annotate → enrich → record → result
  */
