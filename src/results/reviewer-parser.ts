@@ -1,4 +1,5 @@
 import {
+  type ParseMeta,
   REVIEWER_DOMAINS,
   REVIEWER_SEVERITIES,
   type ReviewerDomain,
@@ -18,16 +19,31 @@ import { log } from '../utils/logger';
  *
  * Ignores malformed findings; keeps only valid ones.
  */
-export function parseReviewerOutput(raw: string, id: string): ReviewerResult {
+export function parseReviewerOutput(
+  raw: string,
+  id: string,
+): { result: ReviewerResult; meta: ParseMeta } {
   if (!raw.trim()) {
-    throw new Error('No text output from reviewer agent');
+    return {
+      result: { id, findings: [], clean: false, raw },
+      meta: {
+        status: 'empty_output',
+        error: 'No text output from reviewer agent',
+      },
+    };
   }
 
   const parsed = extractJSON(raw);
 
   if (!parsed || !Array.isArray(parsed.findings)) {
-    log('[reviewer-parser] no valid JSON found, returning clean result');
-    return { id, findings: [], clean: true, raw };
+    log('[reviewer-parser] no valid JSON found, returning unclean result');
+    return {
+      result: { id, findings: [], clean: false, raw },
+      meta: {
+        status: 'invalid_output',
+        error: 'No valid JSON found in reviewer output',
+      },
+    };
   }
 
   const findings = parsed.findings.filter(isValidFinding).map(normalizeFinding);
@@ -35,10 +51,8 @@ export function parseReviewerOutput(raw: string, id: string): ReviewerResult {
   log(`[reviewer-parser] extracted ${findings.length} valid findings`);
 
   return {
-    id,
-    findings,
-    clean: findings.length === 0,
-    raw,
+    result: { id, findings, clean: findings.length === 0, raw },
+    meta: { status: 'ok' },
   };
 }
 

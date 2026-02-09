@@ -58,6 +58,13 @@ export interface ReviewerResult {
   raw: string;
 }
 
+export type ParseStatus = 'ok' | 'invalid_output' | 'empty_output';
+
+export interface ParseMeta {
+  status: ParseStatus;
+  error?: string;
+}
+
 /** A single P0 finding from the janitor agent */
 export interface Finding {
   location: string;

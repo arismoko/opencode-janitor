@@ -14,8 +14,8 @@ type ReviewerExecutor = (context: PrContext) => Promise<string>;
 
 type GhPostReview = (prNumber: number, body: string) => Promise<boolean>;
 
-/** Parsed reviewer output shape (imported from parser). */
-type ReviewerResult = ReturnType<typeof parseReviewerOutput>;
+/** Parsed reviewer output shape (imported from types). */
+import type { ReviewerResult } from '../types';
 
 /**
  * Comprehensive code reviewer orchestrator for PR-level reviews.
@@ -60,7 +60,10 @@ export class ReviewerOrchestrator extends BaseOrchestrator<
   ): Promise<void> {
     const rawOutput = await this.extractAssistantOutput(sessionId, ctx);
     const resultId = extractWorkspaceHeadFromKey(job.key);
-    const result = parseReviewerOutput(rawOutput, resultId);
+    const { result, meta } = parseReviewerOutput(rawOutput, resultId);
+    if (meta.status !== 'ok') {
+      throw new Error(`Reviewer parse failed (${meta.status}): ${meta.error}`);
+    }
     const report = formatReviewerReport(result);
 
     job.completedAt = new Date();
@@ -86,12 +89,22 @@ export class ReviewerOrchestrator extends BaseOrchestrator<
     }
 
     if (delivery.sessionMessage && job.deliverySessionId && !result.clean) {
-      await deliverReviewerToSession(
-        ctx,
-        job.deliverySessionId,
-        report,
-        delivery.noReply,
-      );
+      // Skip session injection when a PR comment will be posted —
+      // the PR comment is the primary delivery channel in that case.
+      const willPostPr =
+        delivery.prComment &&
+        config.pr.postWithGh &&
+        this.postGhReview &&
+        typeof job.context.number === 'number';
+
+      if (!willPostPr) {
+        await deliverReviewerToSession(
+          ctx,
+          job.deliverySessionId,
+          report,
+          delivery.noReply,
+        );
+      }
     }
 
     if (delivery.reportFile) {
