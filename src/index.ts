@@ -33,7 +33,7 @@ import { buildReviewPrompt } from './review/prompt-builder';
 import { createReviewerAgent } from './review/reviewer-agent';
 import { ReviewerOrchestrator } from './review/reviewer-orchestrator';
 import { buildReviewerPrompt } from './review/reviewer-prompt-builder';
-import { spawnJanitorReview, spawnReviewerReview } from './review/runner';
+import { spawnReview } from './review/runner';
 import { CommitStore } from './state/store';
 import { buildSuppressionsBlock } from './suppressions/prompt';
 import { SuppressionStore } from './suppressions/store';
@@ -245,10 +245,11 @@ const TheJanitor: Plugin = async (ctx) => {
         suppressionsBlock,
       });
 
-      const sessionId = await spawnJanitorReview(ctx, {
+      const sessionId = await spawnReview(ctx, {
         prompt,
-        runKey,
-        config,
+        title: `[janitor-run] ${runKey}`,
+        agent: 'janitor',
+        modelId: config.agents.janitor.modelId ?? config.model.id,
       });
       trackedSessions.add(sessionId);
       writeSessionMeta(sessionId, {
@@ -282,10 +283,11 @@ const TheJanitor: Plugin = async (ctx) => {
         scopeExclude: config.scope.exclude,
       });
 
-      const sessionId = await spawnReviewerReview(ctx, {
+      const sessionId = await spawnReview(ctx, {
         prompt,
-        runKey: prContext.key,
-        config,
+        title: `[reviewer-run] ${prContext.key}`,
+        agent: 'code-reviewer',
+        modelId: config.agents.reviewer.modelId ?? config.model.id,
       });
       trackedSessions.add(sessionId);
       writeSessionMeta(sessionId, {

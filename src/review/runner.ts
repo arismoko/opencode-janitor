@@ -1,62 +1,29 @@
 import type { PluginInput } from '@opencode-ai/plugin';
-import type { JanitorConfig } from '../config/schema';
 import { error, log } from '../utils/logger';
 
-/**
- * Spawn an isolated background session for a janitor review.
- * Returns the session ID for tracking completion.
- *
- * The janitor agent is registered in OpenCode's agent registry via the
- * plugin's `config` hook (see index.ts). We reference it by name here
- * so the session uses the janitor's model, temperature, prompt, and tool
- * permissions instead of the default orchestrator agent.
- */
-export async function spawnJanitorReview(
-  ctx: PluginInput,
-  opts: {
-    prompt: string;
-    runKey: string;
-    config: JanitorConfig;
-  },
-): Promise<string> {
-  return spawnReviewSession(ctx, {
-    prompt: opts.prompt,
-    title: `[janitor-run] ${opts.runKey}`,
-    agent: 'janitor',
-    modelId: opts.config.agents.janitor.modelId ?? opts.config.model.id,
-  });
-}
-
-/**
- * Spawn an isolated background session for a comprehensive PR review.
- * Returns the session ID for tracking completion.
- */
-export async function spawnReviewerReview(
-  ctx: PluginInput,
-  opts: {
-    prompt: string;
-    runKey: string;
-    config: JanitorConfig;
-  },
-): Promise<string> {
-  return spawnReviewSession(ctx, {
-    prompt: opts.prompt,
-    title: `[reviewer-run] ${opts.runKey}`,
-    agent: 'code-reviewer',
-    modelId: opts.config.agents.reviewer.modelId ?? opts.config.model.id,
-  });
-}
-
-interface SpawnOpts {
+export interface SpawnReviewOpts {
+  /** The review prompt to send */
   prompt: string;
+  /** Session title (e.g. "[janitor-run] commit:abc123") */
   title: string;
+  /** Agent name registered in the config hook */
   agent: string;
+  /** Optional model override (provider/model format) */
   modelId?: string;
 }
 
-async function spawnReviewSession(
+/**
+ * Spawn an isolated background session for a review.
+ *
+ * Replaces `spawnJanitorReview` and `spawnReviewerReview` with a single
+ * agent-agnostic entry point. The agent is referenced by name so OpenCode
+ * resolves its model, temperature, system prompt, and tool permissions.
+ *
+ * Returns the session ID for tracking completion.
+ */
+export async function spawnReview(
   ctx: PluginInput,
-  opts: SpawnOpts,
+  opts: SpawnReviewOpts,
 ): Promise<string> {
   log(`[runner] spawning ${opts.agent} session`);
 
@@ -75,9 +42,9 @@ async function spawnReviewSession(
   const sessionId = session.data.id;
   log(`[runner] session created: ${sessionId}`);
 
-  // Build prompt body — reference the 'janitor' agent registered via
-  // the config hook. OpenCode resolves it from the agent registry and
-  // applies its model, temperature, system prompt, and tool permissions.
+  // Build prompt body — reference the agent registered via the config hook.
+  // OpenCode resolves it from the agent registry and applies its model,
+  // temperature, system prompt, and tool permissions.
   const body: {
     parts: Array<{ type: 'text'; text: string }>;
     agent?: string;
