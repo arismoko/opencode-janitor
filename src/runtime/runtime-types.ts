@@ -9,12 +9,12 @@
 /** Shell exec bridge — runs a command and returns stdout. */
 export type Exec = (cmd: string) => Promise<string>;
 
+/** Canonical agent name union. */
+export type AgentName = 'janitor' | 'hunter' | 'inspector' | 'scribe';
+
 /** Mutable pause/resume state for agents. */
 export interface AgentControl {
-  pausedJanitor: boolean;
-  pausedHunter: boolean;
-  pausedInspector: boolean;
-  pausedScribe: boolean;
+  paused: Record<AgentName, boolean>;
 }
 
 /** Runtime lifecycle flag. */

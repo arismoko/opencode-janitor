@@ -18,23 +18,9 @@ import {
 } from '../git/pr-context-resolver';
 import type { ReviewRunQueue } from '../review/review-run-queue';
 import type { CommandHookContext } from '../runtime/context';
-import type { AgentControl } from '../runtime/runtime-types';
+import type { AgentControl, AgentName } from '../runtime/runtime-types';
 import { injectMessage } from '../utils/notifier';
 import { workspaceKey } from '../utils/review-key';
-
-// ---------------------------------------------------------------------------
-// Agent name literal — used by shared helpers
-// ---------------------------------------------------------------------------
-
-type AgentName = 'janitor' | 'hunter' | 'inspector' | 'scribe';
-
-/** Map agent name → AgentControl pause key. */
-const pauseKey: Record<AgentName, keyof AgentControl> = {
-  janitor: 'pausedJanitor',
-  hunter: 'pausedHunter',
-  inspector: 'pausedInspector',
-  scribe: 'pausedScribe',
-};
 
 // ---------------------------------------------------------------------------
 // Agent queue / control descriptor — passed to shared helpers
@@ -58,7 +44,7 @@ function renderAgentStatusLine(
   const jobs = queue.getJobsSnapshot();
   const running = jobs.filter((j) => j.status === 'running');
   const pending = jobs.filter((j) => j.status === 'pending');
-  const paused = control[pauseKey[name]];
+  const paused = control.paused[name];
   return `**${name}** ${paused ? '⏸ paused' : '▶ active'} — running=${running.length}, pending=${pending.length}`;
 }
 
@@ -108,17 +94,11 @@ export function createCommandHook(
       injectMessage(rc.ctx, hookInput.sessionID, text, true);
 
     /** Persist current control pause state to store. */
-    const persistPaused = () =>
-      rc.store.setPaused({
-        janitor: rc.control.pausedJanitor,
-        hunter: rc.control.pausedHunter,
-        inspector: rc.control.pausedInspector,
-        scribe: rc.control.pausedScribe,
-      });
+    const persistPaused = () => rc.store.setPaused(rc.control.paused);
 
     /** Shared stop handler. */
     const handleStop = async (ref: AgentRef) => {
-      rc.control[pauseKey[ref.name]] = true;
+      rc.control.paused[ref.name] = true;
       persistPaused();
       const dropped = ref.queue.clearPending();
       const aborted = await ref.queue.abortRunning(rc.ctx);
@@ -129,7 +109,7 @@ export function createCommandHook(
 
     /** Shared resume handler. */
     const handleResume = async (ref: AgentRef) => {
-      rc.control[pauseKey[ref.name]] = false;
+      rc.control.paused[ref.name] = false;
       persistPaused();
       await respond(`▶️ **[${ref.name}]** resumed`);
     };

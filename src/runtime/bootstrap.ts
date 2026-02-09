@@ -15,9 +15,14 @@ import { atomicWriteSync } from '../utils/atomic-write';
 import { log, warn } from '../utils/logger';
 import { ensureStateDir, resolveStateDir } from '../utils/state-dir';
 import { createExec } from './context';
-import type { AgentControl, Exec, RuntimeFlag } from './runtime-types';
+import type {
+  AgentControl,
+  AgentName,
+  Exec,
+  RuntimeFlag,
+} from './runtime-types';
 
-export type AgentName = 'janitor' | 'hunter' | 'inspector' | 'scribe';
+export type { AgentName };
 export type AgentTriggers = Record<AgentName, { commit: boolean; pr: boolean }>;
 
 type TriggerMode = 'commit' | 'pr' | 'both' | 'manual' | 'never';
@@ -156,11 +161,13 @@ export async function bootstrapServices(
   };
 
   const paused = store.getPaused();
-  const control = {
-    pausedJanitor: paused.janitor,
-    pausedHunter: paused.hunter,
-    pausedInspector: paused.inspector,
-    pausedScribe: paused.scribe,
+  const control: AgentControl = {
+    paused: {
+      janitor: Boolean(paused.janitor),
+      hunter: Boolean(paused.hunter),
+      inspector: Boolean(paused.inspector),
+      scribe: Boolean(paused.scribe),
+    },
   };
   const suppressionStore = new SuppressionStore(ctx.directory, {
     maxEntries: config.suppressions?.maxEntries,

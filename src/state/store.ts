@@ -11,10 +11,7 @@ interface StateData {
   processedShas: string[];
   processedPrKeys?: string[];
   processedHunterHeads?: string[];
-  pausedJanitor?: boolean;
-  pausedHunter?: boolean;
-  pausedInspector?: boolean;
-  pausedScribe?: boolean;
+  paused?: Record<string, boolean>;
 }
 
 /**
@@ -25,10 +22,12 @@ export class RuntimeStateStore {
   private processed = new Set<string>();
   private processedPrKeys = new Set<string>();
   private processedHunterHeads = new Set<string>();
-  private pausedJanitor = false;
-  private pausedHunter = false;
-  private pausedInspector = false;
-  private pausedScribe = false;
+  private paused: Record<string, boolean> = {
+    janitor: false,
+    hunter: false,
+    inspector: false,
+    scribe: false,
+  };
   private statePath: string;
 
   constructor(workspaceDir: string) {
@@ -78,31 +77,13 @@ export class RuntimeStateStore {
   }
 
   /** Read paused flags for command controls. */
-  getPaused(): {
-    janitor: boolean;
-    hunter: boolean;
-    inspector: boolean;
-    scribe: boolean;
-  } {
-    return {
-      janitor: this.pausedJanitor,
-      hunter: this.pausedHunter,
-      inspector: this.pausedInspector,
-      scribe: this.pausedScribe,
-    };
+  getPaused(): Record<string, boolean> {
+    return { ...this.paused };
   }
 
   /** Persist paused flags for command controls. */
-  setPaused(flags: {
-    janitor: boolean;
-    hunter: boolean;
-    inspector: boolean;
-    scribe: boolean;
-  }): void {
-    this.pausedJanitor = flags.janitor;
-    this.pausedHunter = flags.hunter;
-    this.pausedInspector = flags.inspector;
-    this.pausedScribe = flags.scribe;
+  setPaused(flags: Record<string, boolean>): void {
+    this.paused = { ...flags };
     this.persist();
   }
 
@@ -139,10 +120,11 @@ export class RuntimeStateStore {
         }
       }
 
-      this.pausedJanitor = Boolean(data.pausedJanitor);
-      this.pausedHunter = Boolean(data.pausedHunter);
-      this.pausedInspector = Boolean(data.pausedInspector);
-      this.pausedScribe = Boolean(data.pausedScribe);
+      if (data.paused && typeof data.paused === 'object') {
+        for (const [name, value] of Object.entries(data.paused)) {
+          this.paused[name] = Boolean(value);
+        }
+      }
 
       log(
         `[store] loaded ${this.processed.size} processed commits and ${this.processedPrKeys.size} processed PR keys`,
@@ -167,10 +149,7 @@ export class RuntimeStateStore {
         processedShas: [...this.processed],
         processedPrKeys: [...this.processedPrKeys],
         processedHunterHeads: [...this.processedHunterHeads],
-        pausedJanitor: this.pausedJanitor,
-        pausedHunter: this.pausedHunter,
-        pausedInspector: this.pausedInspector,
-        pausedScribe: this.pausedScribe,
+        paused: { ...this.paused },
       };
 
       atomicWriteSync(this.statePath, JSON.stringify(data, null, 2));

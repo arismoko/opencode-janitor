@@ -71,14 +71,14 @@ export function createDetectors(
       }
 
       if (agentTriggers.janitor.commit) {
-        if (!control.pausedJanitor) {
+        if (!control.paused.janitor) {
           if (runtime.disposed) return;
           janitorQueue.enqueue(sha);
         }
       }
 
       if (agentTriggers.hunter.commit) {
-        if (control.pausedHunter) {
+        if (control.paused.hunter) {
           return;
         }
         if (runtime.disposed) return;
@@ -111,14 +111,14 @@ export function createDetectors(
       }
 
       if (agentTriggers.inspector.commit) {
-        if (!control.pausedInspector) {
+        if (!control.paused.inspector) {
           if (runtime.disposed) return;
           inspectorQueue.enqueue(`inspector:auto:commit:${sha}`);
         }
       }
 
       if (agentTriggers.scribe.commit) {
-        if (!control.pausedScribe) {
+        if (!control.paused.scribe) {
           if (runtime.disposed) return;
           scribeQueue.enqueue(`scribe:auto:commit:${sha}`);
         }
@@ -210,7 +210,7 @@ export function createDetectors(
           }
 
           if (agentTriggers.janitor.pr) {
-            if (!control.pausedJanitor) {
+            if (!control.paused.janitor) {
               if (runtime.disposed) return;
               if (
                 agentTriggers.janitor.commit &&
@@ -226,7 +226,7 @@ export function createDetectors(
           }
 
           if (agentTriggers.hunter.pr) {
-            if (!control.pausedHunter) {
+            if (!control.paused.hunter) {
               if (runtime.disposed) return;
               if (hunterQueue.hasHeadInFlight(prContext.headSha)) {
                 log(
@@ -245,14 +245,14 @@ export function createDetectors(
           }
 
           if (agentTriggers.inspector.pr) {
-            if (!control.pausedInspector) {
+            if (!control.paused.inspector) {
               if (runtime.disposed) return;
               inspectorQueue.enqueue(`inspector:auto:pr:${prContext.key}`);
             }
           }
 
           if (agentTriggers.scribe.pr) {
-            if (!control.pausedScribe) {
+            if (!control.paused.scribe) {
               if (runtime.disposed) return;
               scribeQueue.enqueue(`scribe:auto:pr:${prContext.key}`);
             }
