@@ -101,10 +101,11 @@ export abstract class SignalDetector<
 
       log(`[${this.label}] new state: ${key} via ${signal.source}`);
 
-      this.lastSeenKey = key;
-
       try {
         await this.onDetected(key, signal);
+        // Advance lastSeenKey only after successful callback —
+        // transient failures allow automatic retry on the next signal.
+        this.lastSeenKey = key;
         this.processed.add(key);
         this.evictProcessed();
       } finally {

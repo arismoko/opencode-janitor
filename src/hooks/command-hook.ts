@@ -83,28 +83,20 @@ export function createCommandHook(
       ].join('\n');
     };
 
-    if (action === 'status') {
-      await respond(`📋 **[Janitor Control]**\n\n${renderJobs()}`);
-      handled();
-    }
-
-    if (!['stop', 'resume', 'clean', 'review'].includes(action)) {
-      await respond(usage);
-      handled();
-    }
+    // -- Subcommand handlers --------------------------------------------------
 
     const targetJanitor = target === 'all' || target === 'janitor';
     const targetHunter = target === 'all' || target === 'hunter';
 
-    if (
-      (action === 'stop' || action === 'resume') &&
-      !['all', 'janitor', 'hunter'].includes(target)
-    ) {
-      await respond(usage);
-      handled();
-    }
+    const handleStatus = async () => {
+      await respond(`📋 **[Janitor Control]**\n\n${renderJobs()}`);
+    };
 
-    if (action === 'stop') {
+    const handleStop = async () => {
+      if (!['all', 'janitor', 'hunter'].includes(target)) {
+        await respond(usage);
+        return;
+      }
       if (targetJanitor) rc.control.pausedJanitor = true;
       if (targetHunter) rc.control.pausedHunter = true;
       rc.store.setPaused({
@@ -126,10 +118,13 @@ export function createCommandHook(
       await respond(
         `🛑 **[Janitor Control]** stopped ${target}. dropped=${dropped}, aborted=${aborted}\n\n${renderJobs()}`,
       );
-      handled();
-    }
+    };
 
-    if (action === 'resume') {
+    const handleResume = async () => {
+      if (!['all', 'janitor', 'hunter'].includes(target)) {
+        await respond(usage);
+        return;
+      }
       if (targetJanitor) rc.control.pausedJanitor = false;
       if (targetHunter) rc.control.pausedHunter = false;
       rc.store.setPaused({
@@ -139,32 +134,30 @@ export function createCommandHook(
       await respond(
         `▶️ **[Janitor Control]** resumed ${target}\n\n${renderJobs()}`,
       );
-      handled();
-    }
+    };
 
-    if (action === 'clean') {
+    const handleClean = async () => {
       const branch = (await rc.exec('git rev-parse --abbrev-ref HEAD')).trim();
       const headSha = (await rc.exec('git rev-parse HEAD')).trim();
       if (!branch || branch === 'HEAD' || !headSha) {
         await respond(
           '⚠️ **[Janitor Control]** clean requires a checked-out branch and a valid HEAD',
         );
-        handled();
+        return;
       }
       const workspace = await getWorkspaceCommitContext(rc.config, rc.exec);
       if (!workspace.patch.trim() && workspace.changedFiles.length === 0) {
         await respond(
           '🧼 **[Janitor Control]** clean: no workspace changes to review',
         );
-        handled();
+        return;
       }
       const runKey = workspaceKey(branch, headSha);
       rc.orchestrator.enqueue(runKey, hookInput.sessionID);
       await respond(`🧼 **[Janitor Control]** clean queued: ${runKey}`);
-      handled();
-    }
+    };
 
-    if (action === 'review') {
+    const handleReview = async () => {
       let prContext: PrContext | null = null;
       const prArg = args[1];
 
@@ -173,28 +166,27 @@ export function createCommandHook(
           await respond(
             '⚠️ **[Janitor Control]** review expects optional numeric PR number, e.g. `/janitor review 123`',
           );
-          handled();
+          return;
         }
         const prNumber = Number(prArg);
         if (!(await isGhAvailable(rc.exec))) {
           await respond(
             '⚠️ **[Janitor Control]** review PR requires gh CLI availability',
           );
-          handled();
+          return;
         }
         const ghPr = await getPrByNumberFromGh(rc.exec, prNumber);
         if (!ghPr) {
           await respond(
             `⚠️ **[Janitor Control]** review: PR #${prNumber} not found or not open`,
           );
-          handled();
+          return;
         }
-        const selectedPr = ghPr!;
         prContext = await getPrContext({
-          baseRef: selectedPr.baseRef,
-          headRef: selectedPr.headRef,
-          headSha: selectedPr.headSha,
-          number: selectedPr.number,
+          baseRef: ghPr.baseRef,
+          headRef: ghPr.headRef,
+          headSha: ghPr.headSha,
+          number: ghPr.number,
           config: rc.config,
           exec: rc.exec,
         });
@@ -206,34 +198,39 @@ export function createCommandHook(
         await respond(
           '⚠️ **[Janitor Control]** review requires a checked-out branch and valid repo state',
         );
-        handled();
+        return;
       }
 
-      const reviewContext = prContext!;
-
-      if (
-        !reviewContext.patch.trim() &&
-        reviewContext.changedFiles.length === 0
-      ) {
+      if (!prContext.patch.trim() && prContext.changedFiles.length === 0) {
         await respond('🔍 **[Janitor Control]** review: no changes to review');
-        handled();
+        return;
       }
 
-      if (hasHunterHeadInFlight(reviewContext.headSha)) {
+      if (hasHunterHeadInFlight(prContext.headSha)) {
         await respond(
-          `🔍 **[Janitor Control]** review skipped: in-flight ${reviewContext.headSha.slice(0, 8)}`,
+          `🔍 **[Janitor Control]** review skipped: in-flight ${prContext.headSha.slice(0, 8)}`,
         );
-        handled();
+        return;
       }
 
-      rc.hunterOrchestrator.enqueue(reviewContext, hookInput.sessionID);
-      await respond(
-        `🔍 **[Janitor Control]** review queued: ${reviewContext.key}`,
-      );
-      handled();
-    }
+      rc.hunterOrchestrator.enqueue(prContext, hookInput.sessionID);
+      await respond(`🔍 **[Janitor Control]** review queued: ${prContext.key}`);
+    };
 
-    await respond(usage);
+    const handlers: Record<string, () => Promise<void>> = {
+      status: handleStatus,
+      stop: handleStop,
+      resume: handleResume,
+      clean: handleClean,
+      review: handleReview,
+    };
+
+    const handler = handlers[action];
+    if (handler) {
+      await handler();
+    } else {
+      await respond(usage);
+    }
     handled();
   };
 }

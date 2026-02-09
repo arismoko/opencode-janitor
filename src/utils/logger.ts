@@ -22,7 +22,6 @@ const LOG_FILE = join(tmpdir(), 'opencode-janitor.log');
 const LOG_FILE_PREV = `${LOG_FILE}.1`;
 const MAX_LOG_BYTES = 5 * 1024 * 1024; // 5 MB
 const PREFIX = '[janitor]';
-const DEBUG = process.env.JANITOR_DEBUG === '1';
 
 /**
  * Extract a human-readable message from an unknown thrown value.

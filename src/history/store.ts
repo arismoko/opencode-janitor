@@ -26,11 +26,11 @@ export class HistoryStore {
   }
 
   getReviews(): ReviewRecord[] {
-    return this.reviews;
+    return [...this.reviews];
   }
 
   getLedger(): FindingLedgerEntry[] {
-    return this.ledger;
+    return [...this.ledger];
   }
 
   addReview(record: ReviewRecord): void {

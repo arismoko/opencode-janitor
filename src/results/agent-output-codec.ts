@@ -85,16 +85,10 @@ function normalizeFindings(
       const normalized: Record<string, unknown> = { ...finding };
 
       // Uppercase enum fields
-      for (const key of ['severity', 'domain', 'category']) {
+      for (const key of ['severity', 'domain']) {
         if (typeof normalized[key] === 'string') {
           normalized[key] = (normalized[key] as string).toUpperCase();
         }
-      }
-
-      // Map legacy 'category' to 'domain' for janitor migration
-      if (normalized.category && !normalized.domain) {
-        normalized.domain = normalized.category;
-        delete normalized.category;
       }
 
       return normalized;

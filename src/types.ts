@@ -23,13 +23,13 @@ import {
 // ---------------------------------------------------------------------------
 
 /** Janitor finding domain */
-export type FindingCategory = _JanitorDomain;
+export type JanitorDomain = _JanitorDomain;
 
 /** Hunter finding domain */
 export type HunterDomain = _HunterDomain;
 
 /** Severity level shared by all agents */
-export type ReviewerSeverity = _Severity;
+export type Severity = _Severity;
 
 /** A single janitor finding (schema-derived) */
 export type Finding = _JanitorFinding;
@@ -41,20 +41,12 @@ export type HunterFinding = _HunterFinding;
 // Runtime domain values (derived from Zod schema)
 // ---------------------------------------------------------------------------
 
-/** All valid janitor domain values as a runtime array */
-export const FINDING_CATEGORIES: readonly FindingCategory[] =
-  _JanitorDomainSchema.options;
-
-/** Pipe-separated domain string for prompt injection */
-export const CATEGORY_PIPE_STR: string = FINDING_CATEGORIES.join(' | ');
-
 /** All valid hunter domain values as a runtime array */
 export const HUNTER_DOMAINS: readonly HunterDomain[] =
   _HunterDomainSchema.options;
 
 /** All valid severity values as a runtime array */
-export const REVIEWER_SEVERITIES: readonly ReviewerSeverity[] =
-  _SeveritySchema.options;
+export const SEVERITIES: readonly Severity[] = _SeveritySchema.options;
 
 // ---------------------------------------------------------------------------
 // Severity guide (descriptive text, not in schema)
@@ -67,9 +59,6 @@ export const SEVERITY_GUIDE = [
   'P2: Fix when convenient — real issue but low blast radius',
   'P3: Consider — minor, worth noting for future awareness',
 ] as const;
-
-/** @deprecated Use SEVERITY_GUIDE */
-export const REVIEWER_SEVERITY_GUIDE = SEVERITY_GUIDE;
 
 // ---------------------------------------------------------------------------
 // Parse metadata
@@ -131,22 +120,4 @@ export type SignalSource = 'fswatch' | 'tool-hook' | 'poll';
 export interface CommitSignal {
   source: SignalSource;
   ts: number;
-}
-
-/** Review job in the orchestrator queue */
-export interface ReviewJob {
-  sha: string;
-  parentSessionId?: string;
-  sessionId?: string;
-  status: 'pending' | 'running' | 'completed' | 'failed';
-  enqueuedAt: Date;
-  startedAt?: Date;
-  completedAt?: Date;
-  result?: ReviewResult;
-  error?: string;
-}
-
-/** Sink interface for delivering results */
-export interface ResultSink {
-  deliver(result: ReviewResult, parentSessionId?: string): Promise<void>;
 }

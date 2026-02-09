@@ -12,17 +12,18 @@ fallback when GitHub CLI is unavailable.
 ## Decision
 
 1. Keep two distinct agents:
-   - `janitor` (structural only)
-   - `code-reviewer` (bugs/security/performance/architecture/docs/spec)
+   - `janitor` (structural: DRY, DEAD, STRUCTURAL domains)
+   - `bug-hunter` (comprehensive: BUG, SECURITY, PERFORMANCE, ARCHITECTURE, DOCS, SPEC domains)
 
 2. Add trigger modes per agent:
-   - `commit | pr | both`
+   - `commit | pr | both | never`
    - Defaults:
      - janitor: `commit`
-     - reviewer: `pr`
+     - hunter: `pr`
 
-3. Use two orchestrators (one per agent), each with its own queue and session
-   tracking, while reusing shared infrastructure patterns.
+3. Use two orchestrators (one per agent), each with its own `ReviewRunQueue` and
+   `ReviewStrategy`, while reusing shared infrastructure (prompt builder, runner,
+   output codec, sink transports).
 
 4. Use a hybrid PR detection model:
    - Tool hook accelerator (`git push`, `gh pr ...`)
@@ -35,14 +36,14 @@ fallback when GitHub CLI is unavailable.
    - Attempt `gh pr review --comment` when enabled and available
    - Fail soft on missing `gh`/auth errors
 
-6. Reviewer output contract is strict JSON:
+6. Hunter output contract is strict JSON:
 
 ```json
 {
   "findings": [
     {
       "location": "path:line",
-      "severity": "CRITICAL|HIGH|MEDIUM|LOW",
+      "severity": "P0|P1|P2|P3",
       "domain": "BUG|SECURITY|PERFORMANCE|ARCHITECTURE|DOCS|SPEC",
       "evidence": "...",
       "prescription": "..."
@@ -54,11 +55,6 @@ fallback when GitHub CLI is unavailable.
 ## Consequences
 
 - Better separation of concerns: janitor stays narrow and reliable.
-- Comprehensive reviews now have a dedicated path and parser.
+- Comprehensive reviews now have a dedicated agent, strategy, and parser.
 - Plugin remains usable without `gh`.
-- Config surface is larger (`agents.*`, `pr.*`, `delivery.reviewer.*`).
-
-## Compatibility
-
-- Legacy `autoReview.onCommit` is still honored for janitor when
-  `agents.janitor` is not explicitly configured.
+- Config surface is larger (`agents.*`, `pr.*`, `delivery.hunter.*`).

@@ -55,7 +55,7 @@ export interface PreparedContext {
  * Build SpawnReviewOpts from a spec and prepared context.
  * Centralizes the common pattern of mapping spec + prompt → spawn opts.
  */
-export function buildSpawnOpts<TContext>(
+function buildSpawnOpts<TContext>(
   spec: AgentRuntimeSpec<TContext>,
   runKey: TContext,
   prompt: string,
