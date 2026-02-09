@@ -1,6 +1,6 @@
 import { z } from 'zod';
 
-const TriggerModeSchema = z.enum(['commit', 'pr', 'both']);
+const TriggerModeSchema = z.enum(['commit', 'pr', 'both', 'never']);
 
 type TriggerMode = z.infer<typeof TriggerModeSchema>;
 
