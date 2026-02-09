@@ -64,15 +64,15 @@ export function createDetectors(
 
       // ── Resolve context ──────────────────────────────────────────────
       const commit = await getCommitContext(sha, config, exec);
-      if (commit.deletionOnly) {
-        log(`[detector] skipping deletion-only commit: ${sha.slice(0, 8)}`);
-        return;
-      }
 
       // ── Janitor ──────────────────────────────────────────────────────
       if (agentTriggers.janitor.commit && !control.paused.janitor) {
         if (runtime.disposed) return;
-        janitorQueue.enqueue(sha);
+        if (commit.deletionOnly) {
+          log(`[janitor] skipping deletion-only commit: ${sha.slice(0, 8)}`);
+        } else {
+          janitorQueue.enqueue(sha);
+        }
       }
 
       // ── Hunter (commit-as-PR context) ────────────────────────────────

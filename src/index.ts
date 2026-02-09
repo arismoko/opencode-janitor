@@ -21,7 +21,7 @@ import { createAgent } from './review/agent-factory';
 import { bootstrapRuntime } from './runtime/review-runtime';
 import { log } from './utils/logger';
 
-let stopActiveRuntime: (() => Promise<void>) | null = null;
+const activeRuntimes = new Map<string, () => Promise<void>>();
 
 /** Best-effort toast — swallows errors so it never breaks init. */
 function toast(ctx: Parameters<Plugin>[0], message: string) {
@@ -35,9 +35,13 @@ function toast(ctx: Parameters<Plugin>[0], message: string) {
 }
 
 const TheJanitor: Plugin = async (ctx) => {
-  if (stopActiveRuntime) {
-    await stopActiveRuntime();
-    stopActiveRuntime = null;
+  const workspaceDir = ctx.directory;
+
+  // Tear down only the runtime for THIS workspace (if any)
+  const existingStop = activeRuntimes.get(workspaceDir);
+  if (existingStop) {
+    await existingStop();
+    activeRuntimes.delete(workspaceDir);
   }
 
   const result = await bootstrapRuntime(ctx);
@@ -52,7 +56,7 @@ const TheJanitor: Plugin = async (ctx) => {
   }
 
   const { rc, stop } = result;
-  stopActiveRuntime = stop;
+  activeRuntimes.set(workspaceDir, stop);
 
   const config = rc.config;
   const agents = (['janitor', 'hunter', 'inspector', 'scribe'] as const).map(

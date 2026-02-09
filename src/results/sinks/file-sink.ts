@@ -47,8 +47,11 @@ export async function deliverToFile(
       mkdirSync(absDir, { recursive: true });
     }
 
+    // Sanitize fileId for cross-platform filename safety (colons, slashes, etc.)
+    const safeFileId = opts.fileId.replace(/[<>:"/\\|?*]/g, '-');
+
     // Write report file
-    const filename = `${opts.fileId}.md`;
+    const filename = `${safeFileId}.md`;
     const filepath = join(absDir, filename);
     const historySection = opts.enrichment
       ? buildHistorySection(opts.enrichment)
