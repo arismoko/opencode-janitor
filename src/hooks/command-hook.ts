@@ -19,7 +19,6 @@ import {
 import type { ReviewRunQueue } from '../review/review-run-queue';
 import type { CommandHookContext } from '../runtime/context';
 import type { AgentControl, AgentName } from '../runtime/runtime-types';
-import { injectMessage } from '../utils/notifier';
 import { workspaceKey } from '../utils/review-key';
 
 // ---------------------------------------------------------------------------
@@ -64,7 +63,7 @@ export function createCommandHook(
   rc: CommandHookContext,
 ): (
   hookInput: { command: string; sessionID: string; arguments: string },
-  _output: { parts: Part[] },
+  output: { parts: Part[] },
 ) => Promise<void> {
   const agentCommands = new Set(['janitor', 'hunter', 'inspector', 'scribe']);
 
@@ -77,21 +76,25 @@ export function createCommandHook(
   };
   const allAgentRefs = Object.values(agents);
 
-  return async (hookInput, _output) => {
+  return async (hookInput, output) => {
     if (rc.runtime.disposed) return;
     if (!agentCommands.has(hookInput.command)) return;
-
-    // Workaround until opencode supports hook-level short-circuiting for
-    // command.execute.before without throwing.
-    const handled = (): never => {
-      throw new Error('__handled__');
-    };
 
     const args = hookInput.arguments.trim().split(/\s+/).filter(Boolean);
     const action = (args[0] ?? 'status').toLowerCase();
 
-    const respond = async (text: string) =>
-      injectMessage(rc.ctx, hookInput.sessionID, text, true);
+    /**
+     * Signal to the host that this command is handled by pushing a TextPart
+     * into output.parts. The host short-circuits when parts.length > 0,
+     * creating an assistant message from the parts instead of running the
+     * default command expansion.
+     */
+    const respond = (text: string) => {
+      output.parts.push({
+        type: 'text',
+        text,
+      } as Part);
+    };
 
     /** Persist current control pause state to store. */
     const persistPaused = () => rc.store.setPaused(rc.control.paused);
@@ -102,16 +105,16 @@ export function createCommandHook(
       persistPaused();
       const dropped = ref.queue.clearPending();
       const aborted = await ref.queue.abortRunning(rc.ctx);
-      await respond(
+      respond(
         `🛑 **[${ref.name}]** stopped. dropped=${dropped}, aborted=${aborted}`,
       );
     };
 
     /** Shared resume handler. */
-    const handleResume = async (ref: AgentRef) => {
+    const handleResume = (ref: AgentRef) => {
       rc.control.paused[ref.name] = false;
       persistPaused();
-      await respond(`▶️ **[${ref.name}]** resumed`);
+      respond(`▶️ **[${ref.name}]** resumed`);
     };
 
     // Cross-agent status renderer (shown by /janitor status as plugin overview)
@@ -125,36 +128,33 @@ export function createCommandHook(
       const usage = 'Usage: /janitor run | status | stop | resume';
 
       if (action === 'status') {
-        await respond(`📋 **Agent Status**\n\n${renderAllStatus()}`);
+        respond(`📋 **Agent Status**\n\n${renderAllStatus()}`);
       } else if (action === 'run') {
         const branch = (
           await rc.exec('git rev-parse --abbrev-ref HEAD')
         ).trim();
         const headSha = (await rc.exec('git rev-parse HEAD')).trim();
         if (!branch || branch === 'HEAD' || !headSha) {
-          await respond(
+          respond(
             '⚠️ **[janitor]** run requires a checked-out branch and a valid HEAD',
           );
-          handled();
           return;
         }
         const workspace = await getWorkspaceCommitContext(rc.config, rc.exec);
         if (!workspace.patch.trim() && workspace.changedFiles.length === 0) {
-          await respond('🧼 **[janitor]** no workspace changes to review');
-          handled();
+          respond('🧼 **[janitor]** no workspace changes to review');
           return;
         }
         const runKey = workspaceKey(branch, headSha);
         rc.janitorQueue.enqueue(runKey, hookInput.sessionID);
-        await respond(`🧼 **[janitor]** review queued: ${runKey}`);
+        respond(`🧼 **[janitor]** review queued: ${runKey}`);
       } else if (action === 'stop') {
         await handleStop(agents.janitor);
       } else if (action === 'resume') {
-        await handleResume(agents.janitor);
+        handleResume(agents.janitor);
       } else {
-        await respond(usage);
+        respond(usage);
       }
-      handled();
       return;
     }
 
@@ -163,31 +163,28 @@ export function createCommandHook(
       const usage = 'Usage: /hunter run [pr#] | status | stop | resume';
 
       if (action === 'status') {
-        await respond(renderDetailedStatus(rc.control, agents.hunter));
+        respond(renderDetailedStatus(rc.control, agents.hunter));
       } else if (action === 'run') {
         let prContext: PrContext | null = null;
         const prArg = args[1];
 
         if (prArg) {
           if (!/^\d+$/.test(prArg)) {
-            await respond(
+            respond(
               '⚠️ **[hunter]** run expects optional numeric PR number, e.g. `/hunter run 123`',
             );
-            handled();
             return;
           }
           const prNumber = Number(prArg);
           if (!(await isGhAvailable(rc.exec))) {
-            await respond('⚠️ **[hunter]** run PR requires gh CLI availability');
-            handled();
+            respond('⚠️ **[hunter]** run PR requires gh CLI availability');
             return;
           }
           const ghPr = await getPrByNumberFromGh(rc.exec, prNumber);
           if (!ghPr) {
-            await respond(
+            respond(
               `⚠️ **[hunter]** run: PR #${prNumber} not found or not open`,
             );
-            handled();
             return;
           }
           prContext = await getPrContext({
@@ -203,37 +200,33 @@ export function createCommandHook(
         }
 
         if (!prContext) {
-          await respond(
+          respond(
             '⚠️ **[hunter]** run requires a checked-out branch and valid repo state',
           );
-          handled();
           return;
         }
 
         if (!prContext.patch.trim() && prContext.changedFiles.length === 0) {
-          await respond('🔍 **[hunter]** run: no changes to review');
-          handled();
+          respond('🔍 **[hunter]** run: no changes to review');
           return;
         }
 
         if (rc.hunterQueue.hasHeadInFlight(prContext.headSha)) {
-          await respond(
+          respond(
             `🔍 **[hunter]** run skipped: in-flight ${prContext.headSha.slice(0, 8)}`,
           );
-          handled();
           return;
         }
 
         rc.hunterQueue.enqueue(prContext, hookInput.sessionID);
-        await respond(`🔍 **[hunter]** review queued: ${prContext.key}`);
+        respond(`🔍 **[hunter]** review queued: ${prContext.key}`);
       } else if (action === 'stop') {
         await handleStop(agents.hunter);
       } else if (action === 'resume') {
-        await handleResume(agents.hunter);
+        handleResume(agents.hunter);
       } else {
-        await respond(usage);
+        respond(usage);
       }
-      handled();
       return;
     }
 
@@ -242,21 +235,18 @@ export function createCommandHook(
       const usage = 'Usage: /inspector run | status | stop | resume';
 
       if (action === 'status') {
-        await respond(renderDetailedStatus(rc.control, agents.inspector));
+        respond(renderDetailedStatus(rc.control, agents.inspector));
       } else if (action === 'run') {
         const runKey = `inspector:${Date.now()}`;
         rc.inspectorQueue.enqueue(runKey, hookInput.sessionID);
-        await respond(
-          `🔎 **[inspector]** repo-wide analysis queued: ${runKey}`,
-        );
+        respond(`🔎 **[inspector]** repo-wide analysis queued: ${runKey}`);
       } else if (action === 'stop') {
         await handleStop(agents.inspector);
       } else if (action === 'resume') {
-        await handleResume(agents.inspector);
+        handleResume(agents.inspector);
       } else {
-        await respond(usage);
+        respond(usage);
       }
-      handled();
       return;
     }
 
@@ -265,19 +255,18 @@ export function createCommandHook(
       const usage = 'Usage: /scribe run | status | stop | resume';
 
       if (action === 'status') {
-        await respond(renderDetailedStatus(rc.control, agents.scribe));
+        respond(renderDetailedStatus(rc.control, agents.scribe));
       } else if (action === 'run') {
         const runKey = `scribe:${Date.now()}`;
         rc.scribeQueue.enqueue(runKey, hookInput.sessionID);
-        await respond(`📝 **[scribe]** documentation audit queued: ${runKey}`);
+        respond(`📝 **[scribe]** documentation audit queued: ${runKey}`);
       } else if (action === 'stop') {
         await handleStop(agents.scribe);
       } else if (action === 'resume') {
-        await handleResume(agents.scribe);
+        handleResume(agents.scribe);
       } else {
-        await respond(usage);
+        respond(usage);
       }
-      handled();
       return;
     }
   };
