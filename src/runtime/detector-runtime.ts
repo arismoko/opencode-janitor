@@ -42,7 +42,7 @@ export function createDetectors(
     anyPrReviews,
   } = svc;
 
-  const { janitorQueue, hunterQueue } = queues;
+  const { janitorQueue, hunterQueue, inspectorQueue, scribeQueue } = queues;
 
   // Commit detector
   const detector = new CommitDetector(
@@ -102,6 +102,20 @@ export function createDetectors(
             patch: commit.patch,
             patchTruncated: commit.patchTruncated,
           });
+        }
+      }
+
+      if (agentTriggers.inspector.commit) {
+        if (!control.pausedInspector) {
+          if (runtime.disposed) return;
+          inspectorQueue.enqueue(`inspector:auto:commit:${sha}`);
+        }
+      }
+
+      if (agentTriggers.scribe.commit) {
+        if (!control.pausedScribe) {
+          if (runtime.disposed) return;
+          scribeQueue.enqueue(`scribe:auto:commit:${sha}`);
         }
       }
     },
@@ -221,6 +235,20 @@ export function createDetectors(
                 return;
               }
               hunterQueue.enqueue(prContext);
+            }
+          }
+
+          if (agentTriggers.inspector.pr) {
+            if (!control.pausedInspector) {
+              if (runtime.disposed) return;
+              inspectorQueue.enqueue(`inspector:auto:pr:${prContext.key}`);
+            }
+          }
+
+          if (agentTriggers.scribe.pr) {
+            if (!control.pausedScribe) {
+              if (runtime.disposed) return;
+              scribeQueue.enqueue(`scribe:auto:pr:${prContext.key}`);
             }
           }
         },
