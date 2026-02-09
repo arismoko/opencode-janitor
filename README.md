@@ -4,24 +4,35 @@ Automatic structural and comprehensive code reviews inside [OpenCode](https://gi
 
 ## What It Does
 
-When you commit, the janitor spawns an isolated background session and reviews your diff for structural issues across three categories:
+The janitor plugin ships two independent review agents that watch your work and produce structured findings:
 
-| Category | What It Catches |
-|----------|----------------|
+### Janitor Agent
+
+Detects structural rot in your diffs across three domains:
+
+| Domain | What It Catches |
+|--------|----------------|
+| **YAGNI** | Speculative abstractions, unused parameters, premature generalization |
 | **DRY** | Functions with >60% structural similarity, copy-pasted types, repeated constants |
 | **DEAD** | Exported symbols with zero importers, unreachable branches, dead type chains |
-| **STRUCTURAL** | Responsibility drift, complexity accretion, coupling increase, shotgun surgery, needless indirection |
 
-Every finding includes a **location**, **evidence**, and an **exact prescription** (delete, extract, merge).
+Default trigger: **commit**
 
-### Comprehensive Reviewer
+### Bug Hunter Agent
 
-The plugin also ships a second agent: **`code-reviewer`**.
+Comprehensive review focused on correctness and security:
 
-- Focus: bugs, security, performance, architecture, docs drift, and spec drift
-- Default trigger: PR updates
-- Output contract: strict JSON findings parsed and rendered into reports
-- Delivery: toast, session message, file report, and optional direct PR comment via `gh pr review`
+| Domain | What It Catches |
+|--------|----------------|
+| **BUG** | Logic errors, race conditions, incorrect assumptions, off-by-one errors |
+| **SECURITY** | Injection vectors, auth bypasses, secrets exposure, unsafe deserialization |
+| **CORRECTNESS** | Spec drift, contract violations, type unsoundness, invariant violations |
+
+Default trigger: **pr**
+
+Both agents share a severity scale: **P0** (critical) → **P1** (high) → **P2** (medium) → **P3** (low).
+
+Every finding includes a **location**, **evidence**, and an **exact prescription** (delete, extract, merge, fix).
 
 ## Install
 
@@ -60,7 +71,6 @@ Both are optional. All fields have defaults. Example:
 {
   "enabled": true,
   "autoReview": {
-    "onCommit": true,
     "debounceMs": 1200,
     "pollFallbackSec": 15
   },
@@ -71,7 +81,7 @@ Both are optional. All fields have defaults. Example:
       "modelId": "anthropic/claude-sonnet-4-20250514",
       "variant": "high"
     },
-    "reviewer": {
+    "hunter": {
       "enabled": true,
       "trigger": "pr",
       "modelId": "openai/gpt-5.3-codex",
@@ -81,7 +91,7 @@ Both are optional. All fields have defaults. Example:
   "categories": {
     "DRY": true,
     "DEAD": true,
-    "STRUCTURAL": true
+    "YAGNI": true
   },
   "scope": {
     "include": ["**/*.{ts,tsx,js,jsx,py,go,rs,java,rb,swift,kt}"],
@@ -101,11 +111,11 @@ Both are optional. All fields have defaults. Example:
     "sessionMessage": true,
     "reportFile": true,
     "reportDir": ".janitor/reports",
-    "reviewer": {
+    "hunter": {
       "toast": true,
       "sessionMessage": true,
       "reportFile": true,
-      "reportDir": ".janitor/reviewer-reports",
+      "reportDir": ".janitor/hunter-reports",
       "prComment": true
     }
   },
@@ -128,13 +138,13 @@ Both are optional. All fields have defaults. Example:
 |---------|---------|-------|
 | `model.id` | *(inherits from OpenCode)* | Fallback model for both agents if per-agent `modelId` is not set |
 | `agents.janitor.modelId` | *(inherits from `model.id`)* | Override model for the janitor agent (`provider/model` format) |
-| `agents.reviewer.modelId` | *(inherits from `model.id`)* | Override model for the reviewer agent (`provider/model` format) |
+| `agents.hunter.modelId` | *(inherits from `model.id`)* | Override model for the hunter agent (`provider/model` format) |
 | `agents.*.variant` | *(none)* | Model-specific config variant (e.g. reasoning effort for OpenAI, thinking budget for Anthropic) |
-| `agents.janitor.trigger` | `commit` | `commit`, `pr`, or `both` |
-| `agents.reviewer.trigger` | `pr` | `commit`, `pr`, or `both` |
+| `agents.janitor.trigger` | `commit` | `commit`, `pr`, `both`, or `never` |
+| `agents.hunter.trigger` | `pr` | `commit`, `pr`, `both`, or `never` |
 | `queue.dropIntermediate` | `true` | During rapid commits, only review the latest |
 | `delivery.reportFile` | `true` | Writes reports to `.janitor/reports/<sha>.md` |
-| `delivery.reviewer.prComment` | `true` | Post reviewer report to PR via `gh pr review` when available |
+| `delivery.hunter.prComment` | `true` | Post hunter report to PR via `gh pr review` when available |
 | `pr.baseBranch` | `master` | Fallback base branch when `gh` PR metadata is unavailable |
 
 ## How It Works
@@ -165,8 +175,8 @@ If `gh` is unavailable, PR comments are skipped gracefully and results still lan
 signal detected → debounce → resolve context (commit/PR) → build prompt → spawn background session → parse output → deliver results
 ```
 
-- Reviews run in isolated background sessions with per-agent prompts (`janitor`, `code-reviewer`)
-- Janitor and reviewer run with a strict allowlist: `glob`, `grep`, `list`, `read`, `lsp` (everything else denied)
+- Reviews run in isolated background sessions with per-agent prompts (`janitor`, `bug-hunter`)
+- Both agents run with a strict tool allowlist: `glob`, `grep`, `list`, `read`, `lsp` (everything else denied)
 - Large diffs are truncated; the agent uses tools to explore beyond the patch
 - Burst commits are coalesced: only the oldest running + latest pending are kept
 
@@ -178,48 +188,90 @@ Results are delivered through three sinks (all independently toggleable):
 |------|------|
 | **Toast** | Quick summary: "Janitor: 3 P0 findings in abc1234" |
 | **Session message** | Full markdown report injected into your session |
-| **File report** | Persistent `.janitor/reports/<sha>.md` |
-| **PR comment** | Reviewer posts to GitHub PR via `gh pr review --comment` (optional) |
+| **File report** | Persistent `.janitor/reports/<sha>.md` (janitor) or `.janitor/hunter-reports/<sha>.md` (hunter) |
+| **PR comment** | Hunter posts to GitHub PR via `gh pr review --comment` (optional) |
 
 ## Architecture
 
 ```
 src/
-  index.ts                    # Plugin entry — wires all subsystems
-  types.ts                    # Shared types, category/severity constants
+  index.ts                          # Plugin entry — hook wiring
+  types.ts                          # Schema-derived types, severity guide, result containers
+  schemas/
+    finding.ts                      # Zod v4 schemas — single source of truth for domains/severities
   config/
-    schema.ts                 # Zod config schema with defaults
-    loader.ts                 # XDG-compliant config loading
-  git/
-    signal-detector.ts        # Generic SignalDetector base (verify, debounce, inflight guard)
-    commit-detector.ts        # Hybrid fs.watch + poll + accelerator
-    commit-resolver.ts        # Diff extraction, parent selection
-    pr-detector.ts            # PR poll + tool-hook accelerator
-    pr-context-resolver.ts    # PR merge-base diff extraction
-    gh-pr.ts                  # gh availability + PR metadata + PR comment delivery
-    repo-locator.ts           # .git dir resolution
+    schema.ts                       # Zod config schema with defaults
+    loader.ts                       # XDG-compliant config loading
+  agents/
+    registry.ts                     # Agent definition registry (config hook)
+  hooks/
+    command-hook.ts                 # /janitor command surface (handler map dispatch)
+    event-hook.ts                   # Session completion/error routing
+    tool-hook.ts                    # Tool accelerator for commit/PR detection
+  runtime/
+    context.ts                      # RuntimeContext type, Exec bridge
+    bootstrap.ts                    # Config, git, stores, state dir, trigger flags
+    agent-runtime.ts                # Agent queue construction with runtime specs
+    agent-runtime-spec.ts           # AgentRuntimeSpec type + generic executor factory
+    detector-runtime.ts             # Commit/PR signal detector wiring
+    review-runtime.ts               # Thin composition root
   review/
-    base-orchestrator.ts      # Generic queue/lifecycle base class
-    orchestrator.ts           # Queue, concurrency, burst coalescing
-    reviewer-orchestrator.ts  # Queue/lifecycle for comprehensive reviewer
-    janitor-agent.ts          # Agent definition (model, tools, prompt)
-    reviewer-agent.ts         # Comprehensive reviewer agent definition
-    prompt-builder.ts         # Review prompt assembly
-    reviewer-prompt-builder.ts # PR review prompt assembly
-    runner.ts                 # Background session spawner
+    review-run-queue.ts             # Generic queue with strategy pattern
+    runner.ts                       # Background session spawner (spawnReview)
+    prompt-builder.ts               # Unified prompt assembly
+    agent-factory.ts                # Agent definition factory
+    agent-profiles.ts               # Per-agent system prompts and tool configs
+    janitor-agent.ts                # Janitor agent definition
+    hunter-agent.ts                 # Hunter agent definition
+    strategies/
+      janitor-strategy.ts           # Janitor result parsing + delivery
+      hunter-strategy.ts            # Hunter result parsing + delivery + GH PR comments
   results/
-    parser.ts                 # Structured finding extraction
-    reviewer-parser.ts        # Reviewer JSON extraction
-    formatter.ts              # Markdown report rendering
-    reviewer-formatter.ts     # Reviewer markdown rendering
-    format-helpers.ts         # Shared summarizeLocation/formatChangedFiles helpers
-    sinks/                    # Toast, session, file delivery
+    agent-output-codec.ts           # Unified JSON extraction + Zod validation
+    report-renderer.ts              # Shared markdown report renderer
+    formatter.ts                    # Janitor-specific report formatting
+    format-helpers.ts               # Shared helpers (summarizeLocation, formatChangedFiles)
+    pipeline.ts                     # Janitor result pipeline (parse → enrich → suppress)
+    sinks/
+      toast-sink.ts                 # Toast notification delivery
+      session-sink.ts               # Session message injection
+      file-sink.ts                  # File report writing
+  git/
+    signal-detector.ts              # Generic SignalDetector base class
+    commit-detector.ts              # Hybrid fs.watch + poll + accelerator
+    commit-resolver.ts              # Commit diff extraction
+    pr-detector.ts                  # PR poll + tool-hook accelerator
+    pr-context-resolver.ts          # PR merge-base diff extraction
+    gh-pr.ts                        # gh CLI availability + PR metadata + PR comments
+    repo-locator.ts                 # .git dir resolution
   state/
-    store.ts                  # Processed commit persistence
+    store.ts                        # RuntimeStateStore — processed commits/PRs persistence
+  history/
+    store.ts                        # HistoryStore — review history with defensive-copy getters
+    schema.ts                       # History file Zod schema
+    types.ts                        # History domain types
+    analyzer.ts                     # Finding analysis
+    enrichment.ts                   # Finding enrichment data
+    trends.ts                       # Trend computation
+  findings/
+    fingerprint.ts                  # Finding fingerprinting (exactKey, scopedKey)
+  suppressions/
+    store.ts                        # SuppressionStore
+    lifecycle.ts                    # Suppression lifecycle management
+    matcher.ts                      # Suppression matching
+    prompt.ts                       # Suppressions block for prompt injection
+    schema.ts                       # Suppression file Zod schema
+    types.ts                        # Suppression domain types
   utils/
-    logger.ts                 # Structured logging
-    notifier.ts               # Session message injection
-    limits.ts                 # Diff truncation helpers
+    logger.ts                       # File-based logger (no stdout/stderr)
+    notifier.ts                     # Session message injection helper
+    limits.ts                       # Diff truncation
+    review-key.ts                   # Review key parsing (workspace:, pr: prefixes)
+    atomic-write.ts                 # Atomic file writes
+    eviction.ts                     # Set eviction for bounded caches
+    event-log.ts                    # JSONL event logging
+    state-dir.ts                    # State directory resolution
+    workspace-git.ts                # Workspace git helpers
 ```
 
 ## Development
