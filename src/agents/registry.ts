@@ -1,6 +1,6 @@
 /**
- * Agent registry — registers janitor + hunter agents and the /janitor command
- * in OpenCode's config hook.
+ * Agent registry — registers janitor + hunter agents and per-agent slash
+ * commands (/janitor, /hunter, /inspector, /scribe) in OpenCode's config hook.
  *
  * Extracted from the inline `config` hook in `src/index.ts`. The returned
  * callback mutates the OpenCode config object in place (return value of
@@ -17,8 +17,8 @@ export interface AgentDefinition {
 }
 
 /**
- * Build a config-hook callback that registers the given agents and the
- * `/janitor` slash command in OpenCode's configuration.
+ * Build a config-hook callback that registers the given agents and per-agent
+ * slash commands in OpenCode's configuration.
  */
 export function registerAgents(
   agents: AgentDefinition[],
@@ -35,13 +35,26 @@ export function registerAgents(
 
     const commands = opencodeConfig.command ?? {};
     commands.janitor = {
-      description:
-        'Janitor control: /janitor status|stop|resume [janitor|hunter|all], /janitor clean, /janitor review [pr#]',
+      description: 'Janitor agent: /janitor run | status | stop | resume',
+      template: '',
+    };
+    commands.hunter = {
+      description: 'Hunter agent: /hunter run [pr#] | status | stop | resume',
+      template: '',
+    };
+    commands.inspector = {
+      description: 'Inspector agent: /inspector run | status (coming soon)',
+      template: '',
+    };
+    commands.scribe = {
+      description: 'Scribe agent: /scribe run | status (coming soon)',
       template: '',
     };
     opencodeConfig.command = commands;
     opencodeConfig.agent = agentRegistry;
 
-    log("registered agents 'janitor' and 'bug-hunter' in config hook");
+    log(
+      "registered agents 'janitor' and 'bug-hunter'; commands /janitor, /hunter, /inspector, /scribe",
+    );
   };
 }
