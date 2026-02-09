@@ -1,8 +1,12 @@
 /**
  * Agent runtime — constructs review queues for janitor and hunter agents.
+ *
+ * Uses AgentRuntimeSpec to centralize per-agent differences as data,
+ * replacing duplicated inline executor closures with a single generic factory.
  */
 
 import type { PluginInput } from '@opencode-ai/plugin';
+import type { JanitorConfig } from '../config/schema';
 import {
   getCommitContext,
   getWorkspaceCommitContext,
@@ -18,33 +22,37 @@ import { buildSuppressionsBlock } from '../suppressions/prompt';
 import type { HunterResult, ReviewResult } from '../types';
 import { log } from '../utils/logger';
 import { extractHeadSha } from '../utils/review-key';
+import {
+  type AgentRuntimeSpec,
+  createSpecExecutor,
+  type PreparedContext,
+} from './agent-runtime-spec';
 import type { BootstrapServices } from './bootstrap';
+import type { Exec } from './context';
 
 export interface AgentQueues {
   orchestrator: ReviewRunQueue<string, ReviewResult>;
   hunterOrchestrator: ReviewRunQueue<PrContext, HunterResult>;
 }
 
-/**
- * Construct the janitor and hunter review queues.
- */
-export function createAgentQueues(svc: BootstrapServices): AgentQueues {
-  const {
-    ctx,
-    config,
-    exec,
-    store,
-    suppressionStore,
-    historyStore,
-    trackedSessions,
-    writeSessionMeta,
-  } = svc;
+// ---------------------------------------------------------------------------
+// Agent runtime specs — per-agent differences as data
+// ---------------------------------------------------------------------------
 
-  // Janitor orchestrator
-  const janitorStrategy = new JanitorStrategy(suppressionStore, historyStore);
-  const orchestrator = new ReviewRunQueue<string, ReviewResult>(
-    config,
-    async (runKey, parentSessionId) => {
+function createJanitorSpec(
+  suppressionStore: BootstrapServices['suppressionStore'],
+): AgentRuntimeSpec<string> {
+  return {
+    agent: 'janitor',
+    queueTag: 'orchestrator',
+    resolveModelId: (config) =>
+      config.agents.janitor.modelId ?? config.model.id,
+
+    async prepareReviewContext(
+      runKey: string,
+      config: JanitorConfig,
+      exec: Exec,
+    ): Promise<PreparedContext> {
       const workspace = runKey.startsWith('workspace:');
       const commit = workspace
         ? await getWorkspaceCommitContext(config, exec)
@@ -62,8 +70,9 @@ export function createAgentQueues(svc: BootstrapServices): AgentQueues {
             config.suppressions?.maxPromptBytes,
           )
         : '';
-      const prompt = buildReviewPrompt(
-        {
+
+      return {
+        reviewContext: {
           label: `${commit.sha.slice(0, 8)} — ${commit.subject}`,
           changedFiles: commit.changedFiles,
           patch: commit.patch,
@@ -74,56 +83,28 @@ export function createAgentQueues(svc: BootstrapServices): AgentQueues {
             `Parents: ${commit.parents.join(' ')}`,
           ],
         },
-        {
-          maxFindings: config.model.maxFindings,
-          scopeInclude: config.scope.include,
-          scopeExclude: config.scope.exclude,
-          suppressionsBlock,
-        },
-      );
-
-      const sessionId = await spawnReview(ctx, {
-        prompt,
-        title: `[janitor-run] ${runKey}`,
-        agent: 'janitor',
-        modelId: config.agents.janitor.modelId ?? config.model.id,
-        parentID: parentSessionId,
-      });
-      trackedSessions.add(sessionId);
-      writeSessionMeta(sessionId, {
-        title: `[janitor-run] ${runKey}`,
-        agent: 'janitor',
-        key: runKey,
-        status: 'running',
-        startedAt: Date.now(),
-      });
-      return sessionId;
+        suppressionsBlock,
+      };
     },
-    janitorStrategy,
-    'orchestrator',
-  );
 
-  orchestrator.onCompleted((sha) => {
-    if (sha.startsWith('workspace:')) return;
-    store.add(sha);
-    log(`persisted reviewed commit: ${sha}`);
-  });
-  orchestrator.setContext(ctx);
+    sessionTitle: (runKey) => `[janitor-run] ${runKey}`,
+  };
+}
 
-  // Hunter orchestrator
-  const hunterStrategy = new HunterStrategy(
-    async (prNumber: number, body: string) => {
-      if (!(await isGhAvailable(exec))) return false;
-      return postPrReviewWithGh(exec, prNumber, body);
-    },
-  );
-  const hunterOrchestrator = new ReviewRunQueue<PrContext, HunterResult>(
-    config,
-    async (prContext: PrContext, parentSessionId?: string) => {
-      const id = prContext.number ? `PR #${prContext.number}` : prContext.key;
-      const prompt = buildReviewPrompt(
-        {
-          label: id,
+function createHunterSpec(): AgentRuntimeSpec<PrContext> {
+  return {
+    agent: 'bug-hunter',
+    queueTag: 'hunter-orchestrator',
+    resolveModelId: (config) => config.agents.hunter.modelId ?? config.model.id,
+
+    async prepareReviewContext(
+      prContext: PrContext,
+      _config: JanitorConfig,
+      _exec: Exec,
+    ): Promise<PreparedContext> {
+      return {
+        reviewContext: {
+          label: prContext.number ? `PR #${prContext.number}` : prContext.key,
           changedFiles: prContext.changedFiles,
           patch: prContext.patch,
           patchTruncated: prContext.patchTruncated,
@@ -133,32 +114,84 @@ export function createAgentQueues(svc: BootstrapServices): AgentQueues {
             `Head SHA: ${prContext.headSha}`,
           ],
         },
-        {
-          maxFindings: config.model.maxFindings,
-          scopeInclude: config.scope.include,
-          scopeExclude: config.scope.exclude,
-        },
-      );
-
-      const sessionId = await spawnReview(ctx, {
-        prompt,
-        title: `[hunter-run] ${prContext.key}`,
-        agent: 'bug-hunter',
-        modelId: config.agents.hunter.modelId ?? config.model.id,
-        parentID: parentSessionId,
-      });
-      trackedSessions.add(sessionId);
-      writeSessionMeta(sessionId, {
-        title: `[hunter-run] ${prContext.key}`,
-        agent: 'bug-hunter',
-        key: prContext.key,
-        status: 'running',
-        startedAt: Date.now(),
-      });
-      return sessionId;
+      };
     },
+
+    sessionTitle: (prContext) => `[hunter-run] ${prContext.key}`,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Queue construction
+// ---------------------------------------------------------------------------
+
+/**
+ * Construct the janitor and hunter review queues.
+ */
+export function createAgentQueues(svc: BootstrapServices): AgentQueues {
+  const {
+    ctx,
+    config,
+    exec,
+    store,
+    suppressionStore,
+    historyStore,
+    trackedSessions,
+    writeSessionMeta,
+  } = svc;
+
+  // Janitor
+  const janitorSpec = createJanitorSpec(suppressionStore);
+  const janitorStrategy = new JanitorStrategy(suppressionStore, historyStore);
+  const janitorExecutor = createSpecExecutor(janitorSpec, {
+    ctx,
+    config,
+    exec,
+    trackedSessions,
+    writeSessionMeta,
+    buildPrompt: buildReviewPrompt,
+    spawnReview,
+    extractKey: janitorStrategy.extractKey.bind(janitorStrategy),
+  });
+
+  const orchestrator = new ReviewRunQueue<string, ReviewResult>(
+    config,
+    janitorExecutor,
+    janitorStrategy,
+    janitorSpec.queueTag,
+  );
+
+  orchestrator.onCompleted((sha) => {
+    if (sha.startsWith('workspace:')) return;
+    store.add(sha);
+    log(`persisted reviewed commit: ${sha}`);
+  });
+  orchestrator.setContext(ctx);
+
+  // Hunter
+  const hunterSpec = createHunterSpec();
+  const hunterStrategy = new HunterStrategy(
+    async (prNumber: number, body: string) => {
+      if (!(await isGhAvailable(exec))) return false;
+      return postPrReviewWithGh(exec, prNumber, body);
+    },
+  );
+  const hunterExecutor = createSpecExecutor(hunterSpec, {
+    ctx,
+    config,
+    exec,
+    trackedSessions,
+    writeSessionMeta,
+    buildPrompt: buildReviewPrompt,
+    spawnReview,
+    extractKey: hunterStrategy.extractKey.bind(hunterStrategy),
+  });
+
+  const hunterOrchestrator = new ReviewRunQueue<PrContext, HunterResult>(
+    config,
+    hunterExecutor,
     hunterStrategy,
-    'hunter-orchestrator',
+    hunterSpec.queueTag,
   );
   hunterOrchestrator.setContext(ctx);
   hunterOrchestrator.onCompleted((key: string) => {
