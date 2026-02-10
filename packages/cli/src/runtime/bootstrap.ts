@@ -88,8 +88,11 @@ export async function bootstrapRuntime(
 
     const watch = startRepoWatch({
       db,
-      commitPollMs: config.git.commitPollSec * 1000,
-      prPollMs: config.git.prPollSec * 1000,
+      minPollSec: config.detector.minPollSec,
+      maxPollSec: config.detector.maxPollSec,
+      probeConcurrency: config.detector.probeConcurrency,
+      prTtlSec: config.detector.prTtlSec,
+      pollJitterPct: config.detector.pollJitterPct,
       maxAttempts: config.scheduler.maxAttempts,
       onJobEnqueued: () => {
         scheduler.wake();

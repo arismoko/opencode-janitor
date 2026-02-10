@@ -21,7 +21,7 @@ Build a clean-break, Bun-native **CLI daemon** that runs multi-agent code review
 
 Completed:
 
-- Monorepo split (`plugin`, `shared`, `cli`)
+- Monorepo split (`plugin`, `shared`, `cli`) via `0422456`
 - Shared foundations (schemas/types/review helpers)
 - CLI config + SQLite schema + migrations
 - Daemon lifecycle + IPC skeleton
@@ -40,6 +40,52 @@ Completed:
   - Per-agent normalized run outcomes + structured summary persistence
   - Deterministic retry classification (transient vs terminal vs cancelled)
   - Idempotent run/finding persistence across requeues and restarts
+- P0 + P1 landed via `0f54d30`
+- P1.5 architecture debt retirement landed via `6a2d200`
+- P1.6 detector scalability landed via `f6dca2d`
+
+## Milestone Commits
+
+- `0422456` — workspace split into `plugin` + `shared` + `cli`
+- `0f54d30` — CLI daemon runtime foundations + P0/P1 hardening
+- `6a2d200` — P1.5 architecture debt retirement (strategy runtime, trigger model, queue/event primitives)
+- `f6dca2d` — P1.6 detector scalability (due-time scheduling, async probes, idle backoff, PR TTL)
+
+## Decision Note - Trigger Ingestion (v1)
+
+- v1 remains polling-first and local-runtime-first.
+- Webhook ingestion is intentionally deferred to avoid added network/auth/ops complexity.
+- P1.6 detector scalability is the approved path for 200-500 mostly idle repos.
+
+Decision owner and cadence:
+
+- Owner: CLI runtime maintainers.
+- Cadence: weekly review for first 4 weeks after P1.6 rollout, then monthly.
+- Inputs: detector telemetry + queue health + GH API pressure metrics.
+
+Reevaluation gates for webhook adoption:
+
+- Active-repo detection latency remains above SLA after P1.6 tuning
+  - Gate: p95 active-repo detection delay > 45s for 7 consecutive days.
+- GH CLI/API pressure remains high after PR TTL gating
+  - Gate: GH 429 + command error rate > 2% sustained over 24h windows.
+- Fleet behavior shifts from mostly idle to mostly hot repos
+  - Gate: > 40% repos changed at least once per 15-minute window during peak periods.
+- Scale target exceeds current design center and polling no longer has margin
+  - Gate: sustained operation > 500 repos with queue-time or detector-SLA breach.
+
+Telemetry to track for decision quality:
+
+- p95/p99 detection delay for active repos.
+- Probe volume by kind (commit/pr) and due-lag.
+- GH PR call volume and 429/error rates.
+- Queue depth and time-to-start under sustained churn.
+
+If webhook adoption is triggered later:
+
+- Minimal scope first: PR synchronization/open/reopen events only.
+- Keep polling as anti-entropy fallback during rollout.
+- Require signed delivery verification and replay protection before enabling production ingestion.
 
 Remaining before plugin slim-down:
 
@@ -139,6 +185,46 @@ Dependencies:
 - `8 -> 9`
 - `10 -> 11`
 
+### P1.6 - Detector Scalability Pass (DONE)
+
+Goal: scale trigger detection for mostly idle 200-500 repo fleets without adding webhook infrastructure complexity.
+
+1. **Due-time detector scheduling (per repo)** (DONE)
+   - Track `nextCommitCheckAt` and `nextPrCheckAt` per repo.
+   - Process only due repos each detector tick, not full-repo scans every interval.
+
+2. **Simple idle backoff policy (safe mode)** (DONE)
+   - Fast lane for active repos: ~15s probe cadence.
+   - Idle lane for unchanged repos: ~60s probe cadence.
+   - Keep backoff simple (15s -> 60s only), no complex exponential detector backoff.
+   - Use fixed detector error cooldown (30s).
+
+3. **Async probe execution with bounded concurrency** (DONE)
+   - Replace sync detector subprocess calls with async probes.
+   - Add per-probe timeout (10s) and a bounded worker pool (`probeConcurrency`).
+
+4. **Persist lightweight probe state in DB** (DONE)
+   - Migration v5 adds repo-level probe state fields:
+     - `next_commit_check_at`
+     - `next_pr_check_at`
+     - `idle_streak`
+     - `last_pr_checked_at`
+   - Preserves probe scheduler continuity across daemon restarts.
+
+5. **Reduce `gh pr view` frequency** (DONE)
+   - Gate PR checks by `prTtlSec` (default 300s).
+   - Avoids PR CLI calls on every detector cycle for idle repos.
+
+6. **Config surface extension** (DONE)
+   - `[detector]` section with conservative defaults:
+     - `minPollSec` (15)
+     - `maxPollSec` (60)
+     - `probeConcurrency` (4)
+     - `prTtlSec` (300)
+     - `pollJitterPct` (10)
+
+Clean break: old fixed-interval detector replaced entirely; no feature flag, no legacy path.
+
 ### P2 - Phase 7 Dashboard
 
 1. Use daemon cursor + SSE primitives from P1.5 (step 10).
@@ -160,9 +246,23 @@ Run after each meaningful commit:
 - `bun run --filter './packages/*' typecheck`
 - `bun run --filter './packages/*' build`
 
+P1.6 behavioral verification (required before full rollout):
+
+- Probe volume reduction on mostly idle fleets:
+  - commit probes reduced by >= 10x,
+  - PR probes reduced by >= 20x.
+- Trigger correctness:
+  - no duplicate enqueue regression (> 0.5% increase),
+  - no missed-trigger regression in canary repos.
+- Latency:
+  - p95 active-repo detection delay <= 45s,
+  - queue time-to-start p95 <= 180s under sustained churn tests.
+- Restart continuity:
+  - persisted `next_*_check_at` state prevents restart stampede behavior.
+
 ## Exit Criteria Before Plugin Slim-Down
 
 - Scheduler/runner architecture is modular and testable.
-- Multi-agent async flow is stable under retries/restarts.
-- Event stream and dashboard are operational.
-- Daemon owns the full runtime lifecycle cleanly.
+- Multi-agent async flow is stable under retries/restarts (24h soak without restart/retry regressions).
+- Event stream and dashboard are operational (stream reconnect success >= 99%).
+- Daemon owns the full runtime lifecycle cleanly (no shutdown race causing lost run/finding writes in validation runs).

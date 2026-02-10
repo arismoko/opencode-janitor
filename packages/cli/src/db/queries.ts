@@ -484,3 +484,100 @@ export function findRepoByIdOrPath(
       .get(idOrPath, idOrPath) as RepoRow | null) ?? null
   );
 }
+
+// ---------------------------------------------------------------------------
+// Detector probe state helpers
+// ---------------------------------------------------------------------------
+
+/** Repo row projected for detector due-time scheduling. */
+export interface DetectorRepoView {
+  id: string;
+  path: string;
+  last_head_sha: string | null;
+  last_pr_key: string | null;
+  next_commit_check_at: number;
+  next_pr_check_at: number;
+  idle_streak: number;
+  last_pr_checked_at: number | null;
+}
+
+/** List repos that are enabled, unpaused, and due for a commit check. */
+export function listReposDueForCommitCheck(
+  db: Database,
+  nowMs: number,
+): DetectorRepoView[] {
+  return db
+    .query(
+      `SELECT id, path, last_head_sha, last_pr_key,
+              next_commit_check_at, next_pr_check_at,
+              idle_streak, last_pr_checked_at
+       FROM repos
+       WHERE enabled = 1 AND paused = 0 AND next_commit_check_at <= ?
+       ORDER BY next_commit_check_at ASC`,
+    )
+    .all(nowMs) as DetectorRepoView[];
+}
+
+/** List repos that are enabled, unpaused, and due for a PR check. */
+export function listReposDueForPrCheck(
+  db: Database,
+  nowMs: number,
+): DetectorRepoView[] {
+  return db
+    .query(
+      `SELECT id, path, last_head_sha, last_pr_key,
+              next_commit_check_at, next_pr_check_at,
+              idle_streak, last_pr_checked_at
+       FROM repos
+       WHERE enabled = 1 AND paused = 0 AND next_pr_check_at <= ?
+       ORDER BY next_pr_check_at ASC`,
+    )
+    .all(nowMs) as DetectorRepoView[];
+}
+
+/** Update probe scheduling state for a repo after a probe completes. */
+export function updateProbeState(
+  db: Database,
+  repoId: string,
+  updates: {
+    nextCommitCheckAt?: number;
+    nextPrCheckAt?: number;
+    idleStreak?: number;
+    lastPrCheckedAt?: number;
+    lastHeadSha?: string;
+    lastPrKey?: string;
+  },
+): void {
+  const setClauses: string[] = ['updated_at = ?'];
+  const params: (string | number | null)[] = [nowMs()];
+
+  if (updates.nextCommitCheckAt !== undefined) {
+    setClauses.push('next_commit_check_at = ?');
+    params.push(updates.nextCommitCheckAt);
+  }
+  if (updates.nextPrCheckAt !== undefined) {
+    setClauses.push('next_pr_check_at = ?');
+    params.push(updates.nextPrCheckAt);
+  }
+  if (updates.idleStreak !== undefined) {
+    setClauses.push('idle_streak = ?');
+    params.push(updates.idleStreak);
+  }
+  if (updates.lastPrCheckedAt !== undefined) {
+    setClauses.push('last_pr_checked_at = ?');
+    params.push(updates.lastPrCheckedAt);
+  }
+  if (updates.lastHeadSha !== undefined) {
+    setClauses.push('last_head_sha = ?');
+    params.push(updates.lastHeadSha);
+  }
+  if (updates.lastPrKey !== undefined) {
+    setClauses.push('last_pr_key = ?');
+    params.push(updates.lastPrKey);
+  }
+
+  params.push(repoId);
+  db.query(`UPDATE repos SET ${setClauses.join(', ')} WHERE id = ?`).run(
+    ...params,
+  );
+}

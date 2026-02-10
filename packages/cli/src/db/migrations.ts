@@ -216,6 +216,15 @@ const MIGRATIONS: readonly Migration[] = [
         AND status = 'queued';
     `,
   },
+  {
+    version: 5,
+    sql: `
+      ALTER TABLE repos ADD COLUMN next_commit_check_at INTEGER NOT NULL DEFAULT 0;
+      ALTER TABLE repos ADD COLUMN next_pr_check_at INTEGER NOT NULL DEFAULT 0;
+      ALTER TABLE repos ADD COLUMN idle_streak INTEGER NOT NULL DEFAULT 0;
+      ALTER TABLE repos ADD COLUMN last_pr_checked_at INTEGER;
+    `,
+  },
 ];
 
 /** Run all pending migrations transactionally. */

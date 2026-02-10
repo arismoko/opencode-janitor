@@ -125,3 +125,104 @@ export function resolveCurrentPrKey(repoPath: string): string | null {
   const value = proc.stdout.toString('utf8').trim();
   return value || null;
 }
+
+// ---------------------------------------------------------------------------
+// Async probe helpers (P1.6 detector scalability)
+// ---------------------------------------------------------------------------
+
+const DEFAULT_PROBE_TIMEOUT_MS = 10_000;
+
+interface AsyncGitResult {
+  stdout: string;
+  exitCode: number;
+}
+
+async function runGitAsync(
+  cwd: string,
+  args: string[],
+  timeoutMs: number = DEFAULT_PROBE_TIMEOUT_MS,
+): Promise<AsyncGitResult> {
+  const proc = Bun.spawn({
+    cmd: ['git', '-C', cwd, ...args],
+    stdout: 'pipe',
+    stderr: 'pipe',
+  });
+
+  const timer = setTimeout(() => {
+    proc.kill();
+  }, timeoutMs);
+
+  try {
+    const exitCode = await proc.exited;
+    const stdout = await new Response(proc.stdout).text();
+    return { stdout: stdout.trim(), exitCode };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function runGhAsync(
+  cwd: string,
+  args: string[],
+  timeoutMs: number = DEFAULT_PROBE_TIMEOUT_MS,
+): Promise<AsyncGitResult> {
+  const proc = Bun.spawn({
+    cmd: ['gh', ...args],
+    cwd,
+    stdout: 'pipe',
+    stderr: 'pipe',
+  });
+
+  const timer = setTimeout(() => {
+    proc.kill();
+  }, timeoutMs);
+
+  try {
+    const exitCode = await proc.exited;
+    const stdout = await new Response(proc.stdout).text();
+    return { stdout: stdout.trim(), exitCode };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/** Async version of resolveHeadSha with timeout support. */
+export async function resolveHeadShaAsync(
+  repoPath: string,
+  timeoutMs?: number,
+): Promise<string> {
+  const result = await runGitAsync(repoPath, ['rev-parse', 'HEAD'], timeoutMs);
+  if (result.exitCode !== 0 || !result.stdout) {
+    throw new Error(`Failed to resolve HEAD SHA for repository: ${repoPath}`);
+  }
+
+  return result.stdout;
+}
+
+/**
+ * Async version of resolveCurrentPrKey with timeout support.
+ * Returns `<number>:<headSha>` or null if no PR is available.
+ */
+export async function resolveCurrentPrKeyAsync(
+  repoPath: string,
+  timeoutMs?: number,
+): Promise<string | null> {
+  const result = await runGhAsync(
+    repoPath,
+    [
+      'pr',
+      'view',
+      '--json',
+      'number,headRefOid',
+      '--jq',
+      '.number | tostring + ":" + .headRefOid',
+    ],
+    timeoutMs,
+  );
+
+  if (result.exitCode !== 0) {
+    return null;
+  }
+
+  return result.stdout || null;
+}

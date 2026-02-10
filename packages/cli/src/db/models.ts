@@ -11,6 +11,10 @@ export interface RepoRow {
   paused: 0 | 1;
   last_head_sha: string | null;
   last_pr_key: string | null;
+  next_commit_check_at: number;
+  next_pr_check_at: number;
+  idle_streak: number;
+  last_pr_checked_at: number | null;
   created_at: number;
   updated_at: number;
 }

@@ -39,6 +39,14 @@ export const GitSection = z.object({
   enableGhPr: z.boolean().default(true),
 });
 
+export const DetectorSection = z.object({
+  minPollSec: z.number().int().min(1).default(15),
+  maxPollSec: z.number().int().min(1).default(60),
+  probeConcurrency: z.number().int().min(1).default(4),
+  prTtlSec: z.number().int().min(0).default(300),
+  pollJitterPct: z.number().int().min(0).max(50).default(10),
+});
+
 export const OpencodeSection = z.object({
   defaultModelId: z.string().default(''),
   hubSessionTitle: z.string().default('janitor-hub'),
@@ -73,6 +81,7 @@ export const CliConfigSchema = z.object({
   daemon: DaemonSection.prefault({}),
   scheduler: SchedulerSection.prefault({}),
   git: GitSection.prefault({}),
+  detector: DetectorSection.prefault({}),
   opencode: OpencodeSection.prefault({}),
   scope: ScopeSection.prefault({}),
   agents: AgentsSection.prefault({}),
