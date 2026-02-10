@@ -1,3 +1,5 @@
+#!/usr/bin/env bun
+
 /**
  * @opencode-janitor/cli
  *
@@ -7,6 +9,7 @@
 import { Command } from 'commander';
 import { registerAddCommand } from './commands/add';
 import { registerConfigCommand } from './commands/config';
+import { registerDashboardCommand } from './commands/dashboard';
 import { registerLogCommand } from './commands/log';
 import { registerRemoveCommand } from './commands/remove';
 import { registerReviewCommand } from './commands/review';
@@ -29,6 +32,7 @@ registerAddCommand(program);
 registerRemoveCommand(program);
 registerLogCommand(program);
 registerConfigCommand(program);
+registerDashboardCommand(program);
 registerStartCommand(program);
 registerStopCommand(program);
 registerStatusCommand(program);

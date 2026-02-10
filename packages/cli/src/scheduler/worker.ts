@@ -163,9 +163,22 @@ async function processJob(
     const sha = payloadSha(job.payload_json);
     const trigger = buildTriggerContext(job.path, job.subject_key, sha);
 
-    const selectedSpecs = registry
-      .agents()
-      .filter((spec) => spec.supportsTrigger(config, job.kind));
+    // If the trigger payload specifies a single agent, filter to just that agent.
+    const payload = JSON.parse(job.payload_json) as Record<string, unknown>;
+    const requestedAgent =
+      typeof payload.agent === 'string' ? payload.agent : null;
+
+    const selectedSpecs = registry.agents().filter((spec) => {
+      if (requestedAgent) {
+        const agentConfig = config.agents[spec.agent];
+        return (
+          spec.agent === requestedAgent &&
+          agentConfig.enabled &&
+          agentConfig.trigger !== 'never'
+        );
+      }
+      return spec.supportsTrigger(config, job.kind);
+    });
 
     if (selectedSpecs.length === 0) {
       markJobSucceeded(db, job.id);

@@ -20,6 +20,8 @@ export const DaemonSection = z.object({
   pidFile: z.string().default('/tmp/opencode-janitor.pid'),
   lockFile: z.string().default('/tmp/opencode-janitor.lock'),
   logLevel: z.enum(['debug', 'info', 'warn', 'error']).default('info'),
+  webHost: z.string().default('127.0.0.1'),
+  webPort: z.number().int().min(1).max(65535).default(7700),
 });
 
 export const SchedulerSection = z.object({

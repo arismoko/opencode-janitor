@@ -57,26 +57,20 @@ export function createJanitorSpec(profile: AgentProfile): AgentRuntimeSpec {
     prepareContext(input: PrepareContextInput): PreparedAgentContext {
       const { config, trigger } = input;
 
-      if (trigger.kind === 'manual' && !trigger.commitContext) {
-        return {
-          reviewContext: {
-            label: 'Manual repo-wide analysis',
-            metadata: ['Trigger: manual'],
-          },
-          promptConfig: {
-            scopeInclude: config.scope.include,
-            scopeExclude: config.scope.exclude,
-            maxFindings: config.agents[agentName].maxFindings,
-          },
-        };
-      }
+      const sha = trigger.commitSha;
+      const ctx = trigger.commitContext;
 
-      const sha =
-        trigger.kind === 'manual' ? trigger.commitSha! : trigger.commitSha;
-      const ctx =
-        trigger.kind === 'manual'
-          ? trigger.commitContext!
-          : trigger.commitContext;
+      const metadata = [
+        `SHA: ${sha}`,
+        `Subject: ${ctx.subject}`,
+        `Parents: ${ctx.parents.join(' ') || '-'}`,
+      ];
+      if (trigger.kind === 'manual') {
+        metadata.unshift(
+          'Trigger: manual',
+          'Mode: staged + unstaged workspace changes',
+        );
+      }
 
       return {
         reviewContext: {
@@ -84,11 +78,7 @@ export function createJanitorSpec(profile: AgentProfile): AgentRuntimeSpec {
           changedFiles: ctx.changedFiles,
           patch: ctx.patch,
           patchTruncated: ctx.patchTruncated,
-          metadata: [
-            `SHA: ${sha}`,
-            `Subject: ${ctx.subject}`,
-            `Parents: ${ctx.parents.join(' ')}`,
-          ],
+          metadata,
         },
         promptConfig: {
           scopeInclude: config.scope.include,

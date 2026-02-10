@@ -20,6 +20,8 @@ export interface DaemonStatusResponse {
   draining: boolean;
   socketPath: string;
   dbPath: string;
+  webHost: string;
+  webPort: number;
 }
 
 export interface StopResponse {
@@ -29,6 +31,18 @@ export interface StopResponse {
 
 export interface EnqueueReviewRequest {
   repoOrId: string;
+  /** Optional agent name to run (janitor/hunter/inspector/scribe). Omit to run all matching agents. */
+  agent?: string;
+}
+
+export interface DeleteReportRequest {
+  agentRunId: string;
+}
+
+export interface DeleteReportResponse {
+  ok: true;
+  deleted: boolean;
+  agentRunId: string;
 }
 
 export interface EnqueueReviewResponse {
@@ -41,19 +55,114 @@ export interface EnqueueReviewResponse {
 }
 
 export interface EventJournalEntry {
-  seq: number;
+  eventId: number;
   ts: number;
   level: 'debug' | 'info' | 'warn' | 'error';
-  event_type: string;
-  repo_id: string | null;
-  job_id: string | null;
-  agent_run_id: string | null;
+  topic: string;
+  repoId: string | null;
+  jobId: string | null;
+  agentRunId: string | null;
+  sessionId: string | null;
   message: string;
-  payload_json: string;
+  payload: Record<string, unknown>;
 }
 
 export interface EventsResponse {
   ok: true;
   afterSeq: number;
   events: EventJournalEntry[];
+}
+
+// ---------------------------------------------------------------------------
+// Dashboard snapshot types
+// ---------------------------------------------------------------------------
+
+export interface DashboardDaemonState {
+  pid: number;
+  uptimeMs: number;
+  draining: boolean;
+  socketPath: string;
+  dbPath: string;
+}
+
+export interface DashboardRepoState {
+  id: string;
+  path: string;
+  enabled: boolean;
+  paused: boolean;
+  defaultBranch: string;
+  idleStreak: number;
+  nextCommitCheckAt: number;
+  nextPrCheckAt: number;
+  queuedJobs: number;
+  runningJobs: number;
+  latestEventTs: number | null;
+}
+
+export interface DashboardAgentState {
+  agent: string;
+  queuedRuns: number;
+  runningRuns: number;
+  succeededRuns: number;
+  failedRuns: number;
+  lastFinishedAt: number | null;
+}
+
+export interface DashboardReportSummary {
+  id: string;
+  repoId: string;
+  repoPath: string;
+  jobId: string;
+  subjectKey: string | null;
+  agent: string;
+  sessionId: string | null;
+  status: 'queued' | 'running' | 'succeeded' | 'failed' | 'skipped';
+  outcome:
+    | 'succeeded'
+    | 'failed_transient'
+    | 'failed_terminal'
+    | 'cancelled'
+    | null;
+  findingsCount: number;
+  p0Count: number;
+  p1Count: number;
+  p2Count: number;
+  p3Count: number;
+  startedAt: number | null;
+  finishedAt: number | null;
+  errorMessage: string | null;
+}
+
+export interface DashboardFinding {
+  id: string;
+  repoId: string;
+  repoPath: string;
+  jobId: string;
+  agentRunId: string;
+  agent: string;
+  severity: 'P0' | 'P1' | 'P2' | 'P3';
+  domain: string;
+  location: string;
+  evidence: string;
+  prescription: string;
+  createdAt: number;
+}
+
+export interface DashboardSnapshotResponse {
+  ok: true;
+  generatedAt: number;
+  latestSeq: number;
+  daemon: DashboardDaemonState;
+  repos: DashboardRepoState[];
+  agents: DashboardAgentState[];
+  reports: DashboardReportSummary[];
+  events: EventJournalEntry[];
+}
+
+export interface DashboardReportDetailResponse {
+  ok: true;
+  generatedAt: number;
+  report: DashboardReportSummary;
+  findings: DashboardFinding[];
+  rawOutput: string | null;
 }

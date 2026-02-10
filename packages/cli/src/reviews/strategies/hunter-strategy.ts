@@ -57,35 +57,23 @@ export function createHunterSpec(profile: AgentProfile): AgentRuntimeSpec {
     prepareContext(input: PrepareContextInput): PreparedAgentContext {
       const { config, trigger } = input;
 
-      if (trigger.kind === 'manual' && !trigger.commitContext) {
-        return {
-          reviewContext: {
-            label: 'Manual repo-wide analysis',
-            metadata: ['Trigger: manual'],
-          },
-          promptConfig: {
-            scopeInclude: config.scope.include,
-            scopeExclude: config.scope.exclude,
-            maxFindings: config.agents[agentName].maxFindings,
-          },
-        };
-      }
-
-      const sha =
-        trigger.kind === 'manual' ? trigger.commitSha! : trigger.commitSha;
-      const ctx =
-        trigger.kind === 'manual'
-          ? trigger.commitContext!
-          : trigger.commitContext;
+      const sha = trigger.commitSha;
+      const ctx = trigger.commitContext;
 
       const metadata = [
         `SHA: ${sha}`,
         `Subject: ${ctx.subject}`,
-        `Parents: ${ctx.parents.join(' ')}`,
+        `Parents: ${ctx.parents.join(' ') || '-'}`,
       ];
 
       if (trigger.kind === 'pr') {
         metadata.unshift(`PR: #${trigger.prNumber}`);
+      }
+      if (trigger.kind === 'manual') {
+        metadata.unshift(
+          'Trigger: manual',
+          'Mode: staged + unstaged workspace changes',
+        );
       }
 
       return {

@@ -27,6 +27,8 @@ interface SessionCompletionBusOptions {
   client: OpencodeClient;
   reconnectBaseMs?: number;
   reconnectMaxMs?: number;
+  /** Non-blocking tap invoked for every incoming SSE event. Exceptions are swallowed. */
+  onEventTap?: (event: Event) => void;
 }
 
 function sessionErrorMessage(error: unknown): string {
@@ -141,6 +143,14 @@ export function createSessionCompletionBus(
           }
 
           onEvent(event as Event);
+
+          if (options.onEventTap) {
+            try {
+              options.onEventTap(event as Event);
+            } catch {
+              // Event tap must never disrupt the main stream loop.
+            }
+          }
         }
       } catch {
         if (!running || controller.signal.aborted) {

@@ -8,23 +8,24 @@ import { openDatabase } from '../db/connection';
 import { runMigrations } from '../db/migrations';
 import { listEvents } from '../db/queries';
 import { requestSse } from '../ipc/client';
+import { toEventEntry } from '../ipc/event-entry';
 import type { EventJournalEntry } from '../ipc/protocol';
 import { formatTs } from '../utils/time';
 
 function printEvent(event: EventJournalEntry): void {
   const ts = chalk.dim(formatTs(event.ts));
-  const kind = chalk.cyan(event.event_type);
+  const kind = chalk.cyan(event.topic);
   const level = chalk.dim(event.level.toUpperCase());
-  const repo = event.repo_id ? chalk.dim(` repo=${event.repo_id}`) : '';
+  const repo = event.repoId ? chalk.dim(` repo=${event.repoId}`) : '';
   console.log(`${ts}  ${level}  ${kind}  ${event.message}${repo}`);
 }
 
 function readRecentEvents(limit: number): EventJournalEntry[] {
   const db = openDatabase();
   runMigrations(db);
-  const events = listEvents(db, limit) as EventJournalEntry[];
+  const rows = listEvents(db, limit);
   db.close();
-  return events;
+  return rows.map((row) => toEventEntry(row));
 }
 
 async function followEvents(
@@ -85,7 +86,7 @@ export function registerLogCommand(program: Command): void {
 
         const eventsDesc = readRecentEvents(limit);
         const events = [...eventsDesc].reverse();
-        const lastSeq = events.at(-1)?.seq ?? 0;
+        const lastSeq = events.at(-1)?.eventId ?? 0;
 
         if (json) {
           if (opts.follow) {

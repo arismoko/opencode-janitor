@@ -1,13 +1,15 @@
 {
   "name": "@opencode-janitor/cli",
   "version": "0.1.0",
-  "description": "CLI daemon and TUI dashboard for automated code reviews",
+  "description": "CLI daemon and web dashboard for automated code reviews",
   "main": "src/index.ts",
   "type": "module",
   "license": "MIT",
   "private": true,
   "scripts": {
-    "build": "bun build src/index.ts --outdir dist --target bun --format esm",
+    "build:frontend": "cp src/daemon/dashboard.html dist/dashboard.html",
+    "build:cli": "bun build src/index.ts --outdir dist --target bun --format esm",
+    "build": "bun run build:cli && bun run build:frontend",
     "typecheck": "tsc --noEmit",
     "test": "bun test",
     "dev": "bun run src/index.ts"
@@ -17,6 +19,12 @@
     "@opencode-janitor/shared": "workspace:*",
     "chalk": "^5.4.1",
     "commander": "^13.1.0",
+    "ink": "^6.0.0",
+    "react": "^19.0.0",
+    "react-devtools-core": "^6.1.2",
     "zod": "^4.1.8"
+  },
+  "devDependencies": {
+    "@types/react": "^19.0.0"
   }
 }

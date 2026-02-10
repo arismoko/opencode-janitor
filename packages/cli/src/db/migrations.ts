@@ -225,6 +225,12 @@ const MIGRATIONS: readonly Migration[] = [
       ALTER TABLE repos ADD COLUMN last_pr_checked_at INTEGER;
     `,
   },
+  {
+    version: 6,
+    sql: `
+      CREATE INDEX IF NOT EXISTS idx_event_agent_run ON event_journal(agent_run_id, seq ASC);
+    `,
+  },
 ];
 
 /** Run all pending migrations transactionally. */

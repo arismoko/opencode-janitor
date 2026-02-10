@@ -99,11 +99,15 @@ export function registerStartCommand(program: Command): void {
               running: true,
               pid: proc.pid,
               socketPath: config.daemon.socketPath,
+              webUrl: `http://${config.daemon.webHost}:${config.daemon.webPort}`,
             }),
           );
         } else {
           console.log(
             `${chalk.green('✓')} Daemon started (pid=${proc.pid}) ${chalk.dim(config.daemon.socketPath)}`,
+          );
+          console.log(
+            `${chalk.cyan('↗')} Dashboard: ${chalk.dim(`http://${config.daemon.webHost}:${config.daemon.webPort}`)}`,
           );
         }
       } catch (error) {

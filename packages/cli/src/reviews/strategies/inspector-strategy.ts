@@ -58,7 +58,7 @@ export function createInspectorSpec(profile: AgentProfile): AgentRuntimeSpec {
     prepareContext(input: PrepareContextInput): PreparedAgentContext {
       const { config, trigger } = input;
 
-      if (trigger.kind === 'manual' && !trigger.commitContext) {
+      if (trigger.kind === 'manual') {
         return {
           reviewContext: {
             label: 'Manual repo-wide analysis',
@@ -72,12 +72,8 @@ export function createInspectorSpec(profile: AgentProfile): AgentRuntimeSpec {
         };
       }
 
-      const sha =
-        trigger.kind === 'manual' ? trigger.commitSha! : trigger.commitSha;
-      const ctx =
-        trigger.kind === 'manual'
-          ? trigger.commitContext!
-          : trigger.commitContext;
+      const sha = trigger.commitSha;
+      const ctx = trigger.commitContext;
 
       return {
         reviewContext: {

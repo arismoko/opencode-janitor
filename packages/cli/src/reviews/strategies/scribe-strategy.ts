@@ -23,7 +23,10 @@ import type {
   ReviewTriggerKind,
   SuccessInput,
 } from '../../runtime/agent-runtime-spec';
-import { buildDocIndexMetadata } from './build-doc-index';
+import {
+  buildDocIndexMetadata,
+  buildMarkdownFileInventoryMetadata,
+} from './build-doc-index';
 
 export function createScribeSpec(profile: AgentProfile): AgentRuntimeSpec {
   const agentName = profile.name;
@@ -57,13 +60,19 @@ export function createScribeSpec(profile: AgentProfile): AgentRuntimeSpec {
     },
 
     prepareContext(input: PrepareContextInput): PreparedAgentContext {
-      const { config, trigger } = input;
+      const { config, trigger, job } = input;
 
-      if (trigger.kind === 'manual' && !trigger.commitContext) {
+      if (trigger.kind === 'manual') {
+        const docInventory = buildMarkdownFileInventoryMetadata(job.path);
+        const metadata = ['Trigger: manual', 'Mode: full documentation audit'];
+        if (docInventory) {
+          metadata.push(docInventory);
+        }
+
         return {
           reviewContext: {
             label: 'Manual repo-wide documentation review',
-            metadata: ['Trigger: manual', 'Mode: full documentation audit'],
+            metadata,
           },
           promptConfig: {
             scopeInclude: config.scope.include,
@@ -73,12 +82,8 @@ export function createScribeSpec(profile: AgentProfile): AgentRuntimeSpec {
         };
       }
 
-      const sha =
-        trigger.kind === 'manual' ? trigger.commitSha! : trigger.commitSha;
-      const ctx =
-        trigger.kind === 'manual'
-          ? trigger.commitContext!
-          : trigger.commitContext;
+      const sha = trigger.commitSha;
+      const ctx = trigger.commitContext;
 
       const metadata = [
         `SHA: ${sha}`,

@@ -176,6 +176,297 @@ export function listEvents(db: Database, limit: number): EventRow[] {
     .all(limit) as EventRow[];
 }
 
+// ---------------------------------------------------------------------------
+// Dashboard snapshot query helpers
+// ---------------------------------------------------------------------------
+
+/** Row shape returned by the dashboard repo-state query. */
+export interface DashboardRepoStateRow {
+  id: string;
+  path: string;
+  enabled: 0 | 1;
+  paused: 0 | 1;
+  default_branch: string;
+  idle_streak: number;
+  next_commit_check_at: number;
+  next_pr_check_at: number;
+  queued_jobs: number;
+  running_jobs: number;
+  latest_event_ts: number | null;
+}
+
+/** Row shape returned by the dashboard agent-state query. */
+export interface DashboardAgentStateRow {
+  agent: string;
+  queued_runs: number;
+  running_runs: number;
+  succeeded_runs: number;
+  failed_runs: number;
+  last_finished_at: number | null;
+}
+
+/** Row shape returned by dashboard report summary queries. */
+export interface DashboardReportSummaryRow {
+  id: string;
+  repo_id: string;
+  repo_path: string;
+  job_id: string;
+  subject_key: string | null;
+  agent: string;
+  session_id: string | null;
+  status: 'queued' | 'running' | 'succeeded' | 'failed' | 'skipped';
+  outcome:
+    | 'succeeded'
+    | 'failed_transient'
+    | 'failed_terminal'
+    | 'cancelled'
+    | null;
+  findings_count: number;
+  p0_count: number;
+  p1_count: number;
+  p2_count: number;
+  p3_count: number;
+  started_at: number | null;
+  finished_at: number | null;
+  error_message: string | null;
+}
+
+/** Row shape returned by dashboard report detail query. */
+export interface DashboardReportDetailRow extends DashboardReportSummaryRow {
+  raw_output: string | null;
+}
+
+/** Row shape returned by dashboard report findings query. */
+export interface DashboardReportFindingRow {
+  id: string;
+  repo_id: string;
+  repo_path: string;
+  job_id: string;
+  agent_run_id: string;
+  agent: string;
+  severity: 'P0' | 'P1' | 'P2' | 'P3';
+  domain: string;
+  location: string;
+  evidence: string;
+  prescription: string;
+  created_at: number;
+}
+
+/** Return the highest event sequence number, or 0 if the journal is empty. */
+export function getLatestEventSeq(db: Database): number {
+  const row = db
+    .query('SELECT COALESCE(MAX(seq), 0) AS seq FROM event_journal')
+    .get() as { seq: number };
+  return row.seq;
+}
+
+/**
+ * List per-repo dashboard state including queued/running job counts
+ * and the latest event timestamp scoped to each repo.
+ */
+export function listDashboardRepoState(db: Database): DashboardRepoStateRow[] {
+  return db
+    .query(
+      `
+      SELECT
+        r.id,
+        r.path,
+        r.enabled,
+        r.paused,
+        r.default_branch,
+        r.idle_streak,
+        r.next_commit_check_at,
+        r.next_pr_check_at,
+        COALESCE(jc.queued_jobs, 0)  AS queued_jobs,
+        COALESCE(jc.running_jobs, 0) AS running_jobs,
+        ev.latest_event_ts
+      FROM repos r
+      LEFT JOIN (
+        SELECT
+          repo_id,
+          SUM(CASE WHEN status = 'queued'  THEN 1 ELSE 0 END) AS queued_jobs,
+          SUM(CASE WHEN status = 'running' THEN 1 ELSE 0 END) AS running_jobs
+        FROM review_jobs
+        GROUP BY repo_id
+      ) jc ON jc.repo_id = r.id
+      LEFT JOIN (
+        SELECT repo_id, MAX(ts) AS latest_event_ts
+        FROM event_journal
+        WHERE repo_id IS NOT NULL
+        GROUP BY repo_id
+      ) ev ON ev.repo_id = r.id
+      ORDER BY r.path ASC
+      `,
+    )
+    .all() as DashboardRepoStateRow[];
+}
+
+/**
+ * Aggregate agent_runs grouped by agent for the dashboard.
+ */
+export function listDashboardAgentState(
+  db: Database,
+): DashboardAgentStateRow[] {
+  return db
+    .query(
+      `
+      SELECT
+        agent,
+        SUM(CASE WHEN status = 'queued'    THEN 1 ELSE 0 END) AS queued_runs,
+        SUM(CASE WHEN status = 'running'   THEN 1 ELSE 0 END) AS running_runs,
+        SUM(CASE WHEN status = 'succeeded' THEN 1 ELSE 0 END) AS succeeded_runs,
+        SUM(CASE WHEN status = 'failed'    THEN 1 ELSE 0 END) AS failed_runs,
+        MAX(CASE WHEN finished_at IS NOT NULL THEN finished_at ELSE NULL END) AS last_finished_at
+      FROM agent_runs
+      GROUP BY agent
+      ORDER BY agent ASC
+      `,
+    )
+    .all() as DashboardAgentStateRow[];
+}
+
+/**
+ * List recent agent run summaries for report-first dashboard views.
+ */
+export function listDashboardReportSummaries(
+  db: Database,
+  limit: number,
+): DashboardReportSummaryRow[] {
+  return db
+    .query(
+      `
+      SELECT
+        ar.id,
+        j.repo_id,
+        r.path AS repo_path,
+        ar.job_id,
+        t.subject_key,
+        ar.agent,
+        ar.session_id,
+        ar.status,
+        ar.outcome,
+        ar.findings_count,
+        COALESCE(fs.p0_count, 0) AS p0_count,
+        COALESCE(fs.p1_count, 0) AS p1_count,
+        COALESCE(fs.p2_count, 0) AS p2_count,
+        COALESCE(fs.p3_count, 0) AS p3_count,
+        ar.started_at,
+        ar.finished_at,
+        ar.error_message
+      FROM agent_runs ar
+      JOIN review_jobs j ON j.id = ar.job_id
+      JOIN repos r ON r.id = j.repo_id
+      LEFT JOIN review_triggers t ON t.id = j.trigger_id
+      LEFT JOIN (
+        SELECT
+          agent_run_id,
+          SUM(CASE WHEN severity = 'P0' THEN 1 ELSE 0 END) AS p0_count,
+          SUM(CASE WHEN severity = 'P1' THEN 1 ELSE 0 END) AS p1_count,
+          SUM(CASE WHEN severity = 'P2' THEN 1 ELSE 0 END) AS p2_count,
+          SUM(CASE WHEN severity = 'P3' THEN 1 ELSE 0 END) AS p3_count
+        FROM findings
+        GROUP BY agent_run_id
+      ) fs ON fs.agent_run_id = ar.id
+      ORDER BY COALESCE(ar.finished_at, ar.started_at, j.queued_at) DESC, ar.id DESC
+      LIMIT ?
+      `,
+    )
+    .all(limit) as DashboardReportSummaryRow[];
+}
+
+/**
+ * Load a single report detail row by agent run ID.
+ */
+export function getDashboardReportDetail(
+  db: Database,
+  agentRunId: string,
+): DashboardReportDetailRow | null {
+  return (
+    (db
+      .query(
+        `
+      SELECT
+        ar.id,
+        j.repo_id,
+        r.path AS repo_path,
+        ar.job_id,
+        t.subject_key,
+        ar.agent,
+        ar.session_id,
+        ar.status,
+        ar.outcome,
+        ar.findings_count,
+        COALESCE(fs.p0_count, 0) AS p0_count,
+        COALESCE(fs.p1_count, 0) AS p1_count,
+        COALESCE(fs.p2_count, 0) AS p2_count,
+        COALESCE(fs.p3_count, 0) AS p3_count,
+        ar.started_at,
+        ar.finished_at,
+        ar.error_message,
+        ar.raw_output
+      FROM agent_runs ar
+      JOIN review_jobs j ON j.id = ar.job_id
+      JOIN repos r ON r.id = j.repo_id
+      LEFT JOIN review_triggers t ON t.id = j.trigger_id
+      LEFT JOIN (
+        SELECT
+          agent_run_id,
+          SUM(CASE WHEN severity = 'P0' THEN 1 ELSE 0 END) AS p0_count,
+          SUM(CASE WHEN severity = 'P1' THEN 1 ELSE 0 END) AS p1_count,
+          SUM(CASE WHEN severity = 'P2' THEN 1 ELSE 0 END) AS p2_count,
+          SUM(CASE WHEN severity = 'P3' THEN 1 ELSE 0 END) AS p3_count
+        FROM findings
+        GROUP BY agent_run_id
+      ) fs ON fs.agent_run_id = ar.id
+      WHERE ar.id = ?
+      LIMIT 1
+      `,
+      )
+      .get(agentRunId) as DashboardReportDetailRow | null) ?? null
+  );
+}
+
+/**
+ * Load findings for a specific report (agent run), sorted by severity then recency.
+ */
+export function listDashboardReportFindings(
+  db: Database,
+  agentRunId: string,
+  limit: number,
+): DashboardReportFindingRow[] {
+  return db
+    .query(
+      `
+      SELECT
+        f.id,
+        f.repo_id,
+        r.path AS repo_path,
+        f.job_id,
+        f.agent_run_id,
+        f.agent,
+        f.severity,
+        f.domain,
+        f.location,
+        f.evidence,
+        f.prescription,
+        f.created_at
+      FROM findings f
+      JOIN repos r ON r.id = f.repo_id
+      WHERE f.agent_run_id = ?
+      ORDER BY
+        CASE f.severity
+          WHEN 'P0' THEN 0
+          WHEN 'P1' THEN 1
+          WHEN 'P2' THEN 2
+          ELSE 3
+        END ASC,
+        f.created_at DESC
+      LIMIT ?
+      `,
+    )
+    .all(agentRunId, limit) as DashboardReportFindingRow[];
+}
+
 /** List events after a cursor sequence, oldest first. */
 export function listEventsAfterSeq(
   db: Database,
@@ -185,6 +476,76 @@ export function listEventsAfterSeq(
   return db
     .query('SELECT * FROM event_journal WHERE seq > ? ORDER BY seq ASC LIMIT ?')
     .all(afterSeq, limit) as EventRow[];
+}
+
+// ---------------------------------------------------------------------------
+// Filtered event query helpers (daemon event streaming)
+// ---------------------------------------------------------------------------
+
+/** Filter parameters accepted by the /v1/events endpoints. */
+export interface EventFilterParams {
+  repoId?: string;
+  jobId?: string;
+  agentRunId?: string;
+  /** Maps to event_type column. */
+  topic?: string;
+  /** Filter via LEFT JOIN agent_runs on session_id. */
+  sessionId?: string;
+}
+
+/** Event row extended with the joined session_id from agent_runs. */
+export interface EventRowWithSession extends EventRow {
+  session_id: string | null;
+}
+
+/**
+ * List events after a cursor with optional server-side filters.
+ *
+ * Always LEFT JOINs agent_runs so that session_id is available for both
+ * filtering and enrichment in the API layer.
+ */
+export function listEventsAfterSeqFiltered(
+  db: Database,
+  afterSeq: number,
+  limit: number,
+  filters?: EventFilterParams,
+): EventRowWithSession[] {
+  const conditions: string[] = ['e.seq > ?'];
+  const params: (string | number)[] = [afterSeq];
+
+  if (filters?.repoId) {
+    conditions.push('e.repo_id = ?');
+    params.push(filters.repoId);
+  }
+  if (filters?.jobId) {
+    conditions.push('e.job_id = ?');
+    params.push(filters.jobId);
+  }
+  if (filters?.agentRunId) {
+    conditions.push('e.agent_run_id = ?');
+    params.push(filters.agentRunId);
+  }
+  if (filters?.topic) {
+    conditions.push('e.event_type = ?');
+    params.push(filters.topic);
+  }
+  if (filters?.sessionId) {
+    conditions.push('ar.session_id = ?');
+    params.push(filters.sessionId);
+  }
+
+  params.push(limit);
+
+  const sql = `
+    SELECT e.*, ar.session_id
+    FROM event_journal e
+    LEFT JOIN agent_runs ar ON ar.id = e.agent_run_id
+    WHERE ${conditions.join(' AND ')}
+    ORDER BY e.seq ASC
+    LIMIT ?
+  `;
+
+  return db.query(sql).all(...params) as EventRowWithSession[];
 }
 
 // ---------------------------------------------------------------------------
@@ -473,6 +834,25 @@ export function insertFindingRows(
   })();
 }
 
+/** Delete an agent run and its findings. Returns true if the row existed. */
+export function deleteAgentRun(db: Database, agentRunId: string): boolean {
+  return db.transaction(() => {
+    // Allow deleting queued + terminal runs. Deleting running runs can race
+    // with pipeline persistence and create FK failures.
+    db.query('DELETE FROM findings WHERE agent_run_id = ?').run(agentRunId);
+    const result = db
+      .query(
+        `
+        DELETE FROM agent_runs
+        WHERE id = ?
+          AND status IN ('queued', 'succeeded', 'failed', 'skipped')
+        `,
+      )
+      .run(agentRunId) as { changes?: number };
+    return (result.changes ?? 0) > 0;
+  })();
+}
+
 /** Find a repo by ID or absolute path. */
 export function findRepoByIdOrPath(
   db: Database,
@@ -483,6 +863,47 @@ export function findRepoByIdOrPath(
       .query('SELECT * FROM repos WHERE id = ? OR path = ?')
       .get(idOrPath, idOrPath) as RepoRow | null) ?? null
   );
+}
+
+/** Run context resolved from a session ID for live event correlation. */
+export interface AgentRunContext {
+  agentRunId: string;
+  jobId: string;
+  repoId: string;
+  agent: string;
+}
+
+/** Resolve agent run context by OpenCode session ID. Returns null if not tracked. */
+export function findAgentRunContextBySessionId(
+  db: Database,
+  sessionId: string,
+): AgentRunContext | null {
+  const row = db
+    .query(
+      `
+      SELECT ar.id AS agent_run_id, ar.job_id, j.repo_id, ar.agent
+      FROM agent_runs ar
+      JOIN review_jobs j ON j.id = ar.job_id
+      WHERE ar.session_id = ?
+        AND ar.status = 'running'
+      LIMIT 1
+      `,
+    )
+    .get(sessionId) as {
+    agent_run_id: string;
+    job_id: string;
+    repo_id: string;
+    agent: string;
+  } | null;
+
+  if (!row) return null;
+
+  return {
+    agentRunId: row.agent_run_id,
+    jobId: row.job_id,
+    repoId: row.repo_id,
+    agent: row.agent,
+  };
 }
 
 // ---------------------------------------------------------------------------

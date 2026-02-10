@@ -60,6 +60,7 @@ export function registerStatusCommand(program: Command): void {
         console.log(`draining: ${payload.draining ? 'yes' : 'no'}`);
         console.log(`socket: ${payload.socketPath}`);
         console.log(`db: ${payload.dbPath}`);
+        console.log(`web: http://${payload.webHost}:${payload.webPort}`);
       } catch {
         if (json) {
           console.log(JSON.stringify({ ok: false, running: false }));
