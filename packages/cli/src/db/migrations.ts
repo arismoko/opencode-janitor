@@ -59,7 +59,6 @@ const MIGRATIONS: readonly Migration[] = [
         cancel_requested INTEGER NOT NULL CHECK (cancel_requested IN (0,1)) DEFAULT 0,
         hub_session_id TEXT,
         queued_at INTEGER NOT NULL,
-        next_attempt_at INTEGER NOT NULL DEFAULT 0,
         started_at INTEGER,
         finished_at INTEGER,
         error_code TEXT,
@@ -134,8 +133,6 @@ const MIGRATIONS: readonly Migration[] = [
   {
     version: 3,
     sql: `
-      PRAGMA foreign_keys = OFF;
-
       ALTER TABLE findings RENAME TO findings_old;
       ALTER TABLE agent_runs RENAME TO agent_runs_old;
 
@@ -169,8 +166,6 @@ const MIGRATIONS: readonly Migration[] = [
         started_at, finished_at, error_code, error_message
       FROM agent_runs_old;
 
-      DROP TABLE agent_runs_old;
-
       CREATE TABLE findings (
         id TEXT PRIMARY KEY,
         repo_id TEXT NOT NULL REFERENCES repos(id) ON DELETE CASCADE,
@@ -196,13 +191,12 @@ const MIGRATIONS: readonly Migration[] = [
       FROM findings_old;
 
       DROP TABLE findings_old;
+      DROP TABLE agent_runs_old;
 
       CREATE INDEX IF NOT EXISTS idx_agent_runs_job_status ON agent_runs(job_id, status);
       CREATE INDEX IF NOT EXISTS idx_findings_repo_created ON findings(repo_id, created_at DESC);
       CREATE INDEX IF NOT EXISTS idx_findings_job_agent ON findings(job_id, agent);
       CREATE INDEX IF NOT EXISTS idx_findings_fingerprint ON findings(fingerprint);
-
-      PRAGMA foreign_keys = ON;
     `,
   },
   {
