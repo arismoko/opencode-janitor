@@ -1,5 +1,5 @@
 /**
- * Zod schema for the CLI TOML config.
+ * Zod schema for the CLI JSON config.
  *
  * Uses shared TriggerMode + AgentRuntimeConfig fragments from @opencode-janitor/shared.
  */

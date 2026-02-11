@@ -25,7 +25,7 @@ program
   .description('CLI for opencode-janitor — automated code review management')
   .version('0.1.0')
   .option('--json', 'Output in JSON format')
-  .option('--config <path>', 'Path to config TOML file');
+  .option('--config <path>', 'Path to config JSON file');
 
 // Phase 2 commands
 registerAddCommand(program);

@@ -1,86 +1,10 @@
 /**
- * Atomic config writer and TOML renderer.
+ * Atomic config writer — JSON format.
  */
 import { existsSync, renameSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { defaultConfigPath, ensureParentDirs } from './paths';
 import { type CliConfig, defaultCliConfig } from './schema';
-
-// ---------------------------------------------------------------------------
-// TOML renderer (manual, keeps it readable)
-// ---------------------------------------------------------------------------
-
-function tomlBool(v: boolean): string {
-  return v ? 'true' : 'false';
-}
-
-function tomlStringArray(values: string[]): string {
-  return `[${values.map((v) => `"${v}"`).join(', ')}]`;
-}
-
-function renderToml(c: CliConfig): string {
-  const lines: string[] = [
-    '# opencode-janitor CLI config',
-    '# https://github.com/opencode-janitor',
-    '',
-    '[daemon]',
-    `socketPath = "${c.daemon.socketPath}"`,
-    `pidFile = "${c.daemon.pidFile}"`,
-    `lockFile = "${c.daemon.lockFile}"`,
-    `logLevel = "${c.daemon.logLevel}"`,
-    '',
-    '[scheduler]',
-    `globalConcurrency = ${c.scheduler.globalConcurrency}`,
-    `perRepoConcurrency = ${c.scheduler.perRepoConcurrency}`,
-    `agentParallelism = ${c.scheduler.agentParallelism}`,
-    `maxAttempts = ${c.scheduler.maxAttempts}`,
-    `retryBackoffMs = ${c.scheduler.retryBackoffMs}`,
-    '',
-    '[git]',
-    `commitDebounceMs = ${c.git.commitDebounceMs}`,
-    `commitPollSec = ${c.git.commitPollSec}`,
-    `prPollSec = ${c.git.prPollSec}`,
-    `prBaseBranch = "${c.git.prBaseBranch}"`,
-    `enableFsWatch = ${tomlBool(c.git.enableFsWatch)}`,
-    `enableGhPr = ${tomlBool(c.git.enableGhPr)}`,
-    '',
-    '[detector]',
-    `minPollSec = ${c.detector.minPollSec}`,
-    `maxPollSec = ${c.detector.maxPollSec}`,
-    `probeConcurrency = ${c.detector.probeConcurrency}`,
-    `prTtlSec = ${c.detector.prTtlSec}`,
-    `pollJitterPct = ${c.detector.pollJitterPct}`,
-    '',
-    '[scope]',
-    `include = ${tomlStringArray(c.scope.include)}`,
-    `exclude = ${tomlStringArray(c.scope.exclude)}`,
-    '',
-    '[opencode]',
-    `defaultModelId = "${c.opencode.defaultModelId}"`,
-    `hubSessionTitle = "${c.opencode.hubSessionTitle}"`,
-    `serverHost = "${c.opencode.serverHost}"`,
-    `serverPort = ${c.opencode.serverPort}`,
-    `serverStartTimeoutMs = ${c.opencode.serverStartTimeoutMs}`,
-    '',
-  ];
-
-  for (const agent of ['janitor', 'hunter', 'inspector', 'scribe'] as const) {
-    const a = c.agents[agent];
-    lines.push(`[agents.${agent}]`);
-    lines.push(`enabled = ${tomlBool(a.enabled)}`);
-    lines.push(`trigger = "${a.trigger}"`);
-    lines.push(`maxFindings = ${a.maxFindings}`);
-    if (a.modelId !== undefined) {
-      lines.push(`modelId = "${a.modelId}"`);
-    }
-    if (a.variant !== undefined) {
-      lines.push(`variant = "${a.variant}"`);
-    }
-    lines.push('');
-  }
-
-  return lines.join('\n');
-}
 
 // ---------------------------------------------------------------------------
 // Atomic write helper
@@ -97,10 +21,10 @@ function atomicWrite(filePath: string, content: string): void {
 // Public API
 // ---------------------------------------------------------------------------
 
-/** Write config object to TOML file atomically. */
+/** Write config object to JSON file atomically. */
 export function writeConfig(config: CliConfig, filePath?: string): void {
   const path = filePath ?? defaultConfigPath();
-  atomicWrite(path, renderToml(config));
+  atomicWrite(path, JSON.stringify(config, null, 2) + '\n');
 }
 
 /**

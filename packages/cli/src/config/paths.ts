@@ -5,7 +5,7 @@ import { mkdirSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 
-const APP_NAME = 'opencode-janitor';
+const APP_NAME = 'opencode';
 
 function xdgConfigHome(): string {
   return process.env['XDG_CONFIG_HOME'] || join(homedir(), '.config');
@@ -25,9 +25,9 @@ export function stateDir(): string {
   return join(xdgStateHome(), APP_NAME);
 }
 
-/** Default path to the CLI TOML config file. */
+/** Default path to the CLI JSON config file. */
 export function defaultConfigPath(): string {
-  return join(configDir(), 'config.toml');
+  return join(configDir(), 'janitor.json');
 }
 
 /** Default path to the SQLite database. */
