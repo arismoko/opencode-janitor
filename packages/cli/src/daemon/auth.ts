@@ -10,7 +10,7 @@
  */
 
 import { randomBytes } from 'node:crypto';
-import { chmodSync, readFileSync, writeFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { ensureParentDirs, runtimeDir } from '../config/paths';
 
@@ -31,7 +31,6 @@ export function writeAuthToken(token: string): void {
   const path = authTokenPath();
   ensureParentDirs(path);
   writeFileSync(path, token, { encoding: 'utf8', mode: 0o600 });
-  chmodSync(path, 0o600);
 }
 
 /** Read the auth token from disk, or null if unavailable. */

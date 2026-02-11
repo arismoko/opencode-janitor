@@ -1,5 +1,4 @@
 import {
-  chmodSync,
   closeSync,
   openSync,
   readFileSync,
@@ -114,7 +113,6 @@ export function acquireProcessLock(paths: ProcessLockPaths): ProcessLock {
   // Write PID into the lock file we now exclusively own.
   writeSync(fd, pidContent);
   closeSync(fd);
-  chmodSync(paths.lockFile, 0o600);
 
   // Clean up stale runtime files.
   removeIfExists(paths.socketPath);
@@ -125,7 +123,6 @@ export function acquireProcessLock(paths: ProcessLockPaths): ProcessLock {
     const pidFd = openSync(paths.pidFile, 'w', 0o600);
     writeSync(pidFd, pidContent);
     closeSync(pidFd);
-    chmodSync(paths.pidFile, 0o600);
   } catch {
     // PID file is informational — lock file is the authority.
   }
