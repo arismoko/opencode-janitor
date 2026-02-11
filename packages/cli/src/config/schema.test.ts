@@ -98,6 +98,20 @@ describe('registry-derived agent and trigger config', () => {
     expect(parsed.pr.enabled).toBe(true);
     expect(parsed.manual.enabled).toBe(true);
   });
+
+  it('preserves registry auto-trigger defaults under partial overrides', () => {
+    const parsed = AgentsSection.parse({
+      janitor: { modelId: 'openai/gpt-5.3-codex' },
+      hunter: { modelId: 'openai/gpt-5.3-codex' },
+    });
+
+    expect(parsed.janitor.autoTriggers).toEqual([
+      ...AGENTS.janitor.defaults.autoTriggers,
+    ]);
+    expect(parsed.hunter.autoTriggers).toEqual([
+      ...AGENTS.hunter.defaults.autoTriggers,
+    ]);
+  });
 });
 
 describe('hard capability gate validation', () => {

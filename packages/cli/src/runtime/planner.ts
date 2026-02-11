@@ -10,7 +10,10 @@ import {
 } from '@opencode-janitor/shared';
 import type { CliConfig } from '../config/schema';
 import { enqueueReviewRun } from '../db/queries/review-run-queries';
-import { getTriggerEventById } from '../db/queries/trigger-event-queries';
+import {
+  getTriggerEventById,
+  listTriggerEventsWithoutRuns,
+} from '../db/queries/trigger-event-queries';
 
 type ManualPayload = {
   agent?: AgentId;
@@ -171,4 +174,22 @@ export function planReviewRunsForEvent(
   }
 
   return { planned };
+}
+
+export function planPendingReviewRuns(
+  db: Database,
+  config: CliConfig,
+  limit = 200,
+): { scanned: number; planned: number } {
+  const events = listTriggerEventsWithoutRuns(db, limit);
+  let planned = 0;
+
+  for (const event of events) {
+    planned += planReviewRunsForEvent(db, config, event.id).planned;
+  }
+
+  return {
+    scanned: events.length,
+    planned,
+  };
 }

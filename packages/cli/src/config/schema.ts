@@ -59,36 +59,45 @@ export const ScopeSection = ScopeConfig;
 function makeAgentRuntime(agentId: AgentId) {
   const definition = AGENTS[agentId];
   const defaultMaxFindings = definition.defaults.maxFindings ?? 10;
-
-  return AgentRuntimeConfig.superRefine((value, ctx) => {
-    for (const [index, trigger] of value.autoTriggers.entries()) {
-      if (!definition.capabilities.autoTriggers.includes(trigger)) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          path: ['autoTriggers', index],
-          message: `trigger "${trigger}" is not supported by agent "${agentId}"`,
-        });
-      }
-    }
-
-    if (
-      value.manualDefaultScope &&
-      !definition.capabilities.manualScopes.includes(value.manualDefaultScope)
-    ) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ['manualDefaultScope'],
-        message: `scope "${value.manualDefaultScope}" is not supported by agent "${agentId}"`,
-      });
-    }
-  }).prefault({
+  const baseDefaults: Record<string, unknown> = {
     enabled: true,
     autoTriggers: [...definition.defaults.autoTriggers],
     ...(definition.defaults.manualScope
       ? { manualDefaultScope: definition.defaults.manualScope }
       : {}),
     maxFindings: defaultMaxFindings,
-  });
+  };
+
+  return z
+    .preprocess((input) => {
+      if (!input || typeof input !== 'object' || Array.isArray(input)) {
+        return { ...baseDefaults };
+      }
+      return { ...baseDefaults, ...(input as Record<string, unknown>) };
+    }, AgentRuntimeConfig)
+    .superRefine((value, ctx) => {
+      for (const [index, trigger] of value.autoTriggers.entries()) {
+        if (!definition.capabilities.autoTriggers.includes(trigger)) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ['autoTriggers', index],
+            message: `trigger "${trigger}" is not supported by agent "${agentId}"`,
+          });
+        }
+      }
+
+      if (
+        value.manualDefaultScope &&
+        !definition.capabilities.manualScopes.includes(value.manualDefaultScope)
+      ) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['manualDefaultScope'],
+          message: `scope "${value.manualDefaultScope}" is not supported by agent "${agentId}"`,
+        });
+      }
+    })
+    .prefault({});
 }
 
 const agentShape = Object.fromEntries(
