@@ -1,5 +1,6 @@
 import { JanitorOutput } from '../../review/finding-schemas';
 import { defineAgent } from '../define-agent';
+import { buildReviewAgentRuntime } from '../runtime';
 
 const JANITOR_ROLE = `You are The Janitor — the Cleanup Crew / Maintenance Engineer for codebases.
 
@@ -54,6 +55,7 @@ export const JANITOR_AGENT_DEFINITION = defineAgent<
     alias: 'j',
     description: 'Run the Janitor agent (structural cleanup: YAGNI, DRY, DEAD)',
   },
+  runtime: buildReviewAgentRuntime(),
   resolveManualScope: ({ requestedScope, hasWorkspaceDiff }) => {
     if (requestedScope === 'repo' || requestedScope === 'workspace-diff') {
       return requestedScope;

@@ -1,5 +1,6 @@
 import { HunterOutput } from '../../review/finding-schemas';
 import { defineAgent } from '../define-agent';
+import { buildReviewAgentRuntime } from '../runtime';
 
 const HUNTER_ROLE = `You are The Hunter — the Bug Hunter / Adversarial Reviewer for pull requests.
 
@@ -62,6 +63,7 @@ export const HUNTER_AGENT_DEFINITION = defineAgent<
     alias: 'h',
     description: 'Run the Hunter agent (bug/correctness defects)',
   },
+  runtime: buildReviewAgentRuntime(),
   resolveManualScope: ({ requestedScope, hasWorkspaceDiff, manualInput }) => {
     if (
       requestedScope === 'workspace-diff' ||

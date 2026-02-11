@@ -1,55 +1,45 @@
 import { describe, expect, it } from 'bun:test';
-import { AGENT_IDS, AGENTS } from '@opencode-janitor/shared';
+import {
+  AGENT_IDS,
+  AGENTS,
+  DEFAULT_REVIEW_AGENT_PERMISSIONS,
+} from '@opencode-janitor/shared';
 import { CliConfigSchema, defaultCliConfig } from '../config/schema';
 import {
   buildSystemPrompt,
   createAgentConfigMap,
   createAgentDefinition,
-  REVIEW_AGENT_PERMISSIONS,
-  REVIEW_AGENT_TOOLS,
 } from './agent-factory';
 
 // ---------------------------------------------------------------------------
-// Permission envelope
+// Agent runtime policy
 // ---------------------------------------------------------------------------
 
-describe('REVIEW_AGENT_PERMISSIONS', () => {
-  it('denies edit, bash, webfetch, doom_loop, and external_directory', () => {
-    expect(REVIEW_AGENT_PERMISSIONS).toEqual({
-      edit: 'deny',
-      bash: 'deny',
-      webfetch: 'deny',
-      doom_loop: 'deny',
-      external_directory: 'deny',
-    });
-  });
-
-  it('has no "allow" or "ask" values', () => {
-    for (const [key, value] of Object.entries(REVIEW_AGENT_PERMISSIONS)) {
-      expect(value).toBe('deny');
+describe('agent definition runtime policy', () => {
+  it('each agent declares wildcard deny with tool allow overrides', () => {
+    for (const id of AGENT_IDS) {
+      expect(AGENTS[id].runtime.permission).toEqual(
+        DEFAULT_REVIEW_AGENT_PERMISSIONS,
+      );
+      expect(AGENTS[id].runtime.permission['*']).toBe('deny');
+      expect(AGENTS[id].runtime.permission.glob).toBe('allow');
+      expect(AGENTS[id].runtime.permission.grep).toBe('allow');
+      expect(AGENTS[id].runtime.permission.list).toBe('allow');
+      expect(AGENTS[id].runtime.permission.read).toBe('allow');
+      expect(AGENTS[id].runtime.permission.lsp).toBe('allow');
+      expect(AGENTS[id].runtime.maxSteps).toBeGreaterThan(0);
     }
   });
-});
 
-// ---------------------------------------------------------------------------
-// Allowed tools
-// ---------------------------------------------------------------------------
-
-describe('REVIEW_AGENT_TOOLS', () => {
-  it('allows only glob, grep, list, read, and lsp', () => {
-    expect(REVIEW_AGENT_TOOLS).toEqual({
-      glob: true,
-      grep: true,
-      list: true,
-      read: true,
-      lsp: true,
-    });
-  });
-
-  it('does not allow dangerous tools', () => {
+  it('runtime permissions keep dangerous capabilities denied by default', () => {
     const dangerous = ['edit', 'bash', 'webfetch', 'write', 'exec'];
-    for (const tool of dangerous) {
-      expect(REVIEW_AGENT_TOOLS).not.toHaveProperty(tool);
+    for (const permissionKey of dangerous) {
+      for (const id of AGENT_IDS) {
+        expect(
+          AGENTS[id].runtime.permission[permissionKey] ??
+            AGENTS[id].runtime.permission['*'],
+        ).toBe('deny');
+      }
     }
   });
 });
@@ -67,9 +57,8 @@ describe('createAgentDefinition', () => {
       expect(def.name).toBe(id);
       expect(def.description).toBe(definition.description);
       expect(def.config.mode).toBe('subagent');
-      expect(def.config.maxSteps).toBe(2);
-      expect(def.config.permission).toEqual(REVIEW_AGENT_PERMISSIONS);
-      expect(def.config.tools).toEqual(REVIEW_AGENT_TOOLS);
+      expect(def.config.maxSteps).toBe(definition.runtime.maxSteps);
+      expect(def.config.permission).toEqual(definition.runtime.permission);
     }
   });
 
@@ -186,12 +175,11 @@ describe('createAgentConfigMap', () => {
     expect(keys).toEqual([...AGENT_IDS].sort());
   });
 
-  it('enforces denied permissions on every agent in the map', () => {
+  it('uses per-agent runtime permissions', () => {
     const map = createAgentConfigMap(defaultCliConfig);
 
     for (const id of AGENT_IDS) {
-      expect(map[id].config.permission).toEqual(REVIEW_AGENT_PERMISSIONS);
-      expect(map[id].config.tools).toEqual(REVIEW_AGENT_TOOLS);
+      expect(map[id].config.permission).toEqual(AGENTS[id].runtime.permission);
     }
   });
 

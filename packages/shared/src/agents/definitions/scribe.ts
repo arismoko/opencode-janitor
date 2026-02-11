@@ -1,5 +1,6 @@
 import { ScribeOutput } from '../../review/finding-schemas';
 import { defineAgent } from '../define-agent';
+import { buildReviewAgentRuntime } from '../runtime';
 
 const SCRIBE_ROLE = `You are The Scribe — the Documentation Guardian for codebases.
 
@@ -60,6 +61,7 @@ export const SCRIBE_AGENT_DEFINITION = defineAgent<
     alias: 's',
     description: 'Run the Scribe agent (documentation quality review)',
   },
+  runtime: buildReviewAgentRuntime(),
   resolveManualScope: () => 'repo',
   enrichContext: ({ trigger, sha }) => {
     const metadataSuffix: string[] = [];

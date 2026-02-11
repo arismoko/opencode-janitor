@@ -2,6 +2,15 @@ import type { z } from 'zod';
 
 export type AgentContextReason = 'manual-repo' | 'empty-workspace-fallback';
 
+export type AgentPermissionDecision = 'ask' | 'allow' | 'deny';
+
+export type AgentPermissionPolicy = Record<string, AgentPermissionDecision>;
+
+export type AgentRuntimePolicy = {
+  permission: AgentPermissionPolicy;
+  maxSteps: number;
+};
+
 export type AgentContextMeta = {
   label?: string;
   metadataPrefix?: string[];
@@ -55,6 +64,7 @@ export type AgentDefinition<
     alias?: string;
     description: string;
   };
+  runtime: AgentRuntimePolicy;
   resolveManualScope: (input: ResolveManualScopeInput<TScopeId>) => TScopeId;
   enrichContext: (
     input: EnrichContextInput<TTriggerId, TScopeId>,

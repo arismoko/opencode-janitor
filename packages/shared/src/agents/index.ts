@@ -8,10 +8,19 @@ export { HUNTER_AGENT_DEFINITION } from './definitions/hunter';
 export { INSPECTOR_AGENT_DEFINITION } from './definitions/inspector';
 export { JANITOR_AGENT_DEFINITION } from './definitions/janitor';
 export { SCRIBE_AGENT_DEFINITION } from './definitions/scribe';
+export {
+  buildReviewAgentRuntime,
+  DEFAULT_REVIEW_AGENT_MAX_STEPS,
+  DEFAULT_REVIEW_AGENT_PERMISSIONS,
+  DEFAULT_REVIEW_AGENT_RUNTIME,
+} from './runtime';
 export type {
   AgentContextMeta,
   AgentContextReason,
   AgentDefinition,
+  AgentPermissionDecision,
+  AgentPermissionPolicy,
+  AgentRuntimePolicy,
   EnrichContextInput,
   ResolveManualScopeInput,
 } from './types';

@@ -1,5 +1,6 @@
 import { InspectorOutput } from '../../review/finding-schemas';
 import { defineAgent } from '../define-agent';
+import { buildReviewAgentRuntime } from '../runtime';
 
 const INSPECTOR_ROLE = `You are The Inspector — the Architect / Senior Engineer for codebases.
 
@@ -60,6 +61,7 @@ export const INSPECTOR_AGENT_DEFINITION = defineAgent<
     alias: 'i',
     description: 'Run the Inspector agent (deep code inspection)',
   },
+  runtime: buildReviewAgentRuntime(),
   resolveManualScope: () => 'repo',
   enrichContext: ({ trigger, sha }) => {
     const metadataSuffix: string[] = [];
