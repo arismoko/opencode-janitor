@@ -1,7 +1,7 @@
 /**
  * Finding types and result containers.
  *
- * All finding shapes are derived from schemas/finding.ts (Zod).
+ * All finding shapes are derived from review/finding-schemas.ts (Zod).
  * This module re-exports derived types and defines result containers.
  */
 import type {
@@ -14,13 +14,14 @@ import type {
   ScribeDomain as _ScribeDomain,
   ScribeFinding as _ScribeFinding,
   Severity as _Severity,
-} from '../schemas/finding';
+} from '../review/finding-schemas';
+
 import {
   Severity as _SeveritySchema,
   HUNTER_DOMAIN_VALUES,
   INSPECTOR_DOMAIN_VALUES,
   SCRIBE_DOMAIN_VALUES,
-} from '../schemas/finding';
+} from '../review/finding-schemas';
 
 // ---------------------------------------------------------------------------
 // Re-exported schema-derived types

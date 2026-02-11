@@ -1,4 +1,4 @@
-import { InspectorOutput } from '../../schemas/finding';
+import { InspectorOutput } from '../../review/finding-schemas';
 import { defineAgent } from '../define-agent';
 
 const INSPECTOR_ROLE = `You are The Inspector — the Architect / Senior Engineer for codebases.

@@ -7,13 +7,13 @@
  */
 import type { z } from 'zod';
 import { AGENTS, type AgentId } from '../agents';
+import type { ParseMeta } from '../types/finding';
 import type {
   HunterOutput,
   InspectorOutput,
   JanitorOutput,
   ScribeOutput,
-} from '../schemas/finding';
-import type { ParseMeta } from '../types/finding';
+} from './finding-schemas';
 
 type AgentOutputById = {
   janitor: JanitorOutput;

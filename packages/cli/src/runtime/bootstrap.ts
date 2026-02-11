@@ -12,7 +12,7 @@ import { startScheduler } from '../scheduler/worker';
 import { startTriggerEngine } from '../triggers/engine';
 import { createAgentConfigMap } from './agent-factory';
 import type { RuntimeContext, ShutdownContext } from './context';
-import { createDefaultAgentRegistry } from './default-agent-specs';
+import { createDefinitionAgentRegistry } from './definition-agent-registry';
 import { startOpencodeChild } from './opencode-child';
 import { createSessionCompletionBus } from './session-completion-bus';
 import { createSessionEventProjector } from './session-event-projector';
@@ -79,7 +79,7 @@ export async function bootstrapRuntime(
       logLevel: mapLogLevel(config.daemon.logLevel),
     });
 
-    const registry = createDefaultAgentRegistry();
+    const registry = createDefinitionAgentRegistry();
     const sessionEventProjector = createSessionEventProjector(db);
 
     const completionBus = createSessionCompletionBus({

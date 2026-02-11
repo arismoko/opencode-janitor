@@ -1,4 +1,4 @@
-import { JanitorOutput } from '../../schemas/finding';
+import { JanitorOutput } from '../../review/finding-schemas';
 import { defineAgent } from '../define-agent';
 
 const JANITOR_ROLE = `You are The Janitor — the Cleanup Crew / Maintenance Engineer for codebases.

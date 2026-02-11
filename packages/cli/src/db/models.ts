@@ -99,6 +99,7 @@ export interface QueuedJobRow {
 
   // trigger fields
   kind: 'commit' | 'pr' | 'manual';
+  scope?: string;
   subject_key: string;
   payload_json: string;
 }

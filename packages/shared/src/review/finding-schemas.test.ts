@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import { HunterOutput, JanitorOutput, Severity } from './finding';
+import { HunterOutput, JanitorOutput, Severity } from './finding-schemas';
 
 describe('finding schemas', () => {
   it('accepts valid janitor output', () => {

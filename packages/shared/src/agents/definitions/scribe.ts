@@ -1,4 +1,4 @@
-import { ScribeOutput } from '../../schemas/finding';
+import { ScribeOutput } from '../../review/finding-schemas';
 import { defineAgent } from '../define-agent';
 
 const SCRIBE_ROLE = `You are The Scribe — the Documentation Guardian for codebases.

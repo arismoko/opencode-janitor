@@ -1,4 +1,4 @@
-import { HunterOutput } from '../../schemas/finding';
+import { HunterOutput } from '../../review/finding-schemas';
 import { defineAgent } from '../define-agent';
 
 const HUNTER_ROLE = `You are The Hunter — the Bug Hunter / Adversarial Reviewer for pull requests.
