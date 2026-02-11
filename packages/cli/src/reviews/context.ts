@@ -10,7 +10,7 @@ import {
   parseReviewKey,
 } from '@opencode-janitor/shared';
 import type { TriggerContext } from '../runtime/agent-runtime-spec';
-import { resolveDefaultBranch } from '../utils/git';
+import { ghCliEnv, resolveDefaultBranch } from '../utils/git';
 
 const MAX_PATCH_CHARS = 200_000;
 
@@ -48,7 +48,7 @@ function runGh(cwd: string, args: string[]): string {
     cwd,
     stdout: 'pipe',
     stderr: 'pipe',
-    env: { ...process.env, GH_PROMPT_DISABLED: '1' },
+    env: ghCliEnv(),
   });
 
   const stdout = proc.stdout.toString('utf8').trim();

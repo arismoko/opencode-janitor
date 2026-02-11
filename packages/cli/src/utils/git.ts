@@ -116,7 +116,7 @@ export function resolveCurrentPrKey(repoPath: string): string | null {
     cwd: repoPath,
     stdout: 'pipe',
     stderr: 'pipe',
-    env: { ...process.env, GH_PROMPT_DISABLED: '1' },
+    env: ghCliEnv(),
   });
 
   if (proc.exitCode !== 0) {
@@ -132,6 +132,11 @@ export function resolveCurrentPrKey(repoPath: string): string | null {
 // ---------------------------------------------------------------------------
 
 const DEFAULT_PROBE_TIMEOUT_MS = 10_000;
+
+/** GitHub CLI env — disables interactive prompts to prevent daemon hangs. */
+export function ghCliEnv(): Record<string, string | undefined> {
+  return { ...process.env, GH_PROMPT_DISABLED: '1' };
+}
 
 interface AsyncGitResult {
   stdout: string;
@@ -176,7 +181,7 @@ async function runGhAsync(
     cwd,
     stdout: 'pipe',
     stderr: 'pipe',
-    env: { ...process.env, GH_PROMPT_DISABLED: '1' },
+    env: ghCliEnv(),
   });
 
   const timer = setTimeout(() => {
