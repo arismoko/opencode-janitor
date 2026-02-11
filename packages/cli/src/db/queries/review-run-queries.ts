@@ -139,6 +139,20 @@ export function claimNextQueuedReviewRun(
   })();
 }
 
+export function markReviewRunRunning(
+  db: Database,
+  runId: string,
+  sessionId?: string,
+): void {
+  db.query(
+    `
+      UPDATE review_runs
+      SET status = 'running', session_id = ?, started_at = ?
+      WHERE id = ?
+    `,
+  ).run(sessionId ?? null, nowMs(), runId);
+}
+
 export function markReviewRunSucceeded(
   db: Database,
   runId: string,
@@ -214,5 +228,16 @@ export function getReviewRunBySessionId(
     (db
       .query('SELECT * FROM review_runs WHERE session_id = ? LIMIT 1')
       .get(sessionId) as ReviewRunRow | null) ?? null
+  );
+}
+
+export function getReviewRunById(
+  db: Database,
+  runId: string,
+): ReviewRunRow | null {
+  return (
+    (db
+      .query('SELECT * FROM review_runs WHERE id = ? LIMIT 1')
+      .get(runId) as ReviewRunRow | null) ?? null
   );
 }

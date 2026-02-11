@@ -229,7 +229,13 @@ export function insertFindingRows(
   db: Database,
   rows: Omit<FindingRow, 'id' | 'created_at'>[],
 ): void {
-  const agentRunIds = [...new Set(rows.map((row) => row.agent_run_id))];
+  const agentRunIds = [
+    ...new Set(
+      rows
+        .map((row) => row.agent_run_id)
+        .filter((value): value is string => typeof value === 'string'),
+    ),
+  ];
   const reviewRunIds = [
     ...new Set(
       rows
@@ -264,8 +270,8 @@ export function insertFindingRows(
       stmt.run(
         id,
         row.repo_id,
-        row.job_id,
-        row.agent_run_id,
+        row.job_id ?? null,
+        row.agent_run_id ?? null,
         row.review_run_id ?? null,
         row.agent,
         row.severity,

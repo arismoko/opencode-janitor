@@ -212,8 +212,8 @@ const SCHEMA_SQL = `
   CREATE TABLE IF NOT EXISTS findings (
     id TEXT PRIMARY KEY,
     repo_id TEXT NOT NULL REFERENCES repos(id) ON DELETE CASCADE,
-    job_id TEXT NOT NULL REFERENCES review_jobs(id) ON DELETE CASCADE,
-    agent_run_id TEXT NOT NULL REFERENCES agent_runs(id) ON DELETE CASCADE,
+    job_id TEXT REFERENCES review_jobs(id) ON DELETE CASCADE,
+    agent_run_id TEXT REFERENCES agent_runs(id) ON DELETE CASCADE,
     review_run_id TEXT REFERENCES review_runs(id) ON DELETE CASCADE,
     agent TEXT NOT NULL CHECK (agent IN ('janitor','hunter','inspector','scribe')),
     severity TEXT NOT NULL CHECK (severity IN ('P0','P1','P2','P3')),

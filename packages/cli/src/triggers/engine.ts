@@ -3,12 +3,9 @@ import { TRIGGER_IDS, type TriggerId } from '@opencode-janitor/shared';
 import type { z } from 'zod';
 import type { CliConfig } from '../config/schema';
 import { appendEvent } from '../db/queries/event-queries';
-import { enqueueTriggerAndJob, listRepos } from '../db/queries/repo-queries';
+import { listRepos } from '../db/queries/repo-queries';
 import { insertTriggerEvent } from '../db/queries/trigger-event-queries';
-import {
-  buildCommitPayload,
-  buildPrPayload,
-} from '../runtime/review-job-payload';
+import { planReviewRunsForEvent } from '../runtime/planner';
 import { TRIGGER_MODULES } from './modules';
 import { createTriggerStateStore } from './state-store';
 
@@ -44,33 +41,6 @@ type TriggerModule = {
 
 interface TickOptions extends TriggerEngineOptions {
   modules?: Partial<Record<TriggerId, TriggerModule>>;
-}
-
-function toLegacySubjectKey(
-  triggerId: TriggerId,
-  payload: Record<string, unknown>,
-): string {
-  if (triggerId === 'commit') {
-    return `commit:${String(payload.sha ?? '')}`;
-  }
-  if (triggerId === 'pr') {
-    const prNumber = Number(payload.prNumber ?? 0);
-    const sha = String(payload.sha ?? '');
-    return `pr:${prNumber}:${sha}`;
-  }
-  return `manual:${String(payload.requestedScope ?? 'repo')}:${String(payload.sha ?? '')}`;
-}
-
-function toLegacyPayload(
-  triggerId: TriggerId,
-  payload: Record<string, unknown>,
-): ReturnType<typeof buildCommitPayload> | ReturnType<typeof buildPrPayload> {
-  if (triggerId === 'commit') {
-    return buildCommitPayload(String(payload.sha ?? ''));
-  }
-  const prNumber = Number(payload.prNumber ?? 0);
-  const sha = String(payload.sha ?? '');
-  return buildPrPayload(prNumber, sha);
 }
 
 export async function runTriggerEngineTick(
@@ -131,17 +101,14 @@ export async function runTriggerEngineTick(
             continue;
           }
 
-          const subjectKey = toLegacySubjectKey(triggerId, payloadObject);
-          enqueueTriggerAndJob(options.db, {
-            repoId: repo.id,
-            kind: triggerId,
-            source: 'poll',
-            subjectKey,
-            payload: toLegacyPayload(triggerId, payloadObject),
-            maxAttempts: options.maxAttempts,
-          });
-
-          options.onJobEnqueued?.();
+          const planned = planReviewRunsForEvent(
+            options.db,
+            options.config,
+            inserted.eventId,
+          );
+          if (planned.planned > 0) {
+            options.onJobEnqueued?.();
+          }
         }
       } catch (error) {
         appendEvent(options.db, {

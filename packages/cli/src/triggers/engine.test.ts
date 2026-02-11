@@ -7,7 +7,7 @@ import { addRepo } from '../db/queries/repo-queries';
 import { runTriggerEngineTick } from './engine';
 
 describe('runTriggerEngineTick', () => {
-  it('inserts trigger_events and deduped queued jobs from emissions', async () => {
+  it('inserts trigger_events and deduped review_runs from emissions', async () => {
     const db = new Database(':memory:');
     db.exec('PRAGMA foreign_keys = ON');
     ensureSchema(db);
@@ -70,11 +70,11 @@ describe('runTriggerEngineTick', () => {
     const firstEvents = db
       .query('SELECT COUNT(*) AS count FROM trigger_events WHERE repo_id = ?')
       .get(repo.id) as { count: number };
-    const firstJobs = db
-      .query('SELECT COUNT(*) AS count FROM review_jobs WHERE repo_id = ?')
+    const firstRuns = db
+      .query('SELECT COUNT(*) AS count FROM review_runs WHERE repo_id = ?')
       .get(repo.id) as { count: number };
     expect(firstEvents.count).toBe(1);
-    expect(firstJobs.count).toBe(1);
+    expect(firstRuns.count).toBe(1);
 
     await runTriggerEngineTick({
       db,
@@ -89,11 +89,11 @@ describe('runTriggerEngineTick', () => {
     const secondEvents = db
       .query('SELECT COUNT(*) AS count FROM trigger_events WHERE repo_id = ?')
       .get(repo.id) as { count: number };
-    const secondJobs = db
-      .query('SELECT COUNT(*) AS count FROM review_jobs WHERE repo_id = ?')
+    const secondRuns = db
+      .query('SELECT COUNT(*) AS count FROM review_runs WHERE repo_id = ?')
       .get(repo.id) as { count: number };
     expect(secondEvents.count).toBe(1);
-    expect(secondJobs.count).toBe(1);
+    expect(secondRuns.count).toBe(1);
 
     db.close();
   });

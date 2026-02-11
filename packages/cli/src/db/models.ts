@@ -141,8 +141,8 @@ export interface AgentRunRow {
 export interface FindingRow {
   id: string;
   repo_id: string;
-  job_id: string;
-  agent_run_id: string;
+  job_id: string | null;
+  agent_run_id: string | null;
   review_run_id?: string | null;
   agent: string;
   severity: string;

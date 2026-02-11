@@ -10,7 +10,7 @@ import {
   parseReviewKey,
 } from '@opencode-janitor/shared';
 import type { TriggerContext } from '../runtime/agent-runtime-spec';
-import { ghCliEnv, resolveDefaultBranch } from '../utils/git';
+import { ghCliEnv, resolveDefaultBranch, resolveHeadSha } from '../utils/git';
 
 const MAX_PATCH_CHARS = 200_000;
 
@@ -344,4 +344,56 @@ export function buildTriggerContext(
         prNumber: parsed.number,
       };
   }
+}
+
+/**
+ * Build trigger context from structured trigger payloads without subject-key parsing.
+ */
+export function buildTriggerContextFromPayload(
+  repoPath: string,
+  triggerId: 'commit' | 'pr' | 'manual',
+  payloadJson: string,
+): TriggerContext {
+  let payload: Record<string, unknown> = {};
+  try {
+    payload = JSON.parse(payloadJson) as Record<string, unknown>;
+  } catch {
+    payload = {};
+  }
+
+  if (triggerId === 'commit') {
+    const sha =
+      typeof payload.sha === 'string' ? payload.sha : resolveHeadSha(repoPath);
+    return {
+      kind: 'commit',
+      commitSha: sha,
+      commitContext: buildCommitContext(repoPath, sha),
+    };
+  }
+
+  if (triggerId === 'pr') {
+    const sha =
+      typeof payload.sha === 'string' ? payload.sha : resolveHeadSha(repoPath);
+    const prNumber =
+      typeof payload.prNumber === 'number' && Number.isInteger(payload.prNumber)
+        ? payload.prNumber
+        : 0;
+    return {
+      kind: 'pr',
+      commitSha: sha,
+      commitContext: buildPrCommitContext(repoPath, sha, prNumber),
+      prNumber,
+    };
+  }
+
+  const manualSha =
+    typeof payload.sha === 'string' && payload.sha.length > 0
+      ? payload.sha
+      : resolveHeadSha(repoPath);
+
+  return {
+    kind: 'manual',
+    commitSha: manualSha,
+    commitContext: buildWorkspaceCommitContext(repoPath, manualSha),
+  };
 }

@@ -156,8 +156,8 @@ export function ensureSchema(db: Database): void {
     CREATE TABLE IF NOT EXISTS findings (
       id TEXT PRIMARY KEY,
       repo_id TEXT NOT NULL REFERENCES repos(id) ON DELETE CASCADE,
-      job_id TEXT NOT NULL REFERENCES review_jobs(id) ON DELETE CASCADE,
-      agent_run_id TEXT NOT NULL REFERENCES agent_runs(id) ON DELETE CASCADE,
+      job_id TEXT REFERENCES review_jobs(id) ON DELETE CASCADE,
+      agent_run_id TEXT REFERENCES agent_runs(id) ON DELETE CASCADE,
       review_run_id TEXT REFERENCES review_runs(id) ON DELETE CASCADE,
       agent TEXT NOT NULL CHECK (agent IN (${AGENT_SQL_LIST})),
       severity TEXT NOT NULL CHECK (severity IN (${SEVERITY_SQL_LIST})),
