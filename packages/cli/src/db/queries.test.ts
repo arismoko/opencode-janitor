@@ -322,7 +322,7 @@ function insertReviewRunRow(
   opts?:
     | Partial<{
         id: string;
-        agent: 'janitor' | 'hunter' | 'inspector' | 'scribe';
+        agent: string;
         status: 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled';
         findingsCount: number;
         outcome: string;

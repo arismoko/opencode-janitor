@@ -1,4 +1,5 @@
 import { describe, expect, it, mock } from 'bun:test';
+import { AGENT_IDS } from '@opencode-janitor/shared';
 import type { EventRow } from '../db/models';
 import type {
   EventFilterParams,
@@ -568,7 +569,7 @@ describe('POST /v1/reviews/enqueue — input validation', () => {
   });
 
   it('accepts all four valid agent names', async () => {
-    for (const agent of ['janitor', 'hunter', 'inspector', 'scribe']) {
+    for (const agent of AGENT_IDS) {
       const { request, url } = makeRequest('POST', '/v1/reviews/enqueue', {
         repoOrId: 'my-repo',
         agent,

@@ -4,11 +4,7 @@
  * Validates subject keys via the shared parseReviewKey parser and throws
  * explicit errors on malformed/unresolved keys. No fallback-to-HEAD.
  */
-import {
-  type ChangedFile,
-  type CommitContext,
-  parseReviewKey,
-} from '@opencode-janitor/shared';
+import type { ChangedFile, CommitContext } from '@opencode-janitor/shared';
 import type { TriggerContext } from '../runtime/agent-runtime-spec';
 import { ghCliEnv, resolveDefaultBranch, resolveHeadSha } from '../utils/git';
 
@@ -278,72 +274,6 @@ export function buildCommitContext(
     patchTruncated,
     deletionOnly,
   };
-}
-
-/**
- * Resolve the commit SHA from a trigger's subject_key.
- * Throws on malformed or unrecognised keys — no fallback to HEAD.
- */
-export function resolveCommitSha(
-  _repoPath: string,
-  subjectKey: string,
-): string {
-  const parsed = parseReviewKey(subjectKey);
-  if (!parsed) {
-    throw new Error(
-      `Malformed subject key: "${subjectKey}" — expected commit:<sha>, pr:<n>:<sha>, branch:<name>:<sha>, workspace:<name>:<sha>, or manual:<id>:<sha>`,
-    );
-  }
-  return parsed.type === 'commit' ? parsed.sha : parsed.headSha;
-}
-
-/**
- * Build a trigger-discriminated context object from a job's subject key
- * and payload. Validates the key and builds commit context as needed.
- *
- * Throws on malformed/unresolved keys (fail-closed).
- */
-export function buildTriggerContext(
-  repoPath: string,
-  subjectKey: string,
-  payloadSha: string | null,
-): TriggerContext {
-  const parsed = parseReviewKey(subjectKey);
-  if (!parsed) {
-    throw new Error(
-      `Malformed subject key: "${subjectKey}" — expected commit:<sha>, pr:<n>:<sha>, branch:<name>:<sha>, workspace:<name>:<sha>, or manual:<id>:<sha>`,
-    );
-  }
-
-  const sha =
-    payloadSha ?? (parsed.type === 'commit' ? parsed.sha : parsed.headSha);
-
-  if (parsed.type === 'manual') {
-    return {
-      kind: 'manual',
-      commitSha: sha,
-      commitContext: buildWorkspaceCommitContext(repoPath, sha),
-    };
-  }
-
-  switch (parsed.type) {
-    case 'commit':
-    case 'branch':
-    case 'workspace':
-      return {
-        kind: 'commit',
-        commitSha: sha,
-        commitContext: buildCommitContext(repoPath, sha),
-      };
-
-    case 'pr':
-      return {
-        kind: 'pr',
-        commitSha: sha,
-        commitContext: buildPrCommitContext(repoPath, sha, parsed.number),
-        prNumber: parsed.number,
-      };
-  }
 }
 
 /**
