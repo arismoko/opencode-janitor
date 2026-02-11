@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { AGENT_IDS } from '../../agents';
 import type { TriggerDefinition } from '../types';
 
 const ManualTriggerConfigSchema = z.object({
@@ -8,6 +9,7 @@ const ManualTriggerConfigSchema = z.object({
 const ManualTriggerStateSchema = z.object({});
 
 const ManualTriggerPayloadSchema = z.object({
+  agent: z.enum(AGENT_IDS).optional(),
   requestedScope: z.string().optional(),
   input: z.record(z.string(), z.unknown()).optional(),
   note: z.string().optional(),

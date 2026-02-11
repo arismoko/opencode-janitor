@@ -5,7 +5,8 @@ import {
   getBodyField,
   parseJsonBody,
   requireAgentName,
-  requirePositiveInt,
+  requireRecord,
+  requireScopeId,
   requireString,
   ValidationError,
 } from '../http/validation';
@@ -28,15 +29,27 @@ async function handleEnqueueReview(request: Request, review: ReviewApi) {
 
   let repoOrId: string;
   let agent: AgentName;
-  let pr: number | undefined;
+  let scope: EnqueueReviewRequest['scope'];
+  let input: EnqueueReviewRequest['input'];
+  let note: EnqueueReviewRequest['note'];
 
   try {
     repoOrId = requireString(getBodyField(body, 'repoOrId'), 'repoOrId');
     agent = requireAgentName(getBodyField(body, 'agent'));
 
-    const prRaw = getBodyField(body, 'pr');
-    if (prRaw !== undefined) {
-      pr = requirePositiveInt(prRaw, 'pr');
+    const scopeRaw = getBodyField(body, 'scope');
+    if (scopeRaw !== undefined) {
+      scope = requireScopeId(scopeRaw);
+    }
+
+    const inputRaw = getBodyField(body, 'input');
+    if (inputRaw !== undefined) {
+      input = requireRecord(inputRaw, 'input');
+    }
+
+    const noteRaw = getBodyField(body, 'note');
+    if (noteRaw !== undefined) {
+      note = requireString(noteRaw, 'note');
     }
   } catch (error) {
     if (error instanceof ValidationError) {
@@ -49,7 +62,13 @@ async function handleEnqueueReview(request: Request, review: ReviewApi) {
   }
 
   try {
-    const requestBody: EnqueueReviewRequest = { repoOrId, agent, pr };
+    const requestBody: EnqueueReviewRequest = {
+      repoOrId,
+      agent,
+      ...(scope ? { scope } : {}),
+      ...(input ? { input } : {}),
+      ...(note ? { note } : {}),
+    };
     const response = await review.onEnqueueReview(requestBody);
     return json(200, response);
   } catch (error) {

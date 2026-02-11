@@ -1,4 +1,9 @@
-import { AGENT_NAMES, type AgentName } from '@opencode-janitor/shared';
+import {
+  AGENT_NAMES,
+  type AgentName,
+  isScopeId,
+  type ScopeId,
+} from '@opencode-janitor/shared';
 
 export interface CommitJobPayload {
   sha: string;
@@ -10,8 +15,11 @@ export interface PrJobPayload {
 }
 
 export interface ManualJobPayload {
-  sha: string;
   agent: AgentName;
+  requestedScope?: ScopeId;
+  input?: Record<string, unknown>;
+  note?: string;
+  sha?: string;
   prNumber?: number;
 }
 
@@ -40,15 +48,23 @@ export function buildPrPayloadFromKey(prKey: string): PrJobPayload {
   return buildPrPayload(prNumber, sha);
 }
 
-export function buildManualPayload(
-  sha: string,
-  agent: AgentName,
-  prNumber?: number,
-): ManualJobPayload {
+export function buildManualPayload(payload: {
+  agent: AgentName;
+  requestedScope?: ScopeId;
+  input?: Record<string, unknown>;
+  note?: string;
+  sha?: string;
+  prNumber?: number;
+}): ManualJobPayload {
   return {
-    sha,
-    agent,
-    ...(prNumber !== undefined ? { prNumber } : {}),
+    agent: payload.agent,
+    ...(payload.requestedScope
+      ? { requestedScope: payload.requestedScope }
+      : {}),
+    ...(payload.input ? { input: payload.input } : {}),
+    ...(payload.note ? { note: payload.note } : {}),
+    ...(payload.sha ? { sha: payload.sha } : {}),
+    ...(payload.prNumber !== undefined ? { prNumber: payload.prNumber } : {}),
   };
 }
 
@@ -94,6 +110,48 @@ function parseOptionalPositiveInt(
   return value;
 }
 
+function parseOptionalScopeId(
+  payload: Record<string, unknown>,
+  field: string,
+): ScopeId | undefined {
+  const value = payload[field];
+  if (value === undefined) return undefined;
+  if (typeof value !== 'string' || !isScopeId(value)) {
+    throw new Error(
+      `Invalid review job payload: \`${field}\` must be one of commit-diff, workspace-diff, repo, pr`,
+    );
+  }
+  return value;
+}
+
+function parseOptionalRecord(
+  payload: Record<string, unknown>,
+  field: string,
+): Record<string, unknown> | undefined {
+  const value = payload[field];
+  if (value === undefined) return undefined;
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error(
+      `Invalid review job payload: \`${field}\` must be an object`,
+    );
+  }
+  return value as Record<string, unknown>;
+}
+
+function parseOptionalString(
+  payload: Record<string, unknown>,
+  field: string,
+): string | undefined {
+  const value = payload[field];
+  if (value === undefined) return undefined;
+  if (typeof value !== 'string' || value.trim().length === 0) {
+    throw new Error(
+      `Invalid review job payload: \`${field}\` must be a string`,
+    );
+  }
+  return value.trim();
+}
+
 function parseAgent(payload: Record<string, unknown>): AgentName {
   const value = parseRequiredString(payload, 'agent');
   if (!AGENT_NAMES.includes(value as AgentName)) {
@@ -124,9 +182,12 @@ export function parseReviewJobPayload(
     );
   }
 
-  return buildManualPayload(
-    parseRequiredString(payload, 'sha'),
-    parseAgent(payload),
-    parseOptionalPositiveInt(payload, 'prNumber'),
-  );
+  return buildManualPayload({
+    agent: parseAgent(payload),
+    requestedScope: parseOptionalScopeId(payload, 'requestedScope'),
+    input: parseOptionalRecord(payload, 'input'),
+    note: parseOptionalString(payload, 'note'),
+    sha: parseOptionalString(payload, 'sha'),
+    prNumber: parseOptionalPositiveInt(payload, 'prNumber'),
+  });
 }

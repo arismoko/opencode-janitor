@@ -49,7 +49,8 @@ async function runAgent(
 
     const body: Record<string, unknown> = { repoOrId, agent };
     if (pr !== undefined) {
-      body.pr = pr;
+      body.scope = 'pr';
+      body.input = { prNumber: pr };
     }
 
     const response = await requestJson<EnqueueReviewResponse | ErrorResponse>({

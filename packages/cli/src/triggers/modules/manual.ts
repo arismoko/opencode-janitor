@@ -1,7 +1,12 @@
-import { MANUAL_TRIGGER_DEFINITION } from '@opencode-janitor/shared';
+import {
+  isScopeId,
+  MANUAL_TRIGGER_DEFINITION,
+  type ScopeId,
+} from '@opencode-janitor/shared';
 
 type ManualPayload = {
-  requestedScope?: string;
+  agent?: string;
+  requestedScope?: ScopeId;
   input?: Record<string, unknown>;
   note?: string;
   sha?: string;
@@ -21,8 +26,15 @@ export const MANUAL_TRIGGER_MODULE = {
 
     const payload: ManualPayload = {};
 
-    if (typeof input.scope === 'string' && input.scope.trim().length > 0) {
-      payload.requestedScope = input.scope;
+    if (typeof input.agent === 'string' && input.agent.trim().length > 0) {
+      payload.agent = input.agent;
+    }
+
+    if (typeof input.scope === 'string') {
+      const requestedScope = input.scope.trim();
+      if (isScopeId(requestedScope)) {
+        payload.requestedScope = requestedScope;
+      }
     }
 
     if (isRecord(input.input)) {

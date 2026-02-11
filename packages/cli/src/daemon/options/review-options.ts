@@ -1,18 +1,44 @@
 import { resolve as resolvePath } from 'node:path';
-import { manualKey, prKey } from '@opencode-janitor/shared';
+import type { ScopeId } from '@opencode-janitor/shared';
 import { appendEvent } from '../../db/queries/event-queries';
-import {
-  enqueueTriggerAndJob,
-  findRepoByIdOrPath,
-} from '../../db/queries/repo-queries';
+import { findRepoByIdOrPath } from '../../db/queries/repo-queries';
+import { insertTriggerEvent } from '../../db/queries/trigger-event-queries';
 import type { RuntimeContext } from '../../runtime/context';
+import { planReviewRunsForEvent } from '../../runtime/planner';
 import { buildManualPayload } from '../../runtime/review-job-payload';
+import { MANUAL_TRIGGER_MODULE } from '../../triggers/modules/manual';
 import { resolveHeadSha, resolvePrHeadShaAsync } from '../../utils/git';
+import { makeId } from '../../utils/ids';
 import type { ReviewApi } from '../socket-types';
+
+function parsePrNumber(input?: Record<string, unknown>): number | undefined {
+  const raw = input?.prNumber;
+  if (typeof raw !== 'number' || !Number.isInteger(raw) || raw <= 0) {
+    return undefined;
+  }
+  return raw;
+}
+
+function requirePrNumberForPrScope(
+  scope: ScopeId | undefined,
+  input?: Record<string, unknown>,
+): number | undefined {
+  if (scope !== 'pr') {
+    return parsePrNumber(input);
+  }
+
+  const prNumber = parsePrNumber(input);
+  if (!prNumber) {
+    throw new Error(
+      'Manual scope `pr` requires `input.prNumber` as a positive integer.',
+    );
+  }
+  return prNumber;
+}
 
 export function createReviewOptions(rc: RuntimeContext): ReviewApi {
   return {
-    onEnqueueReview: async ({ repoOrId, agent, pr }) => {
+    onEnqueueReview: async ({ repoOrId, agent, scope, input, note }) => {
       const normalized = resolvePath(repoOrId);
       const repo =
         findRepoByIdOrPath(rc.db, normalized) ??
@@ -24,30 +50,61 @@ export function createReviewOptions(rc: RuntimeContext): ReviewApi {
         );
       }
 
-      const sha = pr
-        ? await resolvePrHeadShaAsync(repo.path, pr)
+      const prNumber = requirePrNumberForPrScope(scope, input);
+      const sha = prNumber
+        ? await resolvePrHeadShaAsync(repo.path, prNumber)
         : resolveHeadSha(repo.path);
-      const subjectKey = pr
-        ? prKey(pr, sha)
-        : manualKey(String(Date.now()), sha);
-      const enqueued = enqueueTriggerAndJob(rc.db, {
-        repoId: repo.id,
-        kind: 'manual',
-        source: 'cli',
-        subjectKey,
-        payload: buildManualPayload(sha, agent, pr),
-        maxAttempts: rc.config.scheduler.maxAttempts,
+
+      const payload = await MANUAL_TRIGGER_MODULE.fromManualRequest({
+        agent,
+        scope,
+        input,
+        note,
+        sha,
+        ...(prNumber ? { prNumber } : {}),
       });
+      const manualPayload = buildManualPayload({
+        agent,
+        requestedScope: payload.requestedScope,
+        input: payload.input,
+        note: payload.note,
+        sha: payload.sha,
+        prNumber: payload.prNumber,
+      });
+      const subjectKey = MANUAL_TRIGGER_MODULE.buildSubject(manualPayload);
+
+      const inserted = insertTriggerEvent(rc.db, {
+        repoId: repo.id,
+        triggerId: 'manual',
+        eventKey: makeId('manual'),
+        subject: subjectKey,
+        payloadJson: JSON.stringify(manualPayload),
+        source: 'cli',
+        detectedAt: Date.now(),
+      });
+      const planned = planReviewRunsForEvent(
+        rc.db,
+        rc.config,
+        inserted.eventId,
+      );
+      const enqueued = planned.planned > 0;
 
       if (enqueued) {
         rc.scheduler.wake();
-        const prLabel = pr ? ` PR #${pr}` : '';
+        const prLabel = prNumber ? ` PR #${prNumber}` : '';
         appendEvent(rc.db, {
           eventType: 'review.enqueued',
           repoId: repo.id,
           message: `Manual ${agent}${prLabel} review enqueued for ${sha.slice(0, 10)}`,
           level: 'info',
-          payload: { sha, subjectKey, agent, ...(pr ? { pr } : {}) },
+          payload: {
+            sha,
+            subjectKey,
+            agent,
+            ...(scope ? { scope } : {}),
+            ...(input ? { input } : {}),
+            ...(prNumber ? { prNumber } : {}),
+          },
         });
       }
 

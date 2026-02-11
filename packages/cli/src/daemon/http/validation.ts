@@ -1,4 +1,9 @@
-import { AGENT_NAMES, type AgentName } from '@opencode-janitor/shared';
+import {
+  AGENT_NAMES,
+  type AgentName,
+  isScopeId,
+  type ScopeId,
+} from '@opencode-janitor/shared';
 import type { EventFilterParams } from '../../db/queries/event-queries';
 
 const VALID_AGENT_NAMES = new Set<string>(AGENT_NAMES);
@@ -7,6 +12,8 @@ export type ValidationErrorCode =
   | 'INVALID_BODY'
   | 'INVALID_REPO'
   | 'INVALID_AGENT'
+  | 'INVALID_SCOPE'
+  | 'INVALID_SCOPE_INPUT'
   | 'INVALID_PR'
   | 'INVALID_AGENT_RUN_ID';
 
@@ -67,7 +74,12 @@ export async function parseJsonBody(request: Request): Promise<unknown> {
 
 export function requireString(value: unknown, field: string): string {
   if (typeof value !== 'string' || value.trim().length === 0) {
-    const code = field === 'repoOrId' ? 'INVALID_REPO' : 'INVALID_AGENT_RUN_ID';
+    const code =
+      field === 'repoOrId'
+        ? 'INVALID_REPO'
+        : field === 'agentRunId'
+          ? 'INVALID_AGENT_RUN_ID'
+          : 'INVALID_BODY';
     throw new ValidationError(
       code,
       `\`${field}\` must be a non-empty string`,
@@ -86,6 +98,42 @@ export function requirePositiveInt(value: unknown, field: string): number {
     );
   }
   return value;
+}
+
+export function requireScopeId(value: unknown): ScopeId {
+  if (typeof value !== 'string' || value.trim().length === 0) {
+    throw new ValidationError(
+      'INVALID_SCOPE',
+      '`scope` must be a non-empty string',
+      'scope',
+    );
+  }
+
+  const scope = value.trim();
+  if (!isScopeId(scope)) {
+    throw new ValidationError(
+      'INVALID_SCOPE',
+      '`scope` must be one of commit-diff, workspace-diff, repo, pr',
+      'scope',
+    );
+  }
+
+  return scope;
+}
+
+export function requireRecord(
+  value: unknown,
+  field: string,
+): Record<string, unknown> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new ValidationError(
+      'INVALID_SCOPE_INPUT',
+      `\`${field}\` must be an object`,
+      field,
+    );
+  }
+
+  return value as Record<string, unknown>;
 }
 
 export function getBodyField(body: unknown, field: string): unknown {

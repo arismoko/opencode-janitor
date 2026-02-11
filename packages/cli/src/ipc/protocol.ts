@@ -1,4 +1,4 @@
-import type { AgentName } from '@opencode-janitor/shared';
+import type { AgentName, ScopeId } from '@opencode-janitor/shared';
 
 export interface ErrorResponse {
   error: {
@@ -35,8 +35,12 @@ export interface EnqueueReviewRequest {
   repoOrId: string;
   /** Agent name to run (janitor/hunter/inspector/scribe). */
   agent: AgentName;
-  /** PR number for hunter reviews. When set, builds PR-aware context via prKey(). */
-  pr?: number;
+  /** Optional manual scope request (commit-diff/workspace-diff/repo/pr). */
+  scope?: ScopeId;
+  /** Optional scope-specific input object validated against scope schema. */
+  input?: Record<string, unknown>;
+  /** Optional freeform note carried in manual trigger payload metadata. */
+  note?: string;
 }
 
 export interface DeleteReportRequest {

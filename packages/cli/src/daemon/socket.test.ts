@@ -433,20 +433,22 @@ describe('POST /v1/reviews/enqueue — input validation', () => {
     expect(body.enqueued).toBe(true);
   });
 
-  it('accepts valid request with pr field', async () => {
+  it('accepts valid request with scope/input fields', async () => {
     const opts = stubOptions();
     const { request, url } = makeRequest('POST', '/v1/reviews/enqueue', {
       repoOrId: 'my-repo',
       agent: 'hunter',
-      pr: 42,
+      scope: 'pr',
+      input: { prNumber: 42 },
     });
     const resp = (await handleApiRequest(request, url, opts)) as Response;
     expect(resp.status).toBe(200);
-    // Verify the pr was passed through
+    // Verify scope/input were passed through
     expect(opts.review.onEnqueueReview).toHaveBeenCalledWith({
       repoOrId: 'my-repo',
       agent: 'hunter',
-      pr: 42,
+      scope: 'pr',
+      input: { prNumber: 42 },
     });
   });
 
@@ -568,11 +570,11 @@ describe('POST /v1/reviews/enqueue — input validation', () => {
     }
   });
 
-  it('rejects non-integer pr', async () => {
+  it('rejects unknown scope', async () => {
     const { request, url } = makeRequest('POST', '/v1/reviews/enqueue', {
       repoOrId: 'my-repo',
       agent: 'hunter',
-      pr: 3.14,
+      scope: 'not-a-scope',
     });
     const resp = (await handleApiRequest(
       request,
@@ -581,14 +583,14 @@ describe('POST /v1/reviews/enqueue — input validation', () => {
     )) as Response;
     expect(resp.status).toBe(400);
     const body = (await resp.json()) as { error: { code: string } };
-    expect(body.error.code).toBe('INVALID_PR');
+    expect(body.error.code).toBe('INVALID_SCOPE');
   });
 
-  it('rejects zero pr', async () => {
+  it('rejects non-object input', async () => {
     const { request, url } = makeRequest('POST', '/v1/reviews/enqueue', {
       repoOrId: 'my-repo',
       agent: 'hunter',
-      pr: 0,
+      input: 'bad',
     });
     const resp = (await handleApiRequest(
       request,
@@ -597,14 +599,14 @@ describe('POST /v1/reviews/enqueue — input validation', () => {
     )) as Response;
     expect(resp.status).toBe(400);
     const body = (await resp.json()) as { error: { code: string } };
-    expect(body.error.code).toBe('INVALID_PR');
+    expect(body.error.code).toBe('INVALID_SCOPE_INPUT');
   });
 
-  it('rejects negative pr', async () => {
+  it('rejects note when not a string', async () => {
     const { request, url } = makeRequest('POST', '/v1/reviews/enqueue', {
       repoOrId: 'my-repo',
       agent: 'hunter',
-      pr: -1,
+      note: 123,
     });
     const resp = (await handleApiRequest(
       request,
@@ -613,26 +615,10 @@ describe('POST /v1/reviews/enqueue — input validation', () => {
     )) as Response;
     expect(resp.status).toBe(400);
     const body = (await resp.json()) as { error: { code: string } };
-    expect(body.error.code).toBe('INVALID_PR');
+    expect(body.error.code).toBe('INVALID_BODY');
   });
 
-  it('rejects string pr', async () => {
-    const { request, url } = makeRequest('POST', '/v1/reviews/enqueue', {
-      repoOrId: 'my-repo',
-      agent: 'hunter',
-      pr: 'abc',
-    });
-    const resp = (await handleApiRequest(
-      request,
-      url,
-      stubOptions(),
-    )) as Response;
-    expect(resp.status).toBe(400);
-    const body = (await resp.json()) as { error: { code: string } };
-    expect(body.error.code).toBe('INVALID_PR');
-  });
-
-  it('accepts undefined pr (optional field)', async () => {
+  it('accepts undefined scope/input (optional fields)', async () => {
     const { request, url } = makeRequest('POST', '/v1/reviews/enqueue', {
       repoOrId: 'my-repo',
       agent: 'janitor',
