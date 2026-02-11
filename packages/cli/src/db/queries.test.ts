@@ -30,6 +30,13 @@ import {
   updateRepoSignals,
 } from './queries/repo-queries';
 import {
+  claimNextQueuedReviewRun,
+  enqueueReviewRun,
+  getReviewRunBySessionId,
+  markReviewRunFailed,
+  markReviewRunSucceeded,
+} from './queries/review-run-queries';
+import {
   claimNextQueuedJob,
   claimNextQueuedJobWithRepoLimit,
   createAgentRun,
@@ -44,6 +51,16 @@ import {
   recoverRunningJobs,
   requeueJob,
 } from './queries/scheduler-queries';
+import {
+  getTriggerEventById,
+  insertTriggerEvent,
+  listTriggerEventsWithoutRuns,
+} from './queries/trigger-event-queries';
+import {
+  getTriggerState,
+  listTriggerStatesDue,
+  upsertTriggerState,
+} from './queries/trigger-state-queries';
 
 // ---------------------------------------------------------------------------
 // Schema DDL — mirrors ensureSchema() but with literal enum values to avoid
@@ -272,6 +289,69 @@ function seedRepoWithJob(db: Database) {
     .query('SELECT * FROM review_jobs WHERE repo_id = ? LIMIT 1')
     .get(repo.id) as { id: string };
   return { repo, jobId: job.id };
+}
+
+function insertTriggerEventRow(
+  db: Database,
+  repoId: string,
+  opts?: Partial<{ triggerId: 'commit' | 'pr' | 'manual'; subject: string }>,
+): string {
+  const id = `tev-${Math.random().toString(16).slice(2, 10)}`;
+  db.query(
+    `
+      INSERT INTO trigger_events (
+        id, repo_id, trigger_id, event_key, subject, payload_json, source, detected_at
+      ) VALUES (?, ?, ?, ?, ?, ?, 'poll', ?)
+    `,
+  ).run(
+    id,
+    repoId,
+    opts?.triggerId ?? 'commit',
+    `${id}:key`,
+    opts?.subject ?? 'commit:abc123',
+    JSON.stringify({ sha: 'abc123' }),
+    Date.now(),
+  );
+  return id;
+}
+
+function insertReviewRunRow(
+  db: Database,
+  repoId: string,
+  triggerEventId: string,
+  opts?:
+    | Partial<{
+        id: string;
+        agent: 'janitor' | 'hunter' | 'inspector' | 'scribe';
+        status: 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled';
+        findingsCount: number;
+        outcome: string;
+      }>
+    | undefined,
+): string {
+  const id = opts?.id ?? `rrn-${Math.random().toString(16).slice(2, 10)}`;
+  const now = Date.now();
+  db.query(
+    `
+      INSERT INTO review_runs (
+        id, repo_id, trigger_event_id, agent, scope, scope_input_json, status,
+        priority, attempt, max_attempts, next_attempt_at, queued_at,
+        findings_count, outcome, started_at, finished_at
+      ) VALUES (?, ?, ?, ?, 'commit-diff', '{}', ?, 100, 0, 3, 0, ?, ?, ?, ?, ?)
+    `,
+  ).run(
+    id,
+    repoId,
+    triggerEventId,
+    opts?.agent ?? 'janitor',
+    opts?.status ?? 'queued',
+    now,
+    opts?.findingsCount ?? 0,
+    opts?.outcome ?? null,
+    opts?.status === 'queued' ? null : now,
+    opts?.status === 'succeeded' || opts?.status === 'failed' ? now : null,
+  );
+  return id;
 }
 
 // ---------------------------------------------------------------------------
@@ -1274,16 +1354,203 @@ describe('listEventsAfterSeqFiltered', () => {
 });
 
 // ===========================================================================
+// Generic trigger/review run query layer
+// ===========================================================================
+describe('trigger state/event and review run queries', () => {
+  it('upsertTriggerState stores and updates trigger state rows', () => {
+    const repo = addRepo(db, TEST_REPO);
+
+    upsertTriggerState(db, {
+      repoId: repo.id,
+      triggerId: 'commit',
+      stateJson: JSON.stringify({ lastHeadSha: 'a' }),
+      nextCheckAt: 100,
+      lastCheckedAt: 90,
+    });
+
+    const first = getTriggerState(db, repo.id, 'commit');
+    expect(first).not.toBeNull();
+    expect(first!.state_json).toContain('lastHeadSha');
+
+    upsertTriggerState(db, {
+      repoId: repo.id,
+      triggerId: 'commit',
+      stateJson: JSON.stringify({ lastHeadSha: 'b' }),
+      nextCheckAt: 200,
+      lastCheckedAt: 190,
+    });
+
+    const second = getTriggerState(db, repo.id, 'commit');
+    expect(second!.state_json).toContain('"b"');
+    expect(second!.next_check_at).toBe(200);
+  });
+
+  it('listTriggerStatesDue returns due rows by trigger', () => {
+    const repo = addRepo(db, TEST_REPO);
+
+    upsertTriggerState(db, {
+      repoId: repo.id,
+      triggerId: 'commit',
+      stateJson: '{}',
+      nextCheckAt: 10,
+    });
+    upsertTriggerState(db, {
+      repoId: repo.id,
+      triggerId: 'pr',
+      stateJson: '{}',
+      nextCheckAt: 9999,
+    });
+
+    const due = listTriggerStatesDue(db, 'commit', 100, 10);
+    expect(due).toHaveLength(1);
+    expect(due[0]!.trigger_id).toBe('commit');
+  });
+
+  it('insertTriggerEvent dedupes by (repo,trigger,event_key)', () => {
+    const repo = addRepo(db, TEST_REPO);
+    const input = {
+      repoId: repo.id,
+      triggerId: 'commit' as const,
+      eventKey: 'sha-1',
+      subject: 'commit:sha-1',
+      payloadJson: JSON.stringify({ sha: 'sha-1' }),
+      source: 'poll' as const,
+      detectedAt: Date.now(),
+    };
+
+    const first = insertTriggerEvent(db, input);
+    const second = insertTriggerEvent(db, input);
+
+    expect(first.inserted).toBe(true);
+    expect(second.inserted).toBe(false);
+    expect(second.eventId).toBe(first.eventId);
+    expect(getTriggerEventById(db, first.eventId)?.subject).toBe(
+      'commit:sha-1',
+    );
+  });
+
+  it('enqueueReviewRun and claimNextQueuedReviewRun operate on review_runs', () => {
+    const repo = addRepo(db, TEST_REPO);
+    const event = insertTriggerEvent(db, {
+      repoId: repo.id,
+      triggerId: 'commit',
+      eventKey: 'sha-claim',
+      subject: 'commit:sha-claim',
+      payloadJson: JSON.stringify({ sha: 'sha-claim' }),
+      source: 'poll',
+      detectedAt: Date.now(),
+    });
+
+    const enqueued = enqueueReviewRun(db, {
+      repoId: repo.id,
+      triggerEventId: event.eventId,
+      agent: 'janitor',
+      scope: 'commit-diff',
+    });
+    expect(enqueued.inserted).toBe(true);
+
+    const claimed = claimNextQueuedReviewRun(db, 1);
+    expect(claimed).not.toBeNull();
+    expect(claimed!.agent).toBe('janitor');
+    expect(claimed!.trigger_id).toBe('commit');
+    expect(claimed!.subject).toBe('commit:sha-claim');
+
+    db.query('UPDATE review_runs SET session_id = ? WHERE id = ?').run(
+      'session-1',
+      claimed!.id,
+    );
+    expect(getReviewRunBySessionId(db, 'session-1')?.id).toBe(claimed!.id);
+  });
+
+  it('listTriggerEventsWithoutRuns excludes events once runs are enqueued', () => {
+    const repo = addRepo(db, TEST_REPO);
+    const event = insertTriggerEvent(db, {
+      repoId: repo.id,
+      triggerId: 'manual',
+      eventKey: 'manual-1',
+      subject: 'manual:repo',
+      payloadJson: JSON.stringify({}),
+      source: 'cli',
+      detectedAt: Date.now(),
+    });
+
+    expect(listTriggerEventsWithoutRuns(db, 10)).toHaveLength(1);
+
+    enqueueReviewRun(db, {
+      repoId: repo.id,
+      triggerEventId: event.eventId,
+      agent: 'inspector',
+      scope: 'repo',
+    });
+
+    expect(listTriggerEventsWithoutRuns(db, 10)).toHaveLength(0);
+  });
+
+  it('markReviewRunSucceeded and markReviewRunFailed update run status fields', () => {
+    const repo = addRepo(db, TEST_REPO);
+    const event = insertTriggerEvent(db, {
+      repoId: repo.id,
+      triggerId: 'commit',
+      eventKey: 'sha-status',
+      subject: 'commit:sha-status',
+      payloadJson: JSON.stringify({ sha: 'sha-status' }),
+      source: 'poll',
+      detectedAt: Date.now(),
+    });
+
+    const run = enqueueReviewRun(db, {
+      repoId: repo.id,
+      triggerEventId: event.eventId,
+      agent: 'janitor',
+      scope: 'commit-diff',
+    });
+
+    markReviewRunSucceeded(
+      db,
+      run.runId,
+      2,
+      'output',
+      'succeeded',
+      JSON.stringify({ ok: true }),
+    );
+    const succeeded = db
+      .query('SELECT status, findings_count FROM review_runs WHERE id = ?')
+      .get(run.runId) as { status: string; findings_count: number };
+    expect(succeeded.status).toBe('succeeded');
+    expect(succeeded.findings_count).toBe(2);
+
+    const run2 = enqueueReviewRun(db, {
+      repoId: repo.id,
+      triggerEventId: event.eventId,
+      agent: 'hunter',
+      scope: 'commit-diff',
+    });
+    markReviewRunFailed(
+      db,
+      run2.runId,
+      'ERR',
+      'failed',
+      'failed_terminal',
+      JSON.stringify({ ok: false }),
+    );
+    const failed = db
+      .query('SELECT status, error_code FROM review_runs WHERE id = ?')
+      .get(run2.runId) as { status: string; error_code: string };
+    expect(failed.status).toBe('failed');
+    expect(failed.error_code).toBe('ERR');
+  });
+});
+
+// ===========================================================================
 // Dashboard queries
 // ===========================================================================
 describe('Dashboard queries', () => {
   it('listDashboardRepoState includes job counts', () => {
     const repo = addRepo(db, TEST_REPO);
-    enqueueTriggerAndJob(db, makeTriggerInput(repo.id, { subjectKey: 'q1' }));
-    enqueueTriggerAndJob(db, makeTriggerInput(repo.id, { subjectKey: 'q2' }));
-
-    // Claim one job → 1 running, 1 queued
-    claimNextQueuedJobWithRepoLimit(db, 2);
+    const event1 = insertTriggerEventRow(db, repo.id, { subject: 'commit:q1' });
+    const event2 = insertTriggerEventRow(db, repo.id, { subject: 'commit:q2' });
+    insertReviewRunRow(db, repo.id, event1, { status: 'queued' });
+    insertReviewRunRow(db, repo.id, event2, { status: 'running' });
 
     const rows = listDashboardRepoState(db);
     expect(rows).toHaveLength(1);
@@ -1304,16 +1571,12 @@ describe('Dashboard queries', () => {
   });
 
   it('listDashboardAgentState aggregates agent runs', () => {
-    const { jobId } = seedRepoWithJob(db);
-    const runId = createAgentRun(db, { jobId, agent: 'janitor' });
-    markAgentRunRunning(db, runId);
-    markAgentRunSucceeded(db, runId, 0, '', {
+    const repo = addRepo(db, TEST_REPO);
+    const eventId = insertTriggerEventRow(db, repo.id);
+    insertReviewRunRow(db, repo.id, eventId, {
+      agent: 'janitor',
+      status: 'succeeded',
       outcome: 'succeeded',
-      retryable: false,
-      findingsCount: 0,
-      durationMs: 50,
-      sessionId: null,
-      completion: 'idle',
     });
 
     const rows = listDashboardAgentState(db);
@@ -1324,22 +1587,23 @@ describe('Dashboard queries', () => {
 
   it('listDashboardReportSummaries returns recent reports', () => {
     const { repo, jobId } = seedRepoWithJob(db);
-    const runId = createAgentRun(db, { jobId, agent: 'janitor' });
-    markAgentRunRunning(db, runId);
-    markAgentRunSucceeded(db, runId, 1, 'output', {
-      outcome: 'succeeded',
-      retryable: false,
+    const legacyRunId = createAgentRun(db, { jobId, agent: 'janitor' });
+    const eventId = insertTriggerEventRow(db, repo.id, {
+      subject: 'commit:sum',
+    });
+    const runId = insertReviewRunRow(db, repo.id, eventId, {
+      agent: 'janitor',
+      status: 'succeeded',
       findingsCount: 1,
-      durationMs: 100,
-      sessionId: null,
-      completion: 'idle',
+      outcome: 'succeeded',
     });
 
     insertFindingRows(db, [
       {
         repo_id: repo.id,
         job_id: jobId,
-        agent_run_id: runId,
+        agent_run_id: legacyRunId,
+        review_run_id: runId,
         agent: 'janitor',
         severity: 'P1',
         domain: 'DRY',
@@ -1360,13 +1624,22 @@ describe('Dashboard queries', () => {
 
   it('listDashboardReportFindings returns findings sorted by severity', () => {
     const { repo, jobId } = seedRepoWithJob(db);
-    const runId = createAgentRun(db, { jobId, agent: 'janitor' });
+    const legacyRunId = createAgentRun(db, { jobId, agent: 'janitor' });
+    const eventId = insertTriggerEventRow(db, repo.id, {
+      subject: 'commit:find',
+    });
+    const runId = insertReviewRunRow(db, repo.id, eventId, {
+      agent: 'janitor',
+      status: 'succeeded',
+      outcome: 'succeeded',
+    });
 
     insertFindingRows(db, [
       {
         repo_id: repo.id,
         job_id: jobId,
-        agent_run_id: runId,
+        agent_run_id: legacyRunId,
+        review_run_id: runId,
         agent: 'janitor',
         severity: 'P2',
         domain: 'DRY',
@@ -1378,7 +1651,8 @@ describe('Dashboard queries', () => {
       {
         repo_id: repo.id,
         job_id: jobId,
-        agent_run_id: runId,
+        agent_run_id: legacyRunId,
+        review_run_id: runId,
         agent: 'janitor',
         severity: 'P0',
         domain: 'DEAD',

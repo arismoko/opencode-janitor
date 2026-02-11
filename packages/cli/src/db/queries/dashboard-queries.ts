@@ -90,7 +90,7 @@ export function listDashboardRepoState(db: Database): DashboardRepoStateRow[] {
           repo_id,
           SUM(CASE WHEN status = 'queued'  THEN 1 ELSE 0 END) AS queued_jobs,
           SUM(CASE WHEN status = 'running' THEN 1 ELSE 0 END) AS running_jobs
-        FROM review_jobs
+        FROM review_runs
         GROUP BY repo_id
       ) jc ON jc.repo_id = r.id
       LEFT JOIN (
@@ -118,7 +118,7 @@ export function listDashboardAgentState(
         SUM(CASE WHEN status = 'succeeded' THEN 1 ELSE 0 END) AS succeeded_runs,
         SUM(CASE WHEN status = 'failed'    THEN 1 ELSE 0 END) AS failed_runs,
         MAX(CASE WHEN finished_at IS NOT NULL THEN finished_at ELSE NULL END) AS last_finished_at
-      FROM agent_runs
+      FROM review_runs
       GROUP BY agent
       ORDER BY agent ASC
       `,
@@ -128,37 +128,37 @@ export function listDashboardAgentState(
 
 const REPORT_SUMMARY_BASE_SELECT = `
   SELECT
-    ar.id,
-    j.repo_id,
+    rr.id,
+    rr.repo_id,
     r.path AS repo_path,
-    ar.job_id,
-    t.subject_key,
-    ar.agent,
-    ar.session_id,
-    ar.status,
-    ar.outcome,
-    ar.findings_count,
+    rr.trigger_event_id AS job_id,
+    te.subject AS subject_key,
+    rr.agent,
+    rr.session_id,
+    rr.status,
+    rr.outcome,
+    rr.findings_count,
     COALESCE(fs.p0_count, 0) AS p0_count,
     COALESCE(fs.p1_count, 0) AS p1_count,
     COALESCE(fs.p2_count, 0) AS p2_count,
     COALESCE(fs.p3_count, 0) AS p3_count,
-    ar.started_at,
-    ar.finished_at,
-    ar.error_message
-  FROM agent_runs ar
-  JOIN review_jobs j ON j.id = ar.job_id
-  JOIN repos r ON r.id = j.repo_id
-  LEFT JOIN review_triggers t ON t.id = j.trigger_id
+    rr.started_at,
+    rr.finished_at,
+    rr.error_message
+  FROM review_runs rr
+  JOIN repos r ON r.id = rr.repo_id
+  LEFT JOIN trigger_events te ON te.id = rr.trigger_event_id
   LEFT JOIN (
     SELECT
-      agent_run_id,
+      review_run_id,
       SUM(CASE WHEN severity = 'P0' THEN 1 ELSE 0 END) AS p0_count,
       SUM(CASE WHEN severity = 'P1' THEN 1 ELSE 0 END) AS p1_count,
       SUM(CASE WHEN severity = 'P2' THEN 1 ELSE 0 END) AS p2_count,
       SUM(CASE WHEN severity = 'P3' THEN 1 ELSE 0 END) AS p3_count
     FROM findings
-    GROUP BY agent_run_id
-  ) fs ON fs.agent_run_id = ar.id
+    WHERE review_run_id IS NOT NULL
+    GROUP BY review_run_id
+  ) fs ON fs.review_run_id = rr.id
 `;
 
 export function listDashboardReportSummaries(
@@ -169,7 +169,7 @@ export function listDashboardReportSummaries(
     .query(
       `
       ${REPORT_SUMMARY_BASE_SELECT}
-      ORDER BY COALESCE(ar.finished_at, ar.started_at, j.queued_at) DESC, ar.id DESC
+      ORDER BY COALESCE(rr.finished_at, rr.started_at, rr.queued_at) DESC, rr.id DESC
       LIMIT ?
       `,
     )
@@ -184,8 +184,8 @@ export function getDashboardReportDetail(
     (db
       .query(
         `
-      ${REPORT_SUMMARY_BASE_SELECT.replace('ar.error_message', 'ar.error_message,\n    ar.raw_output')}
-      WHERE ar.id = ?
+      ${REPORT_SUMMARY_BASE_SELECT.replace('rr.error_message', 'rr.error_message,\n    rr.raw_output')}
+      WHERE rr.id = ?
       LIMIT 1
       `,
       )
@@ -206,7 +206,7 @@ export function listDashboardReportFindings(
         f.repo_id,
         r.path AS repo_path,
         f.job_id,
-        f.agent_run_id,
+        COALESCE(f.review_run_id, f.agent_run_id) AS agent_run_id,
         f.agent,
         f.severity,
         f.domain,
@@ -216,7 +216,7 @@ export function listDashboardReportFindings(
         f.created_at
       FROM findings f
       JOIN repos r ON r.id = f.repo_id
-      WHERE f.agent_run_id = ?
+      WHERE f.review_run_id = ?
       ORDER BY
         CASE f.severity
           WHEN 'P0' THEN 0

@@ -230,20 +230,33 @@ export function insertFindingRows(
   rows: Omit<FindingRow, 'id' | 'created_at'>[],
 ): void {
   const agentRunIds = [...new Set(rows.map((row) => row.agent_run_id))];
-  if (agentRunIds.length === 0) return;
+  const reviewRunIds = [
+    ...new Set(
+      rows
+        .map((row) => row.review_run_id)
+        .filter((value): value is string => typeof value === 'string'),
+    ),
+  ];
+  if (agentRunIds.length === 0 && reviewRunIds.length === 0) return;
 
   const now = nowMs();
   const deleteStmt = db.query('DELETE FROM findings WHERE agent_run_id = ?');
+  const deleteReviewRunStmt = db.query(
+    'DELETE FROM findings WHERE review_run_id = ?',
+  );
   const stmt = db.query(
     `
-    INSERT INTO findings (id, repo_id, job_id, agent_run_id, agent, severity, domain, location, evidence, prescription, fingerprint, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO findings (id, repo_id, job_id, agent_run_id, review_run_id, agent, severity, domain, location, evidence, prescription, fingerprint, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `,
   );
 
   db.transaction(() => {
     for (const agentRunId of agentRunIds) {
       deleteStmt.run(agentRunId);
+    }
+    for (const reviewRunId of reviewRunIds) {
+      deleteReviewRunStmt.run(reviewRunId);
     }
 
     for (const row of rows) {
@@ -253,6 +266,7 @@ export function insertFindingRows(
         row.repo_id,
         row.job_id,
         row.agent_run_id,
+        row.review_run_id ?? null,
         row.agent,
         row.severity,
         row.domain,
