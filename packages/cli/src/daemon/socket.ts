@@ -1,6 +1,7 @@
 import { chmodSync } from 'node:fs';
 import { errorResponse, json, sseChunk } from './http/response';
 import { parseFilterParams, parseQueryInt } from './http/validation';
+import { createCapabilitiesRoutes } from './routes/capabilities';
 import { createDashboardRoutes } from './routes/dashboard';
 import { createEventRoutes } from './routes/events';
 import { createHealthRoutes } from './routes/health';
@@ -22,6 +23,7 @@ export function buildRouteMap(options: SocketServerOptions): RouteMap {
     ...createReviewRoutes(options.review),
     ...createEventRoutes(options.event),
     ...createDashboardRoutes(options.dashboard),
+    ...createCapabilitiesRoutes(options.capabilities),
   ];
   const map: RouteMap = new Map();
   for (const route of routes) {

@@ -1,4 +1,8 @@
-import type { AgentName, ScopeId } from '@opencode-janitor/shared';
+import type {
+  AgentName,
+  CapabilitiesView,
+  ScopeId,
+} from '@opencode-janitor/shared';
 
 export interface ErrorResponse {
   error: {
@@ -173,4 +177,9 @@ export interface DashboardReportDetailResponse {
   report: DashboardReportSummary;
   findings: DashboardFinding[];
   rawOutput: string | null;
+}
+
+export interface CapabilitiesResponse extends CapabilitiesView {
+  ok: true;
+  generatedAt: number;
 }

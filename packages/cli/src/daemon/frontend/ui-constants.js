@@ -1,12 +1,5 @@
 export const MAX_EVENTS = 800;
 
-export const AGENTS = [
-  { key: 'janitor', label: 'Janitor' },
-  { key: 'hunter', label: 'Hunter' },
-  { key: 'inspector', label: 'Inspector' },
-  { key: 'scribe', label: 'Scribe' },
-];
-
 export const BADGE = {
   running: ['#5BAF6C', 'rgba(91,175,108,.14)'],
   succeeded: ['#5BAF6C', 'rgba(91,175,108,.14)'],

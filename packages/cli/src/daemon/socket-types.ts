@@ -4,6 +4,7 @@ import type {
   EventRowWithSession,
 } from '../db/queries/event-queries';
 import type {
+  CapabilitiesResponse,
   DashboardReportDetailResponse,
   DashboardSnapshotResponse,
   DeleteReportResponse,
@@ -54,12 +55,17 @@ export interface DashboardApi {
   onDeleteReport: (agentRunId: string) => DeleteReportResponse;
 }
 
+export interface CapabilitiesApi {
+  getCapabilities: () => CapabilitiesResponse;
+}
+
 export interface SocketServerOptions {
   socketPath: string;
   lifecycle: LifecycleApi;
   review: ReviewApi;
   event: EventApi;
   dashboard: DashboardApi;
+  capabilities: CapabilitiesApi;
 }
 
 export interface Route {

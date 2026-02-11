@@ -1,4 +1,4 @@
-import { LEVEL_RANK } from '../constants.js';
+import { LEVEL_RANK } from '../ui-constants.js';
 
 export function selectJobCounts(repos) {
   const runningJobs = repos.reduce(

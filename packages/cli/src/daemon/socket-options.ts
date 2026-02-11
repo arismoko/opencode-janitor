@@ -1,4 +1,5 @@
 import type { RuntimeContext } from '../runtime/context';
+import { createCapabilitiesOptions } from './options/capabilities-options';
 import { createDashboardOptions } from './options/dashboard-options';
 import { createEventOptions } from './options/event-options';
 import { createReviewOptions } from './options/review-options';
@@ -29,5 +30,6 @@ export function createSocketOptions(
     review: createReviewOptions(rc),
     event: createEventOptions(rc),
     dashboard: createDashboardOptions(rc, statusSnapshot),
+    capabilities: createCapabilitiesOptions(),
   };
 }

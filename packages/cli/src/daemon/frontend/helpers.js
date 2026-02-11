@@ -1,4 +1,4 @@
-import { MAX_EVENTS } from './constants.js';
+import { MAX_EVENTS } from './ui-constants.js';
 
 export function fmtClock(ms) {
   return new Date(ms).toLocaleTimeString();

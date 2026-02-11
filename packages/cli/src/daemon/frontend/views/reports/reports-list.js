@@ -1,5 +1,5 @@
-import { BADGE, SEV } from '../../constants.js';
 import { fmtAgo, severityDots } from '../../helpers.js';
+import { BADGE, SEV } from '../../ui-constants.js';
 
 export function renderReportsList({
   html,

@@ -16,6 +16,7 @@ import {
   sseChunk,
 } from './socket';
 import type {
+  CapabilitiesApi,
   DashboardApi,
   EventApi,
   LifecycleApi,
@@ -72,6 +73,7 @@ interface SocketServerOverrides {
   review?: Partial<ReviewApi>;
   event?: Partial<EventApi>;
   dashboard?: Partial<DashboardApi>;
+  capabilities?: Partial<CapabilitiesApi>;
 }
 
 function stubOptions(
@@ -133,6 +135,15 @@ function stubOptions(
         agentRunId: _agentRunId,
       })),
     },
+    capabilities: {
+      getCapabilities: mock(() => ({
+        ok: true as const,
+        generatedAt: Date.now(),
+        agents: [],
+        scopes: [],
+        triggers: [],
+      })),
+    },
   };
 
   return {
@@ -142,6 +153,7 @@ function stubOptions(
     review: { ...base.review, ...(overrides.review ?? {}) },
     event: { ...base.event, ...(overrides.event ?? {}) },
     dashboard: { ...base.dashboard, ...(overrides.dashboard ?? {}) },
+    capabilities: { ...base.capabilities, ...(overrides.capabilities ?? {}) },
   };
 }
 
@@ -685,6 +697,26 @@ describe('POST /v1/reviews/enqueue — invalid JSON body', () => {
     // Empty body triggers json() parse error => INVALID_BODY
     const body = (await resp.json()) as { error: { code: string } };
     expect(body.error.code).toBe('INVALID_BODY');
+  });
+});
+
+describe('GET /v1/capabilities', () => {
+  it('returns capabilities payload', async () => {
+    const opts = stubOptions();
+    const { request, url } = makeRequest('GET', '/v1/capabilities');
+    const resp = handleApiRequest(request, url, opts) as Response;
+    expect(resp.status).toBe(200);
+    const body = (await resp.json()) as {
+      ok: boolean;
+      agents: unknown[];
+      scopes: unknown[];
+      triggers: unknown[];
+    };
+    expect(body.ok).toBe(true);
+    expect(Array.isArray(body.agents)).toBe(true);
+    expect(Array.isArray(body.scopes)).toBe(true);
+    expect(Array.isArray(body.triggers)).toBe(true);
+    expect(opts.capabilities.getCapabilities).toHaveBeenCalledTimes(1);
   });
 });
 

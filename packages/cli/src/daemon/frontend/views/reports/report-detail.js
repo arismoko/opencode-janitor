@@ -1,5 +1,5 @@
-import { SEV } from '../../constants.js';
 import { fmtClock } from '../../helpers.js';
+import { SEV } from '../../ui-constants.js';
 
 export function renderReportDetail({
   html,
