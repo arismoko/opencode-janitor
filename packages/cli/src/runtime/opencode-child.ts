@@ -85,7 +85,7 @@ export async function startOpencodeChild(
 
     await new Promise<void>((resolve) => {
       const killTimer = setTimeout(() => {
-        if (child.exitCode === null && !child.killed) {
+        if (child.exitCode === null) {
           child.kill('SIGKILL');
         }
         resolve();

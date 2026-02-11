@@ -13,8 +13,9 @@ export function registerConfigCommand(program: Command): void {
     .option('-p, --print', 'Print config file contents')
     .action((opts: { print?: boolean }) => {
       const json = program.opts()['json'] as boolean | undefined;
+      const configPath = program.opts()['config'] as string | undefined;
       try {
-        const path = ensureConfigFile();
+        const path = ensureConfigFile(configPath);
 
         if (opts.print) {
           const content = readFileSync(path, 'utf-8');
