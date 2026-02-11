@@ -2,11 +2,8 @@ import chalk from 'chalk';
 import type { Command } from 'commander';
 import { loadConfig } from '../config/loader';
 import { requestJson } from '../ipc/client';
-import type {
-  DaemonStatusResponse,
-  ErrorResponse,
-  HealthResponse,
-} from '../ipc/protocol';
+import { isRunning } from '../ipc/health';
+import type { DaemonStatusResponse, ErrorResponse } from '../ipc/protocol';
 import { toWebUrl } from '../utils/web-url';
 
 function formatMs(ms: number): string {
@@ -26,14 +23,7 @@ export function registerStatusCommand(program: Command): void {
       const config = loadConfig(rootOptions.config);
 
       try {
-        const health = await requestJson<HealthResponse | ErrorResponse>({
-          socketPath: config.daemon.socketPath,
-          path: '/v1/health',
-          method: 'GET',
-          timeoutMs: 1000,
-        });
-
-        if (health.status !== 200) {
+        if (!(await isRunning(config.daemon.socketPath, 1000))) {
           throw new Error('Daemon is not running.');
         }
 
