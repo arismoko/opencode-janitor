@@ -132,16 +132,8 @@ export async function bootstrapRuntime(
           return;
         }
         case 'session.status': {
-          appendEvent(db, {
-            ...base,
-            eventType: 'session.status',
-            level: 'info',
-            message: `Session status: ${event.properties.status.type}`,
-            payload: {
-              sessionId,
-              status: event.properties.status,
-            },
-          });
+          // Intentionally not logged — busy/idle transitions are noise.
+          // The meaningful lifecycle event (session.idle) is handled below.
           return;
         }
         case 'session.idle': {

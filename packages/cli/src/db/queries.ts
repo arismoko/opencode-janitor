@@ -105,7 +105,14 @@ export function enqueueTriggerAndJob(
   input: TriggerEnqueueInput,
 ): boolean {
   const now = nowMs();
-  const dedupeKey = `${input.repoId}:${input.kind}:${input.subjectKey}`;
+  // For PR triggers, dedup on PR number only (strip headSha) so pushes to the
+  // same PR don't create duplicate triggers. subjectKey still carries the sha
+  // for buildTriggerContext to use at execution time.
+  const dedupeSubject =
+    input.kind === 'pr' && input.subjectKey.startsWith('pr:')
+      ? input.subjectKey.replace(/:[^:]+$/, '')
+      : input.subjectKey;
+  const dedupeKey = `${input.repoId}:${input.kind}:${dedupeSubject}`;
   const triggerID = makeId('trg');
   const jobID = makeId('job');
   const maxAttempts = input.maxAttempts ?? 3;
