@@ -31,19 +31,29 @@ export interface CommitContext {
 // Review context (for prompt builder)
 // ---------------------------------------------------------------------------
 
-/** Shared fields for any review context passed to the prompt builder. */
-export interface ReviewContext {
+interface ReviewContextBase {
   /** Display label (e.g. SHA, PR key) */
   label: string;
-  /** Changed files in this review (omit for repo-wide manual runs) */
-  changedFiles?: ChangedFile[];
-  /** Unified diff patch (omit for repo-wide manual runs) */
-  patch?: string;
-  /** Whether the patch was truncated */
-  patchTruncated?: boolean;
   /** Additional metadata lines injected into the CONTEXT section */
   metadata?: string[];
 }
+
+/** Diff-backed review context (commit/PR/workspace with local changes). */
+export interface DiffReviewContext extends ReviewContextBase {
+  mode: 'diff';
+  changedFiles: ChangedFile[];
+  patch: string;
+  patchTruncated: boolean;
+}
+
+/** Repo-wide review context (no explicit diff payload). */
+export interface RepoReviewContext extends ReviewContextBase {
+  mode: 'repo';
+  reason?: 'manual-repo' | 'empty-workspace-fallback';
+}
+
+/** Review context passed to the prompt builder. */
+export type ReviewContext = DiffReviewContext | RepoReviewContext;
 
 // ---------------------------------------------------------------------------
 // Prompt config

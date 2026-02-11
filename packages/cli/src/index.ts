@@ -17,13 +17,14 @@ import { registerStartCommand } from './commands/start';
 import { registerStatusCommand } from './commands/status';
 import { registerStopCommand } from './commands/stop';
 import { runDaemonMain } from './daemon/main';
+import { CLI_VERSION } from './version';
 
 const program = new Command();
 
 program
   .name('opencode-janitor')
   .description('CLI for opencode-janitor — automated code review management')
-  .version('0.1.0')
+  .version(CLI_VERSION)
   .option('--json', 'Output in JSON format')
   .option('--config <path>', 'Path to config JSON file');
 

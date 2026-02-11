@@ -12,6 +12,12 @@ import {
   type SocketServerOptions,
   sseChunk,
 } from './socket';
+import type {
+  DashboardApi,
+  EventApi,
+  LifecycleApi,
+  ReviewApi,
+} from './socket-types';
 
 // ---------------------------------------------------------------------------
 // Test helpers
@@ -55,58 +61,82 @@ function makeEventRowWithSession(
   };
 }
 
+interface SocketServerOverrides {
+  socketPath?: string;
+  lifecycle?: Partial<LifecycleApi>;
+  review?: Partial<ReviewApi>;
+  event?: Partial<EventApi>;
+  dashboard?: Partial<DashboardApi>;
+}
+
 function stubOptions(
-  overrides: Partial<SocketServerOptions> = {},
+  overrides: SocketServerOverrides = {},
 ): SocketServerOptions {
-  return {
+  const base: SocketServerOptions = {
     socketPath: '/tmp/test.sock',
-    getStatus: () => stubStatus(),
-    onStopRequested: mock(() => {}),
-    onEnqueueReview: mock(async (req: EnqueueReviewRequest) => ({
-      ok: true as const,
-      enqueued: true,
-      repoId: 'repo-1',
-      repoPath: '/tmp/repo',
-      sha: 'abc123',
-      subjectKey: `${req.agent}:${req.repoOrId}`,
-    })),
-    listEventsAfterSeq: mock((_afterSeq: number, _limit: number) => [
-      makeEventRow(),
-    ]),
-    listEventsAfterSeqFiltered: mock(
-      (
-        _afterSeq: number,
-        _limit: number,
-        _filters?: EventFilterParams,
-      ): EventRowWithSession[] => [makeEventRowWithSession()],
-    ),
-    getDashboardSnapshot: mock(
-      (_eventsLimit: number, _reportsLimit: number) => ({
+    lifecycle: {
+      getStatus: () => stubStatus(),
+      onStopRequested: mock(() => {}),
+    },
+    review: {
+      onEnqueueReview: mock(async (req: EnqueueReviewRequest) => ({
         ok: true as const,
-        generatedAt: Date.now(),
-        latestSeq: 1,
-        daemon: {
-          pid: 1234,
-          uptimeMs: 60_000,
-          draining: false,
-          socketPath: '/tmp/test.sock',
-          dbPath: '/tmp/test.db',
-        },
-        repos: [],
-        agents: [],
-        reports: [],
-        events: [],
-      }),
-    ),
-    getDashboardReportDetail: mock(
-      (_agentRunId: string, _findingsLimit: number) => null,
-    ),
-    onDeleteReport: mock((_agentRunId: string) => ({
-      ok: true as const,
-      deleted: true,
-      agentRunId: _agentRunId,
-    })),
+        enqueued: true,
+        repoId: 'repo-1',
+        repoPath: '/tmp/repo',
+        sha: 'abc123',
+        subjectKey: `${req.agent}:${req.repoOrId}`,
+      })),
+    },
+    event: {
+      listEventsAfterSeq: mock((_afterSeq: number, _limit: number) => [
+        makeEventRow(),
+      ]),
+      listEventsAfterSeqFiltered: mock(
+        (
+          _afterSeq: number,
+          _limit: number,
+          _filters?: EventFilterParams,
+        ): EventRowWithSession[] => [makeEventRowWithSession()],
+      ),
+    },
+    dashboard: {
+      getDashboardSnapshot: mock(
+        (_eventsLimit: number, _reportsLimit: number) => ({
+          ok: true as const,
+          generatedAt: Date.now(),
+          latestSeq: 1,
+          daemon: {
+            pid: 1234,
+            uptimeMs: 60_000,
+            draining: false,
+            socketPath: '/tmp/test.sock',
+            dbPath: '/tmp/test.db',
+          },
+          repos: [],
+          agents: [],
+          reports: [],
+          events: [],
+        }),
+      ),
+      getDashboardReportDetail: mock(
+        (_agentRunId: string, _findingsLimit: number) => null,
+      ),
+      onDeleteReport: mock((_agentRunId: string) => ({
+        ok: true as const,
+        deleted: true,
+        agentRunId: _agentRunId,
+      })),
+    },
+  };
+
+  return {
+    ...base,
     ...overrides,
+    lifecycle: { ...base.lifecycle, ...(overrides.lifecycle ?? {}) },
+    review: { ...base.review, ...(overrides.review ?? {}) },
+    event: { ...base.event, ...(overrides.event ?? {}) },
+    dashboard: { ...base.dashboard, ...(overrides.dashboard ?? {}) },
   };
 }
 
@@ -408,7 +438,7 @@ describe('POST /v1/reviews/enqueue — input validation', () => {
     const resp = (await handleApiRequest(request, url, opts)) as Response;
     expect(resp.status).toBe(200);
     // Verify the pr was passed through
-    expect(opts.onEnqueueReview).toHaveBeenCalledWith({
+    expect(opts.review.onEnqueueReview).toHaveBeenCalledWith({
       repoOrId: 'my-repo',
       agent: 'hunter',
       pr: 42,
@@ -612,9 +642,11 @@ describe('POST /v1/reviews/enqueue — input validation', () => {
 
   it('surfaces onEnqueueReview errors as 400', async () => {
     const opts = stubOptions({
-      onEnqueueReview: mock(async () => {
-        throw new Error('Repo not found');
-      }),
+      review: {
+        onEnqueueReview: mock(async () => {
+          throw new Error('Repo not found');
+        }),
+      },
     });
     const { request, url } = makeRequest('POST', '/v1/reviews/enqueue', {
       repoOrId: 'unknown-repo',
@@ -738,35 +770,35 @@ describe('GET /v1/events — bounded query params', () => {
     const resp = handleApiRequest(request, url, opts) as Response;
     expect(resp.status).toBe(200);
     // With no filters, calls listEventsAfterSeq
-    expect(opts.listEventsAfterSeq).toHaveBeenCalledWith(0, 100);
+    expect(opts.event.listEventsAfterSeq).toHaveBeenCalledWith(0, 100);
   });
 
   it('caps limit at 500', async () => {
     const opts = stubOptions();
     const { request, url } = makeRequest('GET', '/v1/events?limit=9999');
     handleApiRequest(request, url, opts);
-    expect(opts.listEventsAfterSeq).toHaveBeenCalledWith(0, 500);
+    expect(opts.event.listEventsAfterSeq).toHaveBeenCalledWith(0, 500);
   });
 
   it('uses provided afterSeq', async () => {
     const opts = stubOptions();
     const { request, url } = makeRequest('GET', '/v1/events?afterSeq=50');
     handleApiRequest(request, url, opts);
-    expect(opts.listEventsAfterSeq).toHaveBeenCalledWith(50, 100);
+    expect(opts.event.listEventsAfterSeq).toHaveBeenCalledWith(50, 100);
   });
 
   it('clamps negative afterSeq to 0', async () => {
     const opts = stubOptions();
     const { request, url } = makeRequest('GET', '/v1/events?afterSeq=-10');
     handleApiRequest(request, url, opts);
-    expect(opts.listEventsAfterSeq).toHaveBeenCalledWith(0, 100);
+    expect(opts.event.listEventsAfterSeq).toHaveBeenCalledWith(0, 100);
   });
 
   it('clamps limit below minimum to 1', async () => {
     const opts = stubOptions();
     const { request, url } = makeRequest('GET', '/v1/events?limit=0');
     handleApiRequest(request, url, opts);
-    expect(opts.listEventsAfterSeq).toHaveBeenCalledWith(0, 1);
+    expect(opts.event.listEventsAfterSeq).toHaveBeenCalledWith(0, 1);
   });
 
   it('responds with ok, afterSeq, and events array', async () => {
@@ -794,8 +826,8 @@ describe('GET /v1/events — filter routing', () => {
     const opts = stubOptions();
     const { request, url } = makeRequest('GET', '/v1/events');
     handleApiRequest(request, url, opts);
-    expect(opts.listEventsAfterSeq).toHaveBeenCalled();
-    expect(opts.listEventsAfterSeqFiltered).not.toHaveBeenCalled();
+    expect(opts.event.listEventsAfterSeq).toHaveBeenCalled();
+    expect(opts.event.listEventsAfterSeqFiltered).not.toHaveBeenCalled();
   });
 
   it('uses listEventsAfterSeqFiltered when filters present', () => {
@@ -805,8 +837,8 @@ describe('GET /v1/events — filter routing', () => {
       '/v1/events?repoId=repo-1&jobId=job-1',
     );
     handleApiRequest(request, url, opts);
-    expect(opts.listEventsAfterSeqFiltered).toHaveBeenCalled();
-    expect(opts.listEventsAfterSeq).not.toHaveBeenCalled();
+    expect(opts.event.listEventsAfterSeqFiltered).toHaveBeenCalled();
+    expect(opts.event.listEventsAfterSeq).not.toHaveBeenCalled();
   });
 
   it('passes filter params through to listEventsAfterSeqFiltered', () => {
@@ -816,7 +848,7 @@ describe('GET /v1/events — filter routing', () => {
       '/v1/events?repoId=r1&topic=review.started&afterSeq=10&limit=50',
     );
     handleApiRequest(request, url, opts);
-    expect(opts.listEventsAfterSeqFiltered).toHaveBeenCalledWith(10, 50, {
+    expect(opts.event.listEventsAfterSeqFiltered).toHaveBeenCalledWith(10, 50, {
       repoId: 'r1',
       topic: 'review.started',
     });
@@ -833,7 +865,7 @@ describe('GET /v1/dashboard/snapshot', () => {
     const { request, url } = makeRequest('GET', '/v1/dashboard/snapshot');
     const resp = handleApiRequest(request, url, opts) as Response;
     expect(resp.status).toBe(200);
-    expect(opts.getDashboardSnapshot).toHaveBeenCalledWith(80, 40);
+    expect(opts.dashboard.getDashboardSnapshot).toHaveBeenCalledWith(80, 40);
   });
 
   it('caps eventsLimit at 500 and reportsLimit at 200', () => {
@@ -843,7 +875,7 @@ describe('GET /v1/dashboard/snapshot', () => {
       '/v1/dashboard/snapshot?eventsLimit=9999&reportsLimit=9999',
     );
     handleApiRequest(request, url, opts);
-    expect(opts.getDashboardSnapshot).toHaveBeenCalledWith(500, 200);
+    expect(opts.dashboard.getDashboardSnapshot).toHaveBeenCalledWith(500, 200);
   });
 
   it('accepts custom limits within bounds', () => {
@@ -853,7 +885,7 @@ describe('GET /v1/dashboard/snapshot', () => {
       '/v1/dashboard/snapshot?eventsLimit=20&reportsLimit=10',
     );
     handleApiRequest(request, url, opts);
-    expect(opts.getDashboardSnapshot).toHaveBeenCalledWith(20, 10);
+    expect(opts.dashboard.getDashboardSnapshot).toHaveBeenCalledWith(20, 10);
   });
 });
 
@@ -883,7 +915,9 @@ describe('GET /v1/dashboard/report', () => {
 
   it('returns 404 when report not found', async () => {
     const opts = stubOptions({
-      getDashboardReportDetail: mock(() => null),
+      dashboard: {
+        getDashboardReportDetail: mock(() => null),
+      },
     });
     const { request, url } = makeRequest(
       'GET',
@@ -902,7 +936,10 @@ describe('GET /v1/dashboard/report', () => {
       '/v1/dashboard/report?agentRunId=run-1&findingsLimit=9999',
     );
     handleApiRequest(request, url, opts);
-    expect(opts.getDashboardReportDetail).toHaveBeenCalledWith('run-1', 500);
+    expect(opts.dashboard.getDashboardReportDetail).toHaveBeenCalledWith(
+      'run-1',
+      500,
+    );
   });
 });
 
@@ -972,9 +1009,11 @@ describe('DELETE /v1/dashboard/report', () => {
 
   it('surfaces onDeleteReport errors as 400', async () => {
     const opts = stubOptions({
-      onDeleteReport: mock(() => {
-        throw new Error('DB error');
-      }),
+      dashboard: {
+        onDeleteReport: mock(() => {
+          throw new Error('DB error');
+        }),
+      },
     });
     const { request, url } = makeRequest('DELETE', '/v1/dashboard/report', {
       agentRunId: 'run-1',
@@ -1005,7 +1044,9 @@ describe('GET /v1/events/stream', () => {
 
   it('emits ready event as first chunk', async () => {
     const opts = stubOptions({
-      listEventsAfterSeq: mock(() => []),
+      event: {
+        listEventsAfterSeq: mock(() => []),
+      },
     });
     const { request, url } = makeRequest('GET', '/v1/events/stream?afterSeq=5');
     const resp = handleApiRequest(request, url, opts) as Response;
@@ -1020,7 +1061,9 @@ describe('GET /v1/events/stream', () => {
 
   it('uses Last-Event-ID header when afterSeq param absent', async () => {
     const opts = stubOptions({
-      listEventsAfterSeq: mock(() => []),
+      event: {
+        listEventsAfterSeq: mock(() => []),
+      },
     });
     const url = new URL('http://localhost/v1/events/stream');
     const request = new Request(url.toString(), {
@@ -1037,7 +1080,9 @@ describe('GET /v1/events/stream', () => {
 
   it('afterSeq query param takes precedence over Last-Event-ID', async () => {
     const opts = stubOptions({
-      listEventsAfterSeq: mock(() => []),
+      event: {
+        listEventsAfterSeq: mock(() => []),
+      },
     });
     const url = new URL('http://localhost/v1/events/stream?afterSeq=10');
     const request = new Request(url.toString(), {

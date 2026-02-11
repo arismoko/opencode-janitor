@@ -1,15 +1,13 @@
-import type { Event } from '@opencode-ai/sdk';
 import { loadConfig } from '../config/loader';
 import { defaultDbPath } from '../config/paths';
 import { acquireProcessLock } from '../daemon/lock';
 import { openDatabase } from '../db/connection';
 import { ensureSchema } from '../db/migrations';
+import { appendEvent } from '../db/queries/event-queries';
 import {
-  appendEvent,
-  findAgentRunContextBySessionId,
   recoverRunningAgentRuns,
   recoverRunningJobs,
-} from '../db/queries';
+} from '../db/queries/scheduler-queries';
 import { startRepoWatch } from '../detectors/repo-watch';
 import { startScheduler } from '../scheduler/worker';
 import { createAgentConfigMap } from './agent-factory';
@@ -17,6 +15,7 @@ import type { RuntimeContext, ShutdownContext } from './context';
 import { createDefaultAgentRegistry } from './default-agent-specs';
 import { startOpencodeChild } from './opencode-child';
 import { createSessionCompletionBus } from './session-completion-bus';
+import { createSessionEventProjector } from './session-event-projector';
 
 export interface BootstrapRuntimeOptions {
   configPath?: string;
@@ -81,90 +80,13 @@ export async function bootstrapRuntime(
     });
 
     const registry = createDefaultAgentRegistry();
-
-    /** Extract sessionID from known event shapes. */
-    function extractSessionId(event: Event): string | undefined {
-      switch (event.type) {
-        case 'session.status':
-        case 'session.idle':
-          return event.properties.sessionID;
-        case 'session.error':
-          return event.properties.sessionID ?? undefined;
-        case 'message.part.updated':
-          return event.properties.part.sessionID;
-        default:
-          return undefined;
-      }
-    }
-
-    /** Non-blocking event tap: writes live session events to event_journal. */
-    function onEventTap(event: Event): void {
-      const sessionId = extractSessionId(event);
-      if (!sessionId) return;
-
-      const ctx = findAgentRunContextBySessionId(db, sessionId);
-      if (!ctx) return;
-
-      const base = {
-        repoId: ctx.repoId,
-        jobId: ctx.jobId,
-        agentRunId: ctx.agentRunId,
-      };
-
-      switch (event.type) {
-        case 'message.part.updated': {
-          const { delta, part } = event.properties;
-          if (!delta) return;
-          appendEvent(db, {
-            ...base,
-            eventType: 'session.delta',
-            level: 'info',
-            message: 'Session output chunk',
-            payload: {
-              sessionId,
-              delta,
-              partType: part.type,
-              messageId: part.messageID,
-              partId: part.id,
-              agent: ctx.agent,
-            },
-          });
-          return;
-        }
-        case 'session.status': {
-          // Intentionally not logged — busy/idle transitions are noise.
-          // The meaningful lifecycle event (session.idle) is handled below.
-          return;
-        }
-        case 'session.idle': {
-          appendEvent(db, {
-            ...base,
-            eventType: 'session.idle',
-            level: 'info',
-            message: 'Session idle',
-            payload: { sessionId },
-          });
-          return;
-        }
-        case 'session.error': {
-          appendEvent(db, {
-            ...base,
-            eventType: 'session.error',
-            level: 'error',
-            message: 'Session error',
-            payload: {
-              sessionId,
-              error: event.properties.error,
-            },
-          });
-          return;
-        }
-      }
-    }
+    const sessionEventProjector = createSessionEventProjector(db);
 
     const completionBus = createSessionCompletionBus({
       client: child.client,
-      onEventTap,
+      onEventTap: (event) => {
+        sessionEventProjector.handle(event);
+      },
     });
     completionBus.start();
 

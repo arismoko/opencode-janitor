@@ -6,14 +6,14 @@
  *   opencode-janitor inspector [repo]         # alias: i
  *   opencode-janitor scribe [repo]            # alias: s
  */
+
+import type { AgentName } from '@opencode-janitor/shared';
 import chalk from 'chalk';
 import type { Command } from 'commander';
 import { loadConfig } from '../config/loader';
 import { requestJson } from '../ipc/client';
 import type { EnqueueReviewResponse, ErrorResponse } from '../ipc/protocol';
 import { validateGitRepo } from '../utils/git';
-
-type AgentName = 'janitor' | 'hunter' | 'inspector' | 'scribe';
 
 function resolveRepo(raw?: string): string {
   if (!raw || raw.trim().length === 0) {
@@ -117,11 +117,11 @@ export function registerAgentCommands(program: Command): void {
       await runAgent(program, 'janitor', repoArg);
     });
 
-  // hunter (h) — bug/security/correctness review, with optional --pr
+  // hunter (h) — bug/correctness review, with optional --pr
   program
     .command('hunter [repo]')
     .alias('h')
-    .description('Run the Hunter agent (bug/security/correctness defects)')
+    .description('Run the Hunter agent (bug/correctness defects)')
     .option('--pr <number>', 'PR number to review (builds PR-aware context)')
     .action(async (repoArg: string | undefined, options: { pr?: string }) => {
       let pr: number | undefined;

@@ -170,7 +170,7 @@ describe('parseAgentOutput', () => {
       expect(result.output.findings[0]?.domain).toBe('BUG');
     });
 
-    it('normalizes mixed case domain when severity also needs normalization', () => {
+    it('normalizes mixed case domain to BUG when severity also needs normalization', () => {
       // When severity is valid, .catch() on domain absorbs bad values before
       // normalization runs. But when severity is ALSO lowercase (causing first
       // parse to fail), normalizeFindings uppercases both fields on retry.
@@ -184,7 +184,7 @@ describe('parseAgentOutput', () => {
 
       const result = parseAgentOutput(raw, HunterOutput);
       expect(result.meta.status).toBe('ok');
-      expect(result.output.findings[0]?.domain).toBe('SECURITY');
+      expect(result.output.findings[0]?.domain).toBe('BUG');
       expect(result.output.findings[0]?.severity).toBe('P0');
     });
 
@@ -284,7 +284,7 @@ describe('parseAgentOutput', () => {
             prescription: 'add null guard',
           },
           {
-            domain: 'SECURITY',
+            domain: 'BUG',
             location: 'src/auth.ts:15',
             severity: 'P1',
             evidence: 'SQL injection via unsanitized input',
@@ -306,7 +306,7 @@ describe('parseAgentOutput', () => {
       expect(result.meta.error).toBeUndefined();
       expect(result.output.findings).toHaveLength(3);
       expect(result.output.findings[0]?.severity).toBe('P0');
-      expect(result.output.findings[1]?.domain).toBe('SECURITY');
+      expect(result.output.findings[1]?.domain).toBe('BUG');
       expect(result.output.findings[2]?.location).toBe('src/calc.ts:99');
     });
 

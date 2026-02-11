@@ -53,6 +53,36 @@ function toErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+function classifyErrorType(
+  message: string,
+  precedence: 'agent' | 'job',
+): ErrorType {
+  if (CANCELLED_ERROR_PATTERNS.some((pattern) => pattern.test(message))) {
+    return 'cancelled';
+  }
+
+  if (precedence === 'agent') {
+    if (TERMINAL_ERROR_PATTERNS.some((pattern) => pattern.test(message))) {
+      return 'terminal';
+    }
+
+    if (TRANSIENT_ERROR_PATTERNS.some((pattern) => pattern.test(message))) {
+      return 'transient';
+    }
+    return 'unknown';
+  }
+
+  if (TRANSIENT_ERROR_PATTERNS.some((pattern) => pattern.test(message))) {
+    return 'transient';
+  }
+
+  if (TERMINAL_ERROR_PATTERNS.some((pattern) => pattern.test(message))) {
+    return 'terminal';
+  }
+
+  return 'unknown';
+}
+
 export function classifyCompletionFailure(
   type: 'timeout' | 'error' | 'cancelled',
 ): FailureClassification {
@@ -84,8 +114,9 @@ export function classifyCompletionFailure(
 
 export function classifyAgentFailure(error: unknown): FailureClassification {
   const message = toErrorMessage(error);
+  const errorType = classifyErrorType(message, 'agent');
 
-  if (CANCELLED_ERROR_PATTERNS.some((pattern) => pattern.test(message))) {
+  if (errorType === 'cancelled') {
     return {
       outcome: 'cancelled',
       retryable: false,
@@ -94,7 +125,7 @@ export function classifyAgentFailure(error: unknown): FailureClassification {
     };
   }
 
-  if (TERMINAL_ERROR_PATTERNS.some((pattern) => pattern.test(message))) {
+  if (errorType === 'terminal') {
     return {
       outcome: 'failed_terminal',
       retryable: false,
@@ -103,7 +134,7 @@ export function classifyAgentFailure(error: unknown): FailureClassification {
     };
   }
 
-  if (TRANSIENT_ERROR_PATTERNS.some((pattern) => pattern.test(message))) {
+  if (errorType === 'transient') {
     return {
       outcome: 'failed_transient',
       retryable: true,
@@ -124,8 +155,9 @@ export function classifyUnexpectedJobError(
   error: unknown,
 ): UnexpectedJobErrorClassification {
   const message = toErrorMessage(error);
+  const errorType = classifyErrorType(message, 'job');
 
-  if (CANCELLED_ERROR_PATTERNS.some((pattern) => pattern.test(message))) {
+  if (errorType === 'cancelled') {
     return {
       retryable: false,
       errorCode: 'JOB_CANCELLED',
@@ -134,7 +166,7 @@ export function classifyUnexpectedJobError(
     };
   }
 
-  if (TRANSIENT_ERROR_PATTERNS.some((pattern) => pattern.test(message))) {
+  if (errorType === 'transient') {
     return {
       retryable: true,
       errorCode: 'JOB_RETRY_TRANSIENT',
@@ -143,7 +175,7 @@ export function classifyUnexpectedJobError(
     };
   }
 
-  if (TERMINAL_ERROR_PATTERNS.some((pattern) => pattern.test(message))) {
+  if (errorType === 'terminal') {
     return {
       retryable: false,
       errorCode: 'JOB_ERROR_TERMINAL',

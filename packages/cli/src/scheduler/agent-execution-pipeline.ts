@@ -31,8 +31,6 @@ import {
   type FailureClassification,
 } from './retry-policy';
 
-const AGENT_COMPLETION_TIMEOUT_MS = 180_000;
-
 export interface AgentRunResult {
   success: boolean;
   findingsCount: number;
@@ -121,7 +119,6 @@ export function createAgentExecutionPipeline(
 
         const completion = completionBus.waitFor(sessionId, {
           directory: job.path,
-          timeoutMs: AGENT_COMPLETION_TIMEOUT_MS,
         });
 
         await promptReviewAsync(client, {

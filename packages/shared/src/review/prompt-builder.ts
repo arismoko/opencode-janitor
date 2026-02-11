@@ -27,17 +27,15 @@ export function buildReviewPrompt(
     `Maximum findings: ${config.maxFindings}`,
   );
 
-  const hasDiff = context.changedFiles?.length || context.patch?.trim();
-
-  if (hasDiff) {
-    const filesStr = formatChangedFiles(context.changedFiles ?? []);
+  if (context.mode === 'diff') {
+    const filesStr = formatChangedFiles(context.changedFiles);
     sections.push(
       '',
       `# REVIEW CONTEXT`,
       `Changed files:`,
       filesStr,
       '',
-      `DIFF_TRUNCATED=${context.patchTruncated ?? false}`,
+      `DIFF_TRUNCATED=${context.patchTruncated}`,
     );
 
     if (context.patchTruncated) {
@@ -46,14 +44,23 @@ export function buildReviewPrompt(
       );
     }
 
-    sections.push('', '```diff', context.patch ?? '', '```');
+    sections.push('', '```diff', context.patch, '```');
   } else {
-    sections.push(
-      '',
-      '# REVIEW CONTEXT',
-      'No diff provided — this is a repo-wide analysis run.',
-      'Use your tools (glob, grep, read, lsp) to explore the codebase and identify issues.',
-    );
+    if (context.reason === 'empty-workspace-fallback') {
+      sections.push(
+        '',
+        '# REVIEW CONTEXT',
+        'No workspace diff detected — falling back to a repo-wide analysis run.',
+        'Use your tools (glob, grep, read, lsp) to explore the codebase and identify issues.',
+      );
+    } else {
+      sections.push(
+        '',
+        '# REVIEW CONTEXT',
+        'No diff provided — this is a repo-wide analysis run.',
+        'Use your tools (glob, grep, read, lsp) to explore the codebase and identify issues.',
+      );
+    }
   }
 
   if (config.suppressionsBlock) {

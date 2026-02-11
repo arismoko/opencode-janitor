@@ -7,6 +7,7 @@ import type {
   ErrorResponse,
   HealthResponse,
 } from '../ipc/protocol';
+import { toWebUrl } from '../utils/web-url';
 
 function formatMs(ms: number): string {
   const seconds = Math.floor(ms / 1000);
@@ -60,7 +61,7 @@ export function registerStatusCommand(program: Command): void {
         console.log(`draining: ${payload.draining ? 'yes' : 'no'}`);
         console.log(`socket: ${payload.socketPath}`);
         console.log(`db: ${payload.dbPath}`);
-        console.log(`web: http://${payload.webHost}:${payload.webPort}`);
+        console.log(`web: ${toWebUrl(payload.webHost, payload.webPort)}`);
       } catch {
         if (json) {
           console.log(JSON.stringify({ ok: false, running: false }));

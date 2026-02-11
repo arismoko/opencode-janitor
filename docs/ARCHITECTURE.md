@@ -62,7 +62,7 @@ Execution writes session and lifecycle events back to the journal.
 
 ## Manual
 
-- Janitor/Hunter: workspace diff context (staged + unstaged + untracked)
+- Janitor/Hunter: workspace diff context (staged + unstaged + untracked); if workspace is clean, fallback to repo-wide mode
 - Inspector: forced repo-wide mode
 - Scribe: forced repo-wide doc mode + markdown inventory metadata
 

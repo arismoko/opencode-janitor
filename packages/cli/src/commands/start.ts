@@ -2,26 +2,11 @@ import chalk from 'chalk';
 import type { Command } from 'commander';
 import { loadConfig } from '../config/loader';
 import { runDaemonMain } from '../daemon/main';
-import { requestJson } from '../ipc/client';
-import type { ErrorResponse, HealthResponse } from '../ipc/protocol';
+import { isRunning } from '../ipc/health';
+import { toWebUrl } from '../utils/web-url';
 
 interface StartOptions {
   foreground?: boolean;
-}
-
-async function isRunning(socketPath: string): Promise<boolean> {
-  try {
-    const response = await requestJson<HealthResponse | ErrorResponse>({
-      socketPath,
-      path: '/v1/health',
-      method: 'GET',
-      timeoutMs: 750,
-    });
-
-    return response.status === 200;
-  } catch {
-    return false;
-  }
 }
 
 async function waitUntilUp(
@@ -99,7 +84,7 @@ export function registerStartCommand(program: Command): void {
               running: true,
               pid: proc.pid,
               socketPath: config.daemon.socketPath,
-              webUrl: `http://${config.daemon.webHost}:${config.daemon.webPort}`,
+              webUrl: toWebUrl(config.daemon.webHost, config.daemon.webPort),
             }),
           );
         } else {
@@ -107,7 +92,7 @@ export function registerStartCommand(program: Command): void {
             `${chalk.green('✓')} Daemon started (pid=${proc.pid}) ${chalk.dim(config.daemon.socketPath)}`,
           );
           console.log(
-            `${chalk.cyan('↗')} Dashboard: ${chalk.dim(`http://${config.daemon.webHost}:${config.daemon.webPort}`)}`,
+            `${chalk.cyan('↗')} Dashboard: ${chalk.dim(toWebUrl(config.daemon.webHost, config.daemon.webPort))}`,
           );
         }
       } catch (error) {

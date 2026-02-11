@@ -4,22 +4,30 @@
 import { existsSync, statSync } from 'node:fs';
 import { basename, resolve } from 'node:path';
 
-interface GitResult {
+export interface GitCommandResult {
   stdout: string;
   stderr: string;
   exitCode: number;
 }
 
-function runGit(cwd: string, args: string[]): GitResult {
+export function runGitCommand(
+  cwd: string,
+  args: string[],
+  options?: { trimOutput?: boolean },
+): GitCommandResult {
   const proc = Bun.spawnSync({
     cmd: ['git', '-C', cwd, ...args],
     stdout: 'pipe',
     stderr: 'pipe',
   });
 
+  const trimOutput = options?.trimOutput !== false;
+  const stdoutRaw = proc.stdout.toString('utf8');
+  const stderrRaw = proc.stderr.toString('utf8');
+
   return {
-    stdout: proc.stdout.toString('utf8').trim(),
-    stderr: proc.stderr.toString('utf8').trim(),
+    stdout: trimOutput ? stdoutRaw.trim() : stdoutRaw,
+    stderr: trimOutput ? stderrRaw.trim() : stderrRaw,
     exitCode: proc.exitCode,
   };
 }
@@ -39,7 +47,7 @@ export function validateGitRepo(repoPath: string): string {
     throw new Error(`Not a directory: ${absPath}`);
   }
 
-  const result = runGit(absPath, ['rev-parse', '--show-toplevel']);
+  const result = runGitCommand(absPath, ['rev-parse', '--show-toplevel']);
   if (result.exitCode !== 0 || !result.stdout) {
     throw new Error(`Not a git repository: ${absPath}`);
   }
@@ -49,7 +57,7 @@ export function validateGitRepo(repoPath: string): string {
 
 /** Resolve the absolute .git directory for a repository. */
 export function resolveGitDir(repoPath: string): string {
-  const result = runGit(repoPath, ['rev-parse', '--absolute-git-dir']);
+  const result = runGitCommand(repoPath, ['rev-parse', '--absolute-git-dir']);
   if (result.exitCode !== 0 || !result.stdout) {
     throw new Error(`Failed to resolve .git dir for repository: ${repoPath}`);
   }
@@ -62,7 +70,7 @@ export function resolveGitDir(repoPath: string): string {
  * Tries origin HEAD first, then falls back to current checked-out branch.
  */
 export function resolveDefaultBranch(repoPath: string): string {
-  const originHead = runGit(repoPath, [
+  const originHead = runGitCommand(repoPath, [
     'symbolic-ref',
     'refs/remotes/origin/HEAD',
   ]);
@@ -75,7 +83,11 @@ export function resolveDefaultBranch(repoPath: string): string {
     }
   }
 
-  const current = runGit(repoPath, ['rev-parse', '--abbrev-ref', 'HEAD']);
+  const current = runGitCommand(repoPath, [
+    'rev-parse',
+    '--abbrev-ref',
+    'HEAD',
+  ]);
   if (current.exitCode === 0 && current.stdout && current.stdout !== 'HEAD') {
     return current.stdout;
   }
@@ -90,7 +102,7 @@ export function repoNameFromPath(repoPath: string): string {
 
 /** Resolve the current HEAD SHA for a repository. */
 export function resolveHeadSha(repoPath: string): string {
-  const result = runGit(repoPath, ['rev-parse', 'HEAD']);
+  const result = runGitCommand(repoPath, ['rev-parse', 'HEAD']);
   if (result.exitCode !== 0 || !result.stdout) {
     throw new Error(`Failed to resolve HEAD SHA for repository: ${repoPath}`);
   }

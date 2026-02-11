@@ -8,13 +8,17 @@
  */
 import type { Database } from 'bun:sqlite';
 import {
-  appendEvent,
   type DetectorRepoView,
-  enqueueTriggerAndJob,
   listReposDueForCommitCheck,
   listReposDueForPrCheck,
   updateProbeState,
-} from '../db/queries';
+} from '../db/queries/detector-queries';
+import { appendEvent } from '../db/queries/event-queries';
+import { enqueueTriggerAndJob } from '../db/queries/repo-queries';
+import {
+  buildCommitPayload,
+  buildPrPayloadFromKey,
+} from '../runtime/review-job-payload';
 import { resolveCurrentPrKeyAsync, resolveHeadShaAsync } from '../utils/git';
 import { nowMs } from '../utils/time';
 
@@ -112,7 +116,7 @@ async function probeCommit(
       kind: 'commit',
       source: 'poll',
       subjectKey: `commit:${headSha}`,
-      payload: { path: repo.path, sha: headSha },
+      payload: buildCommitPayload(headSha),
       maxAttempts,
     });
 
@@ -183,7 +187,7 @@ async function probePr(
     // triggered hunter on every new head commit.
     if (!prKey || prKey === repo.last_pr_key) {
       // No PR on this branch, or same head sha — update stored key but don't enqueue.
-      if (prKey) stateUpdate.lastPrKey = prKey;
+      stateUpdate.lastPrKey = prKey;
       updateProbeState(db, repo.id, stateUpdate);
       return;
     }
@@ -197,7 +201,7 @@ async function probePr(
       kind: 'pr',
       source: 'poll',
       subjectKey: `pr:${prKey}`,
-      payload: { path: repo.path, prKey },
+      payload: buildPrPayloadFromKey(prKey),
       maxAttempts,
     });
 

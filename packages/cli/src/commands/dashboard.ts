@@ -7,15 +7,10 @@ import type {
   ErrorResponse,
   HealthResponse,
 } from '../ipc/protocol';
+import { toWebUrl } from '../utils/web-url';
 
 interface DashboardOptions {
   printUrl?: boolean;
-}
-
-function toWebUrl(host: string, port: number): string {
-  const normalizedHost =
-    host.includes(':') && !host.startsWith('[') ? `[${host}]` : host;
-  return `http://${normalizedHost}:${port}`;
 }
 
 function openUrlInBrowser(url: string): void {

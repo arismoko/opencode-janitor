@@ -152,7 +152,6 @@ describe('buildSystemPrompt', () => {
     expect(prompt).toContain('You are The Hunter');
     expect(prompt).toContain('# DOMAINS');
     expect(prompt).toContain('BUG');
-    expect(prompt).toContain('SECURITY');
     expect(prompt).toContain('CORRECTNESS');
     expect(prompt).toContain('# OUTPUT SCHEMA');
     expect(prompt).toContain('"type"');

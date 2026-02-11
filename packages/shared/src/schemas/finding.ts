@@ -57,7 +57,7 @@ export type JanitorOutput = z.infer<typeof JanitorOutput>;
 // ---------------------------------------------------------------------------
 
 /** Hunter domain values (exported for runtime iteration) */
-export const HUNTER_DOMAIN_VALUES = ['BUG', 'SECURITY', 'CORRECTNESS'] as const;
+export const HUNTER_DOMAIN_VALUES = ['BUG', 'CORRECTNESS'] as const;
 /** Hunter domain categories (catch fallback absorbs LLM domain drift) */
 export const HunterDomain = z.enum(HUNTER_DOMAIN_VALUES).catch('BUG');
 export type HunterDomain = z.infer<typeof HunterDomain>;

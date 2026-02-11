@@ -1,3 +1,5 @@
+import type { AgentName } from '@opencode-janitor/shared';
+
 export interface ErrorResponse {
   error: {
     code: string;
@@ -32,7 +34,7 @@ export interface StopResponse {
 export interface EnqueueReviewRequest {
   repoOrId: string;
   /** Agent name to run (janitor/hunter/inspector/scribe). */
-  agent: string;
+  agent: AgentName;
   /** PR number for hunter reviews. When set, builds PR-aware context via prKey(). */
   pr?: number;
 }
@@ -102,7 +104,7 @@ export interface DashboardRepoState {
 }
 
 export interface DashboardAgentState {
-  agent: string;
+  agent: AgentName;
   queuedRuns: number;
   runningRuns: number;
   succeededRuns: number;
@@ -116,7 +118,7 @@ export interface DashboardReportSummary {
   repoPath: string;
   jobId: string;
   subjectKey: string | null;
-  agent: string;
+  agent: AgentName;
   sessionId: string | null;
   status: 'queued' | 'running' | 'succeeded' | 'failed' | 'skipped';
   outcome:
@@ -141,7 +143,7 @@ export interface DashboardFinding {
   repoPath: string;
   jobId: string;
   agentRunId: string;
-  agent: string;
+  agent: AgentName;
   severity: 'P0' | 'P1' | 'P2' | 'P3';
   domain: string;
   location: string;

@@ -1,4 +1,5 @@
 import type { Event, OpencodeClient, SessionStatus } from '@opencode-ai/sdk';
+import { toCompletionSignal } from './session-event-utils';
 import { SessionOwnershipDispatcher } from './session-ownership-dispatcher';
 
 export type SessionCompletionOutcome =
@@ -9,7 +10,7 @@ export type SessionCompletionOutcome =
 
 export interface WaitForSessionOptions {
   directory: string;
-  timeoutMs: number;
+  timeoutMs?: number;
 }
 
 export interface SessionCompletionBus {
@@ -29,27 +30,6 @@ interface SessionCompletionBusOptions {
   reconnectMaxMs?: number;
   /** Non-blocking tap invoked for every incoming SSE event. Exceptions are swallowed. */
   onEventTap?: (event: Event) => void;
-}
-
-function sessionErrorMessage(error: unknown): string {
-  if (!error || typeof error !== 'object') {
-    return 'unknown session error';
-  }
-
-  const named = error as { name?: unknown; data?: unknown };
-  if (
-    named.data &&
-    typeof named.data === 'object' &&
-    typeof (named.data as { message?: unknown }).message === 'string'
-  ) {
-    return (named.data as { message: string }).message;
-  }
-
-  if (typeof named.name === 'string' && named.name.length > 0) {
-    return named.name;
-  }
-
-  return 'unknown session error';
 }
 
 export function createSessionCompletionBus(
@@ -72,29 +52,9 @@ export function createSessionCompletionBus(
   };
 
   const onEvent = (event: Event) => {
-    if (event.type === 'session.status') {
-      const { sessionID, status } = event.properties;
-      if (status.type === 'idle') {
-        complete(sessionID, { type: 'idle' });
-      }
-      return;
-    }
-
-    if (event.type === 'session.idle') {
-      complete(event.properties.sessionID, { type: 'idle' });
-      return;
-    }
-
-    if (event.type === 'session.error') {
-      const sessionID = event.properties.sessionID;
-      if (!sessionID) {
-        return;
-      }
-
-      complete(sessionID, {
-        type: 'error',
-        message: sessionErrorMessage(event.properties.error),
-      });
+    const signal = toCompletionSignal(event);
+    if (signal) {
+      complete(signal.sessionId, signal.outcome);
     }
   };
 
@@ -205,7 +165,7 @@ export function createSessionCompletionBus(
     waitFor(sessionId, waitOptions) {
       return dispatcher.register(sessionId, {
         directory: waitOptions.directory,
-        timeoutMs: waitOptions.timeoutMs,
+        ...(waitOptions.timeoutMs ? { timeoutMs: waitOptions.timeoutMs } : {}),
       });
     },
 

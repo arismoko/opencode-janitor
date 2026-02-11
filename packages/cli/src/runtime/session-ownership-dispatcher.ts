@@ -3,13 +3,13 @@ import type { SessionCompletionOutcome } from './session-completion-bus';
 interface OwnedSession {
   promise: Promise<SessionCompletionOutcome>;
   resolve: (outcome: SessionCompletionOutcome) => void;
-  timeout: ReturnType<typeof setTimeout>;
+  timeout?: ReturnType<typeof setTimeout>;
   directory: string;
 }
 
 export interface RegisterSessionOptions {
   directory: string;
-  timeoutMs: number;
+  timeoutMs?: number;
 }
 
 /**
@@ -34,12 +34,15 @@ export class SessionOwnershipDispatcher {
       resolve = r;
     });
 
-    const timeout = setTimeout(() => {
-      this.resolve(sessionId, {
-        type: 'timeout',
-        message: `session ${sessionId} did not reach idle before timeout`,
-      });
-    }, options.timeoutMs);
+    const timeout =
+      options.timeoutMs && options.timeoutMs > 0
+        ? setTimeout(() => {
+            this.resolve(sessionId, {
+              type: 'timeout',
+              message: `session ${sessionId} did not reach idle before timeout`,
+            });
+          }, options.timeoutMs)
+        : undefined;
 
     this.owners.set(sessionId, {
       promise,
@@ -58,7 +61,9 @@ export class SessionOwnershipDispatcher {
     }
 
     this.owners.delete(sessionId);
-    clearTimeout(owner.timeout);
+    if (owner.timeout) {
+      clearTimeout(owner.timeout);
+    }
     owner.resolve(outcome);
     return true;
   }
