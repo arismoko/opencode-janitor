@@ -8,8 +8,8 @@ import {
   recoverRunningAgentRuns,
   recoverRunningJobs,
 } from '../db/queries/scheduler-queries';
-import { startRepoWatch } from '../detectors/repo-watch';
 import { startScheduler } from '../scheduler/worker';
+import { startTriggerEngine } from '../triggers/engine';
 import { createAgentConfigMap } from './agent-factory';
 import type { RuntimeContext, ShutdownContext } from './context';
 import { createDefaultAgentRegistry } from './default-agent-specs';
@@ -98,14 +98,10 @@ export async function bootstrapRuntime(
       completionBus,
     });
 
-    const watch = startRepoWatch({
+    const watch = startTriggerEngine({
       db,
-      minPollSec: config.detector.minPollSec,
-      maxPollSec: config.detector.maxPollSec,
-      probeConcurrency: config.detector.probeConcurrency,
-      prTtlSec: config.detector.prTtlSec,
-      pollJitterPct: config.detector.pollJitterPct,
       maxAttempts: config.scheduler.maxAttempts,
+      config,
       onJobEnqueued: () => {
         scheduler.wake();
       },
