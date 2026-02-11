@@ -6,7 +6,21 @@
  * parse metadata so callers can fail closed on invalid output.
  */
 import type { z } from 'zod';
+import { AGENTS, type AgentId } from '../agents';
+import type {
+  HunterOutput,
+  InspectorOutput,
+  JanitorOutput,
+  ScribeOutput,
+} from '../schemas/finding';
 import type { ParseMeta } from '../types/finding';
+
+type AgentOutputById = {
+  janitor: JanitorOutput;
+  hunter: HunterOutput;
+  inspector: InspectorOutput;
+  scribe: ScribeOutput;
+};
 
 /** Parsed agent output with validation metadata */
 export interface ParseResult<T> {
@@ -20,13 +34,17 @@ export interface ParseResult<T> {
  * Flow: extract JSON → validate schema → return typed output + status.
  * Never throws — all failures are expressed via meta.status.
  */
-export function parseAgentOutput<T extends { findings: unknown[] }>(
+export function parseAgentOutput<TAgent extends AgentId>(
   raw: string,
-  schema: z.ZodType<T>,
-): ParseResult<T> {
+  agent: TAgent,
+): ParseResult<AgentOutputById[TAgent]> {
+  const schema = AGENTS[agent].outputSchema as z.ZodType<
+    AgentOutputById[TAgent]
+  >;
+
   if (!raw.trim()) {
     return {
-      output: { findings: [] } as unknown as T,
+      output: { findings: [] } as AgentOutputById[TAgent],
       meta: { status: 'empty_output', error: 'No text output from agent' },
     };
   }
@@ -34,7 +52,7 @@ export function parseAgentOutput<T extends { findings: unknown[] }>(
   const extracted = extractJSON(raw);
   if (!extracted) {
     return {
-      output: { findings: [] } as unknown as T,
+      output: { findings: [] } as AgentOutputById[TAgent],
       meta: {
         status: 'invalid_output',
         error: 'No valid JSON found in agent output',
@@ -49,7 +67,7 @@ export function parseAgentOutput<T extends { findings: unknown[] }>(
     const retry = schema.safeParse(normalized);
     if (!retry.success) {
       return {
-        output: { findings: [] } as unknown as T,
+        output: { findings: [] } as AgentOutputById[TAgent],
         meta: {
           status: 'invalid_output',
           error: `Schema validation failed: ${retry.error.message}`,

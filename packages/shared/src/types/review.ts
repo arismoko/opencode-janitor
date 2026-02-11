@@ -36,6 +36,14 @@ interface ReviewContextBase {
   label: string;
   /** Additional metadata lines injected into the CONTEXT section */
   metadata?: string[];
+  /** Trigger identifier that produced this review run */
+  trigger?: string;
+  /** Scope identifier resolved for this review run */
+  scope?: string;
+  /** Trigger subject key or human-readable equivalent */
+  subject?: string;
+  /** Scope-specific metadata lines shown near the SCOPE section */
+  scopeMetadata?: string[];
 }
 
 /** Diff-backed review context (commit/PR/workspace with local changes). */
@@ -66,4 +74,6 @@ export interface PromptConfig {
   maxFindings: number;
   /** Pre-rendered suppressions block (janitor only) */
   suppressionsBlock?: string;
+  /** Optional extra hints appended to review prompt */
+  promptHints?: string[];
 }

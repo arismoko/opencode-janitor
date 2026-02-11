@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'bun:test';
-import { HunterOutput, JanitorOutput } from '../schemas/finding';
 import { parseAgentOutput } from './output-codec';
+
+const HunterOutput = 'hunter' as const;
+const JanitorOutput = 'janitor' as const;
 
 // ---------------------------------------------------------------------------
 // Helpers

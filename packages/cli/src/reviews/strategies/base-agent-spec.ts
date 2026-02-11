@@ -5,7 +5,6 @@ import {
   type CommitContext,
   parseAgentOutput,
 } from '@opencode-janitor/shared';
-import type { z } from 'zod';
 import type { CliConfig } from '../../config/schema';
 import type {
   AgentRuntimeSpec,
@@ -159,8 +158,7 @@ export function createBaseAgentSpec(
     },
 
     parseOutput(rawOutput: string): ParsedAgentOutput {
-      const schema = profile.outputSchema as z.ZodType<ParsedAgentOutput>;
-      const parsed = parseAgentOutput(rawOutput, schema);
+      const parsed = parseAgentOutput(rawOutput, agentName);
 
       if (parsed.meta.status !== 'ok') {
         throw new Error(
