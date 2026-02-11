@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'bun:test';
+import { defaultLockPath, defaultPidPath, defaultSocketPath } from './paths';
 import {
   AgentsSection,
   CliConfigSchema,
@@ -30,9 +31,9 @@ describe('default values from empty input', () => {
 
   it('DaemonSection defaults', () => {
     const d = DaemonSection.parse({});
-    expect(d.socketPath).toBe('/tmp/opencode-janitor.sock');
-    expect(d.pidFile).toBe('/tmp/opencode-janitor.pid');
-    expect(d.lockFile).toBe('/tmp/opencode-janitor.lock');
+    expect(d.socketPath).toBe(defaultSocketPath());
+    expect(d.pidFile).toBe(defaultPidPath());
+    expect(d.lockFile).toBe(defaultLockPath());
     expect(d.logLevel).toBe('info');
     expect(d.webHost).toBe('127.0.0.1');
     expect(d.webPort).toBe(7700);
@@ -252,7 +253,7 @@ describe('partial overrides', () => {
     const d = DaemonSection.parse({ logLevel: 'debug' });
     expect(d.logLevel).toBe('debug');
     expect(d.webPort).toBe(7700);
-    expect(d.socketPath).toBe('/tmp/opencode-janitor.sock');
+    expect(d.socketPath).toBe(defaultSocketPath());
   });
 
   it('overriding one agent keeps other agents at defaults', () => {

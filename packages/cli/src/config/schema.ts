@@ -10,15 +10,16 @@ import {
   TriggerMode,
 } from '@opencode-janitor/shared';
 import { z } from 'zod';
+import { defaultLockPath, defaultPidPath, defaultSocketPath } from './paths';
 
 // ---------------------------------------------------------------------------
 // Section schemas
 // ---------------------------------------------------------------------------
 
 export const DaemonSection = z.object({
-  socketPath: z.string().default('/tmp/opencode-janitor.sock'),
-  pidFile: z.string().default('/tmp/opencode-janitor.pid'),
-  lockFile: z.string().default('/tmp/opencode-janitor.lock'),
+  socketPath: z.string().default(defaultSocketPath),
+  pidFile: z.string().default(defaultPidPath),
+  lockFile: z.string().default(defaultLockPath),
   logLevel: z.enum(['debug', 'info', 'warn', 'error']).default('info'),
   webHost: z.string().default('127.0.0.1'),
   webPort: z.number().int().min(1).max(65535).default(7700),

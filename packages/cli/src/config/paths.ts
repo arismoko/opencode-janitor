@@ -29,6 +29,35 @@ export function stateDir(): string {
   return join(xdgStateHome(), STATE_DIR_NAME);
 }
 
+/**
+ * Directory for ephemeral runtime files (socket, lock, pid).
+ *
+ * Prefers $XDG_RUNTIME_DIR (typically /run/user/<uid>, user-private with 0700)
+ * and falls back to stateDir() when unavailable (containers, macOS).
+ */
+export function runtimeDir(): string {
+  const xdgRuntime = process.env['XDG_RUNTIME_DIR'];
+  if (xdgRuntime) {
+    return join(xdgRuntime, STATE_DIR_NAME);
+  }
+  return stateDir();
+}
+
+/** Default path to the daemon Unix socket. */
+export function defaultSocketPath(): string {
+  return join(runtimeDir(), 'janitor.sock');
+}
+
+/** Default path to the daemon PID file. */
+export function defaultPidPath(): string {
+  return join(runtimeDir(), 'janitor.pid');
+}
+
+/** Default path to the daemon lock file. */
+export function defaultLockPath(): string {
+  return join(runtimeDir(), 'janitor.lock');
+}
+
 /** Default path to the CLI JSON config file. */
 export function defaultConfigPath(): string {
   return join(configDir(), 'janitor.json');

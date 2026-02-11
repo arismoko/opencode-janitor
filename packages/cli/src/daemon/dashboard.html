@@ -1009,8 +1009,13 @@
       };
 
       async function api(path, options) {
+        const headers = { 'content-type': 'application/json' };
+        const method = options?.method || 'GET';
+        if (window.__JANITOR_AUTH_TOKEN__ && (method === 'POST' || method === 'DELETE')) {
+          headers['authorization'] = 'Bearer ' + window.__JANITOR_AUTH_TOKEN__;
+        }
         const response = await fetch(path, {
-          headers: { 'content-type': 'application/json' },
+          headers,
           ...options,
         });
         const data = await response.json().catch(() => ({}));

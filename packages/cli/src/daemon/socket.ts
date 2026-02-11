@@ -1,3 +1,4 @@
+import { chmodSync } from 'node:fs';
 import type { EventRow } from '../db/models';
 import type { EventFilterParams, EventRowWithSession } from '../db/queries';
 import { toEventEntry } from '../ipc/event-entry';
@@ -435,7 +436,7 @@ export function handleApiRequest(
 export function createSocketServer(
   options: SocketServerOptions,
 ): ReturnType<typeof Bun.serve> {
-  return Bun.serve({
+  const server = Bun.serve({
     unix: options.socketPath,
     fetch(request) {
       const url = new URL(request.url);
@@ -448,4 +449,12 @@ export function createSocketServer(
       });
     },
   });
+
+  try {
+    chmodSync(options.socketPath, 0o600);
+  } catch {
+    // Socket may not support chmod on all platforms; best-effort.
+  }
+
+  return server;
 }

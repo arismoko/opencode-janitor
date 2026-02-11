@@ -249,3 +249,37 @@ export async function resolveCurrentPrKeyAsync(
     `gh pr view failed (exit ${result.exitCode}): ${result.stderr.slice(0, 200) || 'no stderr'}`,
   );
 }
+
+/**
+ * Resolve the HEAD SHA of a specific PR number from GitHub.
+ *
+ * Used when a manual `--pr` flag is given so the review key references the
+ * actual PR head commit, not the local working tree HEAD.
+ */
+export async function resolvePrHeadShaAsync(
+  repoPath: string,
+  prNumber: number,
+  timeoutMs?: number,
+): Promise<string> {
+  const result = await runGhAsync(
+    repoPath,
+    [
+      'pr',
+      'view',
+      String(prNumber),
+      '--json',
+      'headRefOid',
+      '--jq',
+      '.headRefOid',
+    ],
+    timeoutMs,
+  );
+
+  if (result.exitCode !== 0 || !result.stdout) {
+    throw new Error(
+      `Failed to resolve head SHA for PR #${prNumber}: ${result.stderr.slice(0, 200) || 'no output'}`,
+    );
+  }
+
+  return result.stdout;
+}

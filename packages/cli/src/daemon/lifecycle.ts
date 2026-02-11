@@ -22,7 +22,8 @@ import {
   shutdownRuntime,
 } from '../runtime/bootstrap';
 import type { SocketContext } from '../runtime/context';
-import { resolveHeadSha } from '../utils/git';
+import { resolveHeadSha, resolvePrHeadShaAsync } from '../utils/git';
+import { generateAuthToken, writeAuthToken } from './auth';
 import {
   createSocketServer,
   type DaemonStatusSnapshot,
@@ -68,6 +69,10 @@ export async function runDaemon(options: RunDaemonOptions): Promise<void> {
   let server: ReturnType<typeof createSocketServer> | null = null;
   let webServer: ReturnType<typeof createWebServer> | null = null;
   try {
+    // Generate and persist auth token for the web server.
+    const authToken = generateAuthToken();
+    writeAuthToken(authToken);
+
     const socketOptions: SocketServerOptions = {
       socketPath: rc.config.daemon.socketPath,
       getStatus: statusSnapshot,
@@ -86,7 +91,9 @@ export async function runDaemon(options: RunDaemonOptions): Promise<void> {
           );
         }
 
-        const sha = resolveHeadSha(repo.path);
+        const sha = pr
+          ? await resolvePrHeadShaAsync(repo.path, pr)
+          : resolveHeadSha(repo.path);
         const subjectKey = pr
           ? prKey(pr, sha)
           : manualKey(String(Date.now()), sha);
@@ -267,6 +274,7 @@ export async function runDaemon(options: RunDaemonOptions): Promise<void> {
       hostname: rc.config.daemon.webHost,
       port: rc.config.daemon.webPort,
       apiOptions: socketOptions,
+      authToken,
     });
   } catch (error) {
     server?.stop(true);
