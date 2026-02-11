@@ -48,6 +48,8 @@ function makeEventRow(overrides: Partial<EventRow> = {}): EventRow {
     repo_id: 'repo-1',
     job_id: 'job-1',
     agent_run_id: 'run-1',
+    trigger_event_id: 'event-1',
+    review_run_id: 'rrn-1',
     message: 'test event',
     payload_json: '{}',
     ...overrides,

@@ -75,6 +75,66 @@ const SCHEMA_SQL = `
 
   CREATE INDEX IF NOT EXISTS idx_repos_enabled ON repos(enabled, paused);
 
+  CREATE TABLE IF NOT EXISTS trigger_states (
+    repo_id TEXT NOT NULL REFERENCES repos(id) ON DELETE CASCADE,
+    trigger_id TEXT NOT NULL CHECK (trigger_id IN ('commit','pr','manual')),
+    state_json TEXT NOT NULL,
+    next_check_at INTEGER,
+    last_checked_at INTEGER,
+    updated_at INTEGER NOT NULL,
+    PRIMARY KEY (repo_id, trigger_id)
+  ) STRICT;
+
+  CREATE INDEX IF NOT EXISTS idx_trigger_states_next_check
+    ON trigger_states(trigger_id, next_check_at);
+
+  CREATE TABLE IF NOT EXISTS trigger_events (
+    id TEXT PRIMARY KEY,
+    repo_id TEXT NOT NULL REFERENCES repos(id) ON DELETE CASCADE,
+    trigger_id TEXT NOT NULL CHECK (trigger_id IN ('commit','pr','manual')),
+    event_key TEXT NOT NULL,
+    subject TEXT NOT NULL,
+    payload_json TEXT NOT NULL,
+    source TEXT NOT NULL CHECK (source IN ('fswatch','poll','tool-hook','cli','recovery')),
+    detected_at INTEGER NOT NULL,
+    UNIQUE(repo_id, trigger_id, event_key)
+  ) STRICT;
+
+  CREATE INDEX IF NOT EXISTS idx_trigger_events_repo_detected
+    ON trigger_events(repo_id, detected_at DESC);
+
+  CREATE TABLE IF NOT EXISTS review_runs (
+    id TEXT PRIMARY KEY,
+    repo_id TEXT NOT NULL REFERENCES repos(id) ON DELETE CASCADE,
+    trigger_event_id TEXT NOT NULL REFERENCES trigger_events(id) ON DELETE CASCADE,
+    agent TEXT NOT NULL CHECK (agent IN ('janitor','hunter','inspector','scribe')),
+    scope TEXT NOT NULL,
+    scope_input_json TEXT NOT NULL,
+    status TEXT NOT NULL CHECK (status IN ('queued','running','succeeded','failed','cancelled')),
+    priority INTEGER NOT NULL DEFAULT 100,
+    attempt INTEGER NOT NULL DEFAULT 0,
+    max_attempts INTEGER NOT NULL DEFAULT 3,
+    next_attempt_at INTEGER NOT NULL DEFAULT 0,
+    queued_at INTEGER NOT NULL,
+    started_at INTEGER,
+    finished_at INTEGER,
+    model_id TEXT,
+    variant TEXT,
+    session_id TEXT UNIQUE,
+    outcome TEXT,
+    summary_json TEXT,
+    findings_count INTEGER NOT NULL DEFAULT 0,
+    raw_output TEXT,
+    error_code TEXT,
+    error_message TEXT,
+    UNIQUE(trigger_event_id, agent)
+  ) STRICT;
+
+  CREATE INDEX IF NOT EXISTS idx_review_runs_status_priority
+    ON review_runs(status, priority, queued_at);
+  CREATE INDEX IF NOT EXISTS idx_review_runs_repo_status
+    ON review_runs(repo_id, status);
+
   CREATE TABLE IF NOT EXISTS review_triggers (
     id TEXT PRIMARY KEY,
     repo_id TEXT NOT NULL REFERENCES repos(id) ON DELETE CASCADE,
@@ -137,6 +197,7 @@ const SCHEMA_SQL = `
     repo_id TEXT NOT NULL REFERENCES repos(id) ON DELETE CASCADE,
     job_id TEXT NOT NULL REFERENCES review_jobs(id) ON DELETE CASCADE,
     agent_run_id TEXT NOT NULL REFERENCES agent_runs(id) ON DELETE CASCADE,
+    review_run_id TEXT REFERENCES review_runs(id) ON DELETE CASCADE,
     agent TEXT NOT NULL CHECK (agent IN ('janitor','hunter','inspector','scribe')),
     severity TEXT NOT NULL CHECK (severity IN ('P0','P1','P2','P3')),
     domain TEXT NOT NULL,
@@ -149,6 +210,7 @@ const SCHEMA_SQL = `
 
   CREATE INDEX IF NOT EXISTS idx_findings_repo_created ON findings(repo_id, created_at DESC);
   CREATE INDEX IF NOT EXISTS idx_findings_job_agent ON findings(job_id, agent);
+  CREATE INDEX IF NOT EXISTS idx_findings_review_run ON findings(review_run_id);
   CREATE INDEX IF NOT EXISTS idx_findings_fingerprint ON findings(fingerprint);
 
   CREATE TABLE IF NOT EXISTS event_journal (
@@ -159,6 +221,8 @@ const SCHEMA_SQL = `
     repo_id TEXT,
     job_id TEXT,
     agent_run_id TEXT,
+    trigger_event_id TEXT,
+    review_run_id TEXT,
     message TEXT NOT NULL,
     payload_json TEXT NOT NULL
   ) STRICT;
