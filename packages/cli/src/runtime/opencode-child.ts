@@ -48,6 +48,152 @@ const FATAL_STARTUP_RE =
   /(EADDRINUSE|address already in use|EACCES|permission denied)/i;
 const SIGKILL_GRACE_MS = 5_000;
 
+interface WaitForServerListeningOptions {
+  timeoutMs: number;
+  listeningRegex: RegExp;
+  fatalRegex: RegExp;
+}
+
+interface ChildReadinessResult {
+  url: string;
+  stdout: string;
+  stderr: string;
+}
+
+function waitForServerListening(
+  child: ChildProcess,
+  options: WaitForServerListeningOptions,
+): Promise<ChildReadinessResult> {
+  const { timeoutMs, listeningRegex, fatalRegex } = options;
+
+  return new Promise<ChildReadinessResult>((resolve, reject) => {
+    const stderrChunks: string[] = [];
+    const stdoutChunks: string[] = [];
+    let stdoutLineBuffer = '';
+    let stderrLineBuffer = '';
+    let settled = false;
+
+    const settleReady = (url: string) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      resolve({
+        url,
+        stdout: stdoutChunks.join(''),
+        stderr: stderrChunks.join(''),
+      });
+    };
+
+    const settleError = (error: Error) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      reject(error);
+    };
+
+    const timeout = setTimeout(() => {
+      settleError(
+        new Error(
+          `opencode child did not become ready within ${timeoutMs}ms.\n` +
+            `stdout: ${stdoutChunks.join('')}\n` +
+            `stderr: ${stderrChunks.join('')}`,
+        ),
+      );
+    }, timeoutMs);
+
+    const onStdoutData = (chunk: Buffer) => {
+      const text = chunk.toString();
+      stdoutChunks.push(text);
+      stdoutLineBuffer += text;
+
+      let lineEnd = stdoutLineBuffer.indexOf('\n');
+      while (lineEnd >= 0) {
+        const line = stdoutLineBuffer.slice(0, lineEnd).trim();
+        stdoutLineBuffer = stdoutLineBuffer.slice(lineEnd + 1);
+
+        const match = listeningRegex.exec(line);
+        if (match?.[1]) {
+          settleReady(match[1]);
+          return;
+        }
+
+        lineEnd = stdoutLineBuffer.indexOf('\n');
+      }
+
+      const pendingMatch = listeningRegex.exec(stdoutLineBuffer);
+      if (pendingMatch?.[1]) {
+        settleReady(pendingMatch[1]);
+      }
+    };
+
+    const onStderrData = (chunk: Buffer) => {
+      const text = chunk.toString();
+      stderrChunks.push(text);
+      stderrLineBuffer += text;
+
+      let lineEnd = stderrLineBuffer.indexOf('\n');
+      while (lineEnd >= 0) {
+        const line = stderrLineBuffer.slice(0, lineEnd).trim();
+        stderrLineBuffer = stderrLineBuffer.slice(lineEnd + 1);
+
+        if (fatalRegex.test(line)) {
+          settleError(
+            new Error(
+              `opencode child reported startup failure before ready: ${line}\n` +
+                `stdout: ${stdoutChunks.join('')}\n` +
+                `stderr: ${stderrChunks.join('')}`,
+            ),
+          );
+          return;
+        }
+
+        lineEnd = stderrLineBuffer.indexOf('\n');
+      }
+
+      if (fatalRegex.test(stderrLineBuffer)) {
+        settleError(
+          new Error(
+            `opencode child reported startup failure before ready: ${stderrLineBuffer.trim()}\n` +
+              `stdout: ${stdoutChunks.join('')}\n` +
+              `stderr: ${stderrChunks.join('')}`,
+          ),
+        );
+      }
+    };
+
+    const onChildExit = (code: number | null, signal: string | null) => {
+      settleError(
+        new Error(
+          `opencode child exited before ready (code=${code}, signal=${signal}).\n` +
+            `stdout: ${stdoutChunks.join('')}\n` +
+            `stderr: ${stderrChunks.join('')}`,
+        ),
+      );
+    };
+
+    const onChildError = (err: Error) => {
+      settleError(
+        new Error(`opencode child spawn error: ${err.message}`, {
+          cause: err,
+        }),
+      );
+    };
+
+    const cleanup = () => {
+      clearTimeout(timeout);
+      child.stdout?.off('data', onStdoutData);
+      child.stderr?.off('data', onStderrData);
+      child.off('exit', onChildExit);
+      child.off('error', onChildError);
+    };
+
+    child.stdout?.on('data', onStdoutData);
+    child.stderr?.on('data', onStderrData);
+    child.once('exit', onChildExit);
+    child.once('error', onChildError);
+  });
+}
+
 export async function startOpencodeChild(
   options: OpencodeChildOptions,
 ): Promise<OpencodeChild> {
@@ -98,136 +244,23 @@ export async function startOpencodeChild(
     });
   };
 
-  return new Promise<OpencodeChild>((resolve, reject) => {
-    const stderrChunks: string[] = [];
-    const stdoutChunks: string[] = [];
-    let stdoutLineBuffer = '';
-    let stderrLineBuffer = '';
-    let settled = false;
+  try {
+    const readiness = await waitForServerListening(child, {
+      timeoutMs: startTimeoutMs,
+      listeningRegex: LISTENING_RE,
+      fatalRegex: FATAL_STARTUP_RE,
+    });
 
-    const settleReady = (url: string) => {
-      if (settled) return;
-      settled = true;
-      cleanup();
+    const client = createOpencodeClient({ baseUrl: readiness.url });
 
-      const client = createOpencodeClient({ baseUrl: url });
-
-      resolve({
-        client,
-        url,
-        pid: child.pid!,
-        close: closeChild,
-      });
+    return {
+      client,
+      url: readiness.url,
+      pid: child.pid!,
+      close: closeChild,
     };
-
-    const settleError = (error: Error) => {
-      if (settled) return;
-      settled = true;
-      cleanup();
-      reject(error);
-    };
-
-    const timeout = setTimeout(() => {
-      settleError(
-        new Error(
-          `opencode child did not become ready within ${startTimeoutMs}ms.\n` +
-            `stdout: ${stdoutChunks.join('')}\n` +
-            `stderr: ${stderrChunks.join('')}`,
-        ),
-      );
-      void closeChild();
-    }, startTimeoutMs);
-
-    const onStdoutData = (chunk: Buffer) => {
-      const text = chunk.toString();
-      stdoutChunks.push(text);
-      stdoutLineBuffer += text;
-
-      let lineEnd = stdoutLineBuffer.indexOf('\n');
-      while (lineEnd >= 0) {
-        const line = stdoutLineBuffer.slice(0, lineEnd).trim();
-        stdoutLineBuffer = stdoutLineBuffer.slice(lineEnd + 1);
-
-        const match = LISTENING_RE.exec(line);
-        if (match?.[1]) {
-          settleReady(match[1]);
-          return;
-        }
-
-        lineEnd = stdoutLineBuffer.indexOf('\n');
-      }
-
-      const pendingMatch = LISTENING_RE.exec(stdoutLineBuffer);
-      if (pendingMatch?.[1]) {
-        settleReady(pendingMatch[1]);
-      }
-    };
-
-    const onStderrData = (chunk: Buffer) => {
-      const text = chunk.toString();
-      stderrChunks.push(text);
-      stderrLineBuffer += text;
-
-      let lineEnd = stderrLineBuffer.indexOf('\n');
-      while (lineEnd >= 0) {
-        const line = stderrLineBuffer.slice(0, lineEnd).trim();
-        stderrLineBuffer = stderrLineBuffer.slice(lineEnd + 1);
-
-        if (FATAL_STARTUP_RE.test(line)) {
-          settleError(
-            new Error(
-              `opencode child reported startup failure before ready: ${line}\n` +
-                `stdout: ${stdoutChunks.join('')}\n` +
-                `stderr: ${stderrChunks.join('')}`,
-            ),
-          );
-          void closeChild();
-          return;
-        }
-
-        lineEnd = stderrLineBuffer.indexOf('\n');
-      }
-
-      if (FATAL_STARTUP_RE.test(stderrLineBuffer)) {
-        settleError(
-          new Error(
-            `opencode child reported startup failure before ready: ${stderrLineBuffer.trim()}\n` +
-              `stdout: ${stdoutChunks.join('')}\n` +
-              `stderr: ${stderrChunks.join('')}`,
-          ),
-        );
-        void closeChild();
-      }
-    };
-
-    const onChildExit = (code: number | null, signal: string | null) => {
-      settleError(
-        new Error(
-          `opencode child exited before ready (code=${code}, signal=${signal}).\n` +
-            `stdout: ${stdoutChunks.join('')}\n` +
-            `stderr: ${stderrChunks.join('')}`,
-        ),
-      );
-    };
-
-    const onChildError = (err: Error) => {
-      settleError(
-        new Error(`opencode child spawn error: ${err.message}`, {
-          cause: err,
-        }),
-      );
-    };
-
-    const cleanup = () => {
-      clearTimeout(timeout);
-      child.stdout?.off('data', onStdoutData);
-      child.stderr?.off('data', onStderrData);
-      child.off('exit', onChildExit);
-      child.off('error', onChildError);
-    };
-    child.stdout!.on('data', onStdoutData);
-    child.stderr!.on('data', onStderrData);
-    child.once('exit', onChildExit);
-    child.once('error', onChildError);
-  });
+  } catch (error) {
+    void closeChild();
+    throw error;
+  }
 }

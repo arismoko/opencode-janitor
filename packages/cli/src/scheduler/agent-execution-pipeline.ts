@@ -12,7 +12,7 @@ import {
   markAgentRunFailed,
   markAgentRunRunning,
   markAgentRunSucceeded,
-} from '../db/queries';
+} from '../db/queries/scheduler-queries';
 import {
   abortSession,
   createReviewSession,
@@ -30,8 +30,6 @@ import {
   classifyCompletionFailure,
   type FailureClassification,
 } from './retry-policy';
-
-const AGENT_COMPLETION_TIMEOUT_MS = 180_000;
 
 export interface AgentRunResult {
   success: boolean;
@@ -121,7 +119,6 @@ export function createAgentExecutionPipeline(
 
         const completion = completionBus.waitFor(sessionId, {
           directory: job.path,
-          timeoutMs: AGENT_COMPLETION_TIMEOUT_MS,
         });
 
         await promptReviewAsync(client, {

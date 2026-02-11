@@ -88,8 +88,14 @@ function makePrTrigger(prNumber = 42): PrTriggerContext {
   };
 }
 
-function makeManualTrigger(): ManualTriggerContext {
-  return { kind: 'manual' };
+function makeManualTrigger(
+  commitContextPartial?: Partial<CommitContext>,
+): ManualTriggerContext {
+  return {
+    kind: 'manual',
+    commitSha: COMMIT_SHA,
+    commitContext: makeCommitContext(commitContextPartial),
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -287,41 +293,102 @@ describe('prepareContext', () => {
         'Subject: fix: resolve edge case',
         'Parents: parent1sha',
       ]);
-      expect(result.reviewContext.changedFiles).toEqual([
-        { status: 'M', path: 'src/foo.ts' },
-      ]);
-      expect(result.reviewContext.patchTruncated).toBe(false);
+      expect(result.reviewContext.mode).toBe('diff');
+      if (result.reviewContext.mode === 'diff') {
+        expect(result.reviewContext.changedFiles).toEqual([
+          { status: 'M', path: 'src/foo.ts' },
+        ]);
+        expect(result.reviewContext.patchTruncated).toBe(false);
+      }
     });
 
-    it('includes manual metadata when kind=manual', () => {
+    it('uses workspace diff context for manual trigger when workspace has changes', () => {
       const input: PrepareContextInput = {
         config,
         job,
-        trigger: {
-          kind: 'manual',
-          commitSha: COMMIT_SHA,
-          commitContext: makeCommitContext(),
-        } as unknown as CommitTriggerContext,
+        trigger: makeManualTrigger(),
       };
 
-      // Janitor's prepareContext accesses trigger.commitSha unconditionally,
-      // so we provide a manual trigger that has commitSha+commitContext
-      const manualWithContext = {
-        kind: 'manual' as const,
-        commitSha: COMMIT_SHA,
-        commitContext: makeCommitContext(),
-      };
+      const result = janitorSpec.prepareContext(input);
 
-      const result = janitorSpec.prepareContext({
-        config,
-        job,
-        trigger: manualWithContext as any,
-      });
-
+      expect(result.reviewContext.mode).toBe('diff');
+      expect(result.reviewContext.label).toBe('Manual workspace review');
       expect(result.reviewContext.metadata).toContain('Trigger: manual');
       expect(result.reviewContext.metadata).toContain(
         'Mode: staged + unstaged workspace changes',
       );
+      if (result.reviewContext.mode === 'diff') {
+        expect(result.reviewContext.changedFiles).toEqual([
+          { status: 'M', path: 'src/foo.ts' },
+        ]);
+        expect(result.reviewContext.patch.length).toBeGreaterThan(0);
+      }
+    });
+
+    it('falls back to repo-wide mode for manual trigger when workspace is clean', () => {
+      const input: PrepareContextInput = {
+        config,
+        job,
+        trigger: makeManualTrigger({ changedFiles: [], patch: '' }),
+      };
+
+      const result = janitorSpec.prepareContext(input);
+
+      expect(result.reviewContext.mode).toBe('repo');
+      expect(result.reviewContext.label).toBe('Manual repo-wide analysis');
+      if (result.reviewContext.mode === 'repo') {
+        expect(result.reviewContext.reason).toBe('empty-workspace-fallback');
+        expect(result.reviewContext.metadata).toContain(
+          'Mode: repo-wide fallback (workspace has no local changes)',
+        );
+      }
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Hunter — manual trigger
+  // -------------------------------------------------------------------------
+  describe('hunter (manual trigger)', () => {
+    it('uses workspace diff context for manual trigger when workspace has changes', () => {
+      const input: PrepareContextInput = {
+        config,
+        job,
+        trigger: makeManualTrigger(),
+      };
+
+      const result = hunterSpec.prepareContext(input);
+
+      expect(result.reviewContext.mode).toBe('diff');
+      expect(result.reviewContext.label).toBe('Manual workspace review');
+      expect(result.reviewContext.metadata).toContain('Trigger: manual');
+      expect(result.reviewContext.metadata).toContain(
+        'Mode: staged + unstaged workspace changes',
+      );
+      if (result.reviewContext.mode === 'diff') {
+        expect(result.reviewContext.changedFiles).toEqual([
+          { status: 'M', path: 'src/foo.ts' },
+        ]);
+        expect(result.reviewContext.patch.length).toBeGreaterThan(0);
+      }
+    });
+
+    it('falls back to repo-wide mode for manual trigger when workspace is clean', () => {
+      const input: PrepareContextInput = {
+        config,
+        job,
+        trigger: makeManualTrigger({ changedFiles: [], patch: '' }),
+      };
+
+      const result = hunterSpec.prepareContext(input);
+
+      expect(result.reviewContext.mode).toBe('repo');
+      expect(result.reviewContext.label).toBe('Manual repo-wide analysis');
+      if (result.reviewContext.mode === 'repo') {
+        expect(result.reviewContext.reason).toBe('empty-workspace-fallback');
+        expect(result.reviewContext.metadata).toContain(
+          'Mode: repo-wide fallback (workspace has no local changes)',
+        );
+      }
     });
   });
 
@@ -380,14 +447,15 @@ describe('prepareContext', () => {
 
       const result = inspectorSpec.prepareContext(input);
 
+      expect(result.reviewContext.mode).toBe('repo');
       expect(result.reviewContext.label).toBe('Manual repo-wide analysis');
       expect(result.reviewContext.metadata).toEqual([
         'Trigger: manual',
         'Mode: full codebase inspection',
       ]);
-      // No changedFiles or patch for manual
-      expect(result.reviewContext.changedFiles).toBeUndefined();
-      expect(result.reviewContext.patch).toBeUndefined();
+      if (result.reviewContext.mode === 'repo') {
+        expect(result.reviewContext.reason).toBe('manual-repo');
+      }
     });
 
     it('produces commit-style context for commit trigger', () => {
@@ -399,11 +467,14 @@ describe('prepareContext', () => {
 
       const result = inspectorSpec.prepareContext(input);
 
+      expect(result.reviewContext.mode).toBe('diff');
       expect(result.reviewContext.label).toBe(
         `${COMMIT_SHA.slice(0, 8)} - fix: resolve edge case`,
       );
-      expect(result.reviewContext.changedFiles).toBeDefined();
-      expect(result.reviewContext.patch).toBeDefined();
+      if (result.reviewContext.mode === 'diff') {
+        expect(result.reviewContext.changedFiles).toBeDefined();
+        expect(result.reviewContext.patch).toBeDefined();
+      }
     });
   });
 

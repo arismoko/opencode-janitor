@@ -64,6 +64,7 @@ bun run src/index.ts dashboard
 
 - `janitor` and `hunter`: get workspace context built from staged + unstaged changes
   - includes tracked diff (`git diff HEAD`) plus untracked file patches
+  - if workspace is clean (no local changes), falls back to repo-wide analysis
 - `inspector`: always repo-wide manual analysis (no diff context injected)
 - `scribe`: always repo-wide documentation audit with markdown inventory
   - includes markdown file list + last git-modified date per file

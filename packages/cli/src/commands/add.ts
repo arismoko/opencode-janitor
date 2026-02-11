@@ -6,7 +6,8 @@ import chalk from 'chalk';
 import type { Command } from 'commander';
 import { openDatabase } from '../db/connection';
 import { ensureSchema } from '../db/migrations';
-import { addRepo, appendEvent } from '../db/queries';
+import { appendEvent } from '../db/queries/event-queries';
+import { addRepo } from '../db/queries/repo-queries';
 import {
   resolveDefaultBranch,
   resolveGitDir,

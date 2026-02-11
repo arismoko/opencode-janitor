@@ -8,8 +8,11 @@
  * - Mutating endpoints (POST, DELETE) require a Bearer auth token.
  * - GET endpoints are open (read-only, informational).
  */
-import { getDashboardHtml } from './frontend';
+
+import { toWebUrl } from '../utils/web-url';
+import { getDashboardHtml, getFrontendAsset } from './frontend';
 import {
+  buildRouteMap,
   errorResponse,
   handleApiRequest,
   type SocketServerOptions,
@@ -80,8 +83,9 @@ export function createWebServer(
     );
   }
 
-  const origin = `http://${options.hostname}:${options.port}`;
+  const origin = toWebUrl(options.hostname, options.port);
   const corsHeaders = buildCorsHeaders(origin);
+  const routeMap = buildRouteMap(options.apiOptions);
 
   return Bun.serve({
     hostname: options.hostname,
@@ -116,6 +120,19 @@ export function createWebServer(
         });
       }
 
+      if (request.method === 'GET' && url.pathname.startsWith('/_dashboard/')) {
+        const asset = getFrontendAsset(url.pathname);
+        if (asset) {
+          return new Response(asset.body, {
+            status: 200,
+            headers: {
+              'content-type': asset.contentType,
+              'cache-control': 'no-cache',
+            },
+          });
+        }
+      }
+
       // Auth gate: require Bearer token on mutating endpoints
       if (options.authToken && MUTATING_METHODS.has(request.method)) {
         const authError = checkAuth(request, options.authToken);
@@ -125,7 +142,7 @@ export function createWebServer(
       }
 
       // API routes
-      const apiResult = handleApiRequest(request, url, options.apiOptions);
+      const apiResult = handleApiRequest(request, url, routeMap);
       if (apiResult) {
         if (apiResult instanceof Promise) {
           return apiResult.then((r) => withCors(r, corsHeaders));

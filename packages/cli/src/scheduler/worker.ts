@@ -8,35 +8,37 @@ import type { Database } from 'bun:sqlite';
 import type { OpencodeClient } from '@opencode-ai/sdk';
 import type { CliConfig } from '../config/schema';
 import type { QueuedJobRow } from '../db/models';
+import { appendEvent } from '../db/queries/event-queries';
 import {
-  appendEvent,
   claimNextQueuedJobWithRepoLimit,
-  markJobFailed,
   markJobSucceeded,
-  requeueJob,
-} from '../db/queries';
+} from '../db/queries/scheduler-queries';
 import { buildTriggerContext } from '../reviews/context';
 import type { AgentRuntimeRegistry } from '../runtime/agent-runtime-registry';
+import {
+  type ManualJobPayload,
+  parseReviewJobPayload,
+} from '../runtime/review-job-payload';
 import type { SessionCompletionBus } from '../runtime/session-completion-bus';
 import {
   type AgentExecutionPipeline,
-  type AgentRunResult,
   createAgentExecutionPipeline,
 } from './agent-execution-pipeline';
+import {
+  executeAgentsInChunks,
+  selectAgents,
+  summarizeExecution,
+} from './job-executor';
+import {
+  applyJobFailurePolicy,
+  persistFailedJobOutcome,
+  persistSuccessfulJobOutcome,
+} from './job-outcome-writer';
 import { createJobSignal } from './job-signal';
 import { classifyUnexpectedJobError } from './retry-policy';
 
 const DEFAULT_STOP_TIMEOUT_MS = 10_000;
 const FALLBACK_HEARTBEAT_MS = 1000;
-
-function computeRetryBackoffMs(baseMs: number, attempt: number): number {
-  const exponent = Math.max(0, attempt - 1);
-  return baseMs * 2 ** exponent;
-}
-
-function computeNextAttemptAt(baseMs: number, attempt: number): number {
-  return Date.now() + computeRetryBackoffMs(baseMs, attempt);
-}
 
 export interface SchedulerDeps {
   db: Database;
@@ -135,15 +137,6 @@ export function startScheduler(deps: SchedulerDeps): SchedulerHandle {
   };
 }
 
-function payloadSha(payloadRaw: string): string | null {
-  try {
-    const payload = JSON.parse(payloadRaw) as { sha?: unknown };
-    return typeof payload.sha === 'string' ? payload.sha : null;
-  } catch {
-    return null;
-  }
-}
-
 async function processJob(
   deps: SchedulerDeps,
   pipeline: AgentExecutionPipeline,
@@ -160,25 +153,11 @@ async function processJob(
       jobId: job.id,
     });
 
-    const sha = payloadSha(job.payload_json);
-    const trigger = buildTriggerContext(job.path, job.subject_key, sha);
-
-    // If the trigger payload specifies a single agent, filter to just that agent.
-    const payload = JSON.parse(job.payload_json) as Record<string, unknown>;
+    const payload = parseReviewJobPayload(job.payload_json, job.kind);
+    const trigger = buildTriggerContext(job.path, job.subject_key, payload.sha);
     const requestedAgent =
-      typeof payload.agent === 'string' ? payload.agent : null;
-
-    const selectedSpecs = registry.agents().filter((spec) => {
-      if (requestedAgent) {
-        const agentConfig = config.agents[spec.agent];
-        return (
-          spec.agent === requestedAgent &&
-          agentConfig.enabled &&
-          agentConfig.trigger !== 'never'
-        );
-      }
-      return spec.supportsTrigger(config, job.kind);
-    });
+      job.kind === 'manual' ? (payload as ManualJobPayload).agent : null;
+    const selectedSpecs = selectAgents(deps, job, requestedAgent);
 
     if (selectedSpecs.length === 0) {
       markJobSucceeded(db, job.id);
@@ -192,156 +171,28 @@ async function processJob(
       return;
     }
 
-    const parallelism = config.scheduler.agentParallelism;
-    const allResults: AgentRunResult[] = [];
-
-    for (let i = 0; i < selectedSpecs.length; i += parallelism) {
-      const chunk = selectedSpecs.slice(i, i + parallelism);
-      const chunkResults = await Promise.all(
-        chunk.map((spec) => pipeline.execute(job, spec, trigger)),
-      );
-      allResults.push(...chunkResults);
-    }
-
-    const totalFindings = allResults.reduce(
-      (sum, result) => sum + result.findingsCount,
-      0,
+    const resultByAgent = await executeAgentsInChunks(
+      pipeline,
+      job,
+      selectedSpecs,
+      config.scheduler.agentParallelism,
+      trigger,
     );
-    const agentRuns = selectedSpecs.map((spec, index) => {
-      const result = allResults[index];
-      return {
-        agent: spec.agent,
-        outcome: result?.outcome ?? 'failed_terminal',
-        findingsCount: result?.findingsCount ?? 0,
-        retryable: result?.retryable ?? false,
-        errorCode: result?.errorCode,
-        durationMs: result?.summary.durationMs ?? 0,
-      };
-    });
-    const failedRuns = selectedSpecs
-      .map((spec, index) => ({ spec, result: allResults[index] }))
-      .filter(
-        (
-          entry,
-        ): entry is {
-          spec: (typeof selectedSpecs)[number];
-          result: AgentRunResult;
-        } => !entry.result?.success,
-      );
 
-    if (failedRuns.length > 0) {
-      const allRetryable = failedRuns.every((entry) => entry.result.retryable);
-      const failedAgentDetails = failedRuns.map(
-        (entry) =>
-          `${entry.spec.agent}:${entry.result.errorCode ?? entry.result.outcome}`,
-      );
-      const message = `agent(s) failed: ${failedAgentDetails.join(', ')}`;
-
-      if (allRetryable && job.attempt < job.max_attempts) {
-        const nextAttemptAt = computeNextAttemptAt(
-          config.scheduler.retryBackoffMs,
-          job.attempt,
-        );
-        requeueJob(
-          db,
-          job.id,
-          'JOB_RETRY_TRANSIENT',
-          message,
-          nextAttemptAt,
-          'transient',
-        );
-        appendEvent(db, {
-          eventType: 'job.requeued',
-          message: `Job ${job.id} requeued after transient agent failure: ${message}`,
-          level: 'warn',
-          repoId: job.repo_id,
-          jobId: job.id,
-          payload: {
-            failedAgents: failedRuns.map((entry) => entry.spec.agent),
-            reasons: failedAgentDetails,
-            agentRuns,
-          },
-        });
-        return;
-      }
-
-      const hasCancelled = failedRuns.some(
-        (entry) => entry.result.outcome === 'cancelled',
-      );
-      const errorCode = hasCancelled
-        ? 'JOB_ERROR_CANCELLED'
-        : 'JOB_ERROR_TERMINAL';
-      const errorType = hasCancelled ? 'cancelled' : 'terminal';
-
-      markJobFailed(db, job.id, errorCode, message, errorType);
-      appendEvent(db, {
-        eventType: 'job.failed',
-        message: `Job ${job.id} failed: ${message}`,
-        level: 'error',
-        repoId: job.repo_id,
-        jobId: job.id,
-        payload: {
-          failedAgents: failedRuns.map((entry) => entry.spec.agent),
-          reasons: failedAgentDetails,
-          agentRuns,
-        },
-      });
+    const summary = summarizeExecution(selectedSpecs, resultByAgent);
+    if (summary.failedRuns.length > 0) {
+      persistFailedJobOutcome(db, config, job, summary);
       return;
     }
 
-    markJobSucceeded(db, job.id);
-    appendEvent(db, {
-      eventType: 'job.finished',
-      message: `Job ${job.id} finished with ${totalFindings} finding(s) across ${selectedSpecs.length} agent(s)`,
-      level: 'info',
-      repoId: job.repo_id,
-      jobId: job.id,
-      payload: {
-        findingsCount: totalFindings,
-        agents: selectedSpecs.map((spec) => spec.agent),
-        agentRuns,
-      },
-    });
+    persistSuccessfulJobOutcome(db, job, selectedSpecs, summary);
   } catch (error) {
     const classified = classifyUnexpectedJobError(error);
-    const message = classified.message;
-
-    if (classified.retryable && job.attempt < job.max_attempts) {
-      const nextAttemptAt = computeNextAttemptAt(
-        config.scheduler.retryBackoffMs,
-        job.attempt,
-      );
-      requeueJob(
-        db,
-        job.id,
-        classified.errorCode,
-        message,
-        nextAttemptAt,
+    applyJobFailurePolicy(db, config, job, classified, {
+      requeueEventMessage: `Job ${job.id} requeued after failure: ${classified.message}`,
+      failEventMessage: `Job ${job.id} failed: ${classified.message}`,
+      requeueErrorType:
         classified.errorType === 'transient' ? 'transient' : 'unknown',
-      );
-      appendEvent(db, {
-        eventType: 'job.requeued',
-        message: `Job ${job.id} requeued after failure: ${message}`,
-        level: 'warn',
-        repoId: job.repo_id,
-        jobId: job.id,
-      });
-      return;
-    }
-
-    markJobFailed(
-      db,
-      job.id,
-      classified.errorCode,
-      message,
-      classified.errorType,
-    );
-    appendEvent(db, {
-      eventType: 'job.failed',
-      message: `Job ${job.id} failed: ${message}`,
-      level: 'error',
-      repoId: job.repo_id,
-      jobId: job.id,
     });
   }
 }

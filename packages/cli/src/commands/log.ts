@@ -6,7 +6,7 @@ import type { Command } from 'commander';
 import { loadConfig } from '../config/loader';
 import { openDatabase } from '../db/connection';
 import { ensureSchema } from '../db/migrations';
-import { listEvents } from '../db/queries';
+import { listEvents } from '../db/queries/event-queries';
 import { requestSse } from '../ipc/client';
 import { toEventEntry } from '../ipc/event-entry';
 import type { EventJournalEntry } from '../ipc/protocol';

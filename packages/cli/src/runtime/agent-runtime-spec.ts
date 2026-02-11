@@ -37,8 +37,8 @@ export interface PrTriggerContext {
 
 export interface ManualTriggerContext {
   kind: 'manual';
-  commitSha?: string;
-  commitContext?: CommitContext;
+  commitSha: string;
+  commitContext: CommitContext;
 }
 
 export type TriggerContext =

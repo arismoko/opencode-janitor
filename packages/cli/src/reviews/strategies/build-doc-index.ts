@@ -5,22 +5,18 @@
  * and pass them as context metadata.
  */
 
+import { runGitCommand } from '../../utils/git';
+
 const DOC_EXTENSIONS = new Set(['.md', '.mdx', '.txt', '.rst', '.adoc']);
 const DOC_DIRS = new Set(['docs', 'doc', 'documentation', '.github']);
 
-function runGit(cwd: string, args: string[]): string {
-  const proc = Bun.spawnSync({
-    cmd: ['git', '-C', cwd, ...args],
-    stdout: 'pipe',
-    stderr: 'pipe',
-  });
-
-  const stdout = proc.stdout.toString('utf8').trim();
-  if (proc.exitCode !== 0) {
+function runGitOrEmpty(cwd: string, args: string[]): string {
+  const result = runGitCommand(cwd, args);
+  if (result.exitCode !== 0) {
     return '';
   }
 
-  return stdout;
+  return result.stdout;
 }
 
 /**
@@ -53,7 +49,7 @@ export function buildDocIndexMetadata(changedFiles: string[]): string | null {
 export function buildMarkdownFileInventoryMetadata(
   repoPath: string,
 ): string | null {
-  const filesRaw = runGit(repoPath, ['ls-files', '*.md']);
+  const filesRaw = runGitOrEmpty(repoPath, ['ls-files', '*.md']);
   if (!filesRaw) {
     return null;
   }
@@ -63,7 +59,7 @@ export function buildMarkdownFileInventoryMetadata(
     .filter(Boolean)
     .map((file) => {
       const lastModified =
-        runGit(repoPath, ['log', '-1', '--format=%cs', '--', file]) ||
+        runGitOrEmpty(repoPath, ['log', '-1', '--format=%cs', '--', file]) ||
         'unknown';
       return `- ${lastModified} ${file}`;
     });
