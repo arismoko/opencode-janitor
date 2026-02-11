@@ -111,7 +111,7 @@ export function resolveCurrentPrKey(repoPath: string): string | null {
       '--json',
       'number,headRefOid',
       '--jq',
-      '.number | tostring + ":" + .headRefOid',
+      '(.number | tostring) + ":" + .headRefOid',
     ],
     cwd: repoPath,
     stdout: 'pipe',
@@ -215,7 +215,7 @@ export async function resolveCurrentPrKeyAsync(
       '--json',
       'number,headRefOid',
       '--jq',
-      '.number | tostring + ":" + .headRefOid',
+      '(.number | tostring) + ":" + .headRefOid',
     ],
     timeoutMs,
   );
