@@ -14,6 +14,7 @@ import { loadConfig } from '../config/loader';
 import { requestJson } from '../ipc/client';
 import type { EnqueueReviewResponse, ErrorResponse } from '../ipc/protocol';
 import { validateGitRepo } from '../utils/git';
+import { registerAgentCommandsFromRegistry } from './agent-command-factory';
 
 function resolveRepo(raw?: string): string {
   if (!raw || raw.trim().length === 0) {
@@ -38,7 +39,8 @@ async function runAgent(
   program: Command,
   agent: AgentName,
   repoArg: string | undefined,
-  pr?: number,
+  scope?: string,
+  input?: Record<string, unknown>,
 ): Promise<void> {
   const rootOptions = program.opts<{ json?: boolean; config?: string }>();
   const json = rootOptions.json;
@@ -48,9 +50,11 @@ async function runAgent(
     const config = loadConfig(rootOptions.config);
 
     const body: Record<string, unknown> = { repoOrId, agent };
-    if (pr !== undefined) {
-      body.scope = 'pr';
-      body.input = { prNumber: pr };
+    if (scope) {
+      body.scope = scope;
+    }
+    if (input) {
+      body.input = input;
     }
 
     const response = await requestJson<EnqueueReviewResponse | ErrorResponse>({
@@ -69,6 +73,10 @@ async function runAgent(
 
     const payload = response.data as EnqueueReviewResponse;
     const { enqueued, repoPath, sha, subjectKey } = payload;
+    const prNumber =
+      scope === 'pr' && typeof input?.prNumber === 'number'
+        ? input.prNumber
+        : undefined;
 
     if (json) {
       console.log(
@@ -79,13 +87,14 @@ async function runAgent(
           sha,
           subjectKey,
           agent,
-          pr,
+          ...(scope ? { scope } : {}),
+          ...(input ? { input } : {}),
         }),
       );
       return;
     }
 
-    const prLabel = pr ? ` PR #${pr}` : '';
+    const prLabel = prNumber ? ` PR #${prNumber}` : '';
     const label = `${chalk.bold(agent)}${prLabel}`;
 
     if (enqueued) {
@@ -109,48 +118,13 @@ async function runAgent(
 }
 
 export function registerAgentCommands(program: Command): void {
-  // janitor (j) — structural cleanup
-  program
-    .command('janitor [repo]')
-    .alias('j')
-    .description('Run the Janitor agent (structural cleanup: YAGNI, DRY, DEAD)')
-    .action(async (repoArg?: string) => {
-      await runAgent(program, 'janitor', repoArg);
-    });
-
-  // hunter (h) — bug/correctness review, with optional --pr
-  program
-    .command('hunter [repo]')
-    .alias('h')
-    .description('Run the Hunter agent (bug/correctness defects)')
-    .option('--pr <number>', 'PR number to review (builds PR-aware context)')
-    .action(async (repoArg: string | undefined, options: { pr?: string }) => {
-      let pr: number | undefined;
-      if (options.pr !== undefined) {
-        pr = Number.parseInt(options.pr, 10);
-        if (!Number.isFinite(pr) || pr <= 0) {
-          console.error(`${chalk.red('✗')} --pr must be a positive integer`);
-          process.exit(1);
-        }
-      }
-      await runAgent(program, 'hunter', repoArg, pr);
-    });
-
-  // inspector (i) — deep inspection
-  program
-    .command('inspector [repo]')
-    .alias('i')
-    .description('Run the Inspector agent (deep code inspection)')
-    .action(async (repoArg?: string) => {
-      await runAgent(program, 'inspector', repoArg);
-    });
-
-  // scribe (s) — documentation review
-  program
-    .command('scribe [repo]')
-    .alias('s')
-    .description('Run the Scribe agent (documentation quality review)')
-    .action(async (repoArg?: string) => {
-      await runAgent(program, 'scribe', repoArg);
-    });
+  registerAgentCommandsFromRegistry(program, async (invocation) => {
+    await runAgent(
+      program,
+      invocation.agent,
+      invocation.repoArg,
+      invocation.scope,
+      invocation.input,
+    );
+  });
 }
