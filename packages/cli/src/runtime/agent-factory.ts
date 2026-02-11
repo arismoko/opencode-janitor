@@ -4,8 +4,7 @@
  * Plugin-style: data-driven agent configuration with centralized permission map.
  */
 import type { AgentConfig } from '@opencode-ai/sdk';
-import type { AgentName, AgentProfile } from '@opencode-janitor/shared';
-import { AGENT_NAMES, agentProfiles } from '@opencode-janitor/shared';
+import { AGENT_IDS, AGENTS, type AgentId } from '@opencode-janitor/shared';
 import { toJSONSchema, z } from 'zod';
 import type { CliConfig } from '../config/schema';
 
@@ -64,7 +63,7 @@ export const REVIEW_AGENT_TOOLS: ReviewAgentTools = {
 };
 
 function validateAgentConfig(
-  agent: AgentName,
+  agent: AgentId,
   config: ReviewAgentConfig,
 ): ReviewAgentConfig {
   const result = ReviewAgentConfigSchema.safeParse(config);
@@ -83,7 +82,7 @@ function validateAgentConfig(
 // ---------------------------------------------------------------------------
 
 export interface AgentDefinition {
-  name: AgentName;
+  name: AgentId;
   description: string;
   config: ReviewAgentConfig;
 }
@@ -92,19 +91,23 @@ export interface AgentDefinition {
 // System prompt builder
 // ---------------------------------------------------------------------------
 
-/** Build a system prompt from a profile, including role, domains, rules, and JSON schema. */
-export function buildSystemPrompt(profile: AgentProfile): string {
-  const schema = JSON.stringify(toJSONSchema(profile.outputSchema), null, 2);
+/** Build a system prompt from canonical definition fields. */
+type CanonicalAgentDefinition = (typeof AGENTS)[AgentId];
+
+export function buildSystemPrompt(
+  definition: CanonicalAgentDefinition,
+): string {
+  const schema = JSON.stringify(toJSONSchema(definition.outputSchema), null, 2);
 
   const sections: string[] = [
-    profile.role,
+    definition.role,
     '',
     `# DOMAINS`,
-    profile.domains.join(', '),
+    definition.domains.join(', '),
   ];
 
-  if (profile.rules) {
-    sections.push('', `# RULES`, profile.rules);
+  if (definition.rules) {
+    sections.push('', `# RULES`, definition.rules);
   }
 
   sections.push(
@@ -125,15 +128,15 @@ export function buildSystemPrompt(profile: AgentProfile): string {
 
 /** Create an AgentDefinition from a profile and CLI config. */
 export function createAgentDefinition(
-  profile: AgentProfile,
+  definition: CanonicalAgentDefinition,
   config: CliConfig,
 ): AgentDefinition {
-  const agentConfig = config.agents[profile.name];
+  const agentConfig = config.agents[definition.id];
   const modelID = agentConfig.modelId ?? config.opencode.defaultModelId;
 
-  const runtimeConfig = validateAgentConfig(profile.name, {
+  const runtimeConfig = validateAgentConfig(definition.id, {
     mode: 'subagent',
-    prompt: buildSystemPrompt(profile),
+    prompt: buildSystemPrompt(definition),
     permission: REVIEW_AGENT_PERMISSIONS,
     tools: REVIEW_AGENT_TOOLS,
     maxSteps: 2,
@@ -141,8 +144,8 @@ export function createAgentDefinition(
   });
 
   return {
-    name: profile.name,
-    description: profile.description,
+    name: definition.id,
+    description: definition.description,
     config: runtimeConfig,
   };
 }
@@ -150,13 +153,10 @@ export function createAgentDefinition(
 /** Create a map of all agent definitions keyed by agent name. */
 export function createAgentConfigMap(
   config: CliConfig,
-): Record<AgentName, AgentDefinition> {
-  const map = {} as Record<AgentName, AgentDefinition>;
-  for (const name of AGENT_NAMES) {
-    map[name] = createAgentDefinition(
-      agentProfiles.AGENT_PROFILES[name],
-      config,
-    );
+): Record<AgentId, AgentDefinition> {
+  const map = {} as Record<AgentId, AgentDefinition>;
+  for (const id of AGENT_IDS) {
+    map[id] = createAgentDefinition(AGENTS[id], config);
   }
   return map;
 }

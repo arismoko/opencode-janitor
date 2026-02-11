@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import { AGENT_NAMES, agentProfiles } from '@opencode-janitor/shared';
+import { AGENT_IDS, AGENTS } from '@opencode-janitor/shared';
 import { CliConfigSchema, defaultCliConfig } from '../config/schema';
 import {
   buildSystemPrompt,
@@ -59,13 +59,13 @@ describe('REVIEW_AGENT_TOOLS', () => {
 // ---------------------------------------------------------------------------
 
 describe('createAgentDefinition', () => {
-  it('produces a valid definition for each agent profile', () => {
-    for (const name of AGENT_NAMES) {
-      const profile = agentProfiles.AGENT_PROFILES[name];
-      const def = createAgentDefinition(profile, defaultCliConfig);
+  it('produces a valid definition for each canonical agent', () => {
+    for (const id of AGENT_IDS) {
+      const definition = AGENTS[id];
+      const def = createAgentDefinition(definition, defaultCliConfig);
 
-      expect(def.name).toBe(name);
-      expect(def.description).toBe(profile.description);
+      expect(def.name).toBe(id);
+      expect(def.description).toBe(definition.description);
       expect(def.config.mode).toBe('subagent');
       expect(def.config.maxSteps).toBe(2);
       expect(def.config.permission).toEqual(REVIEW_AGENT_PERMISSIONS);
@@ -73,9 +73,9 @@ describe('createAgentDefinition', () => {
     }
   });
 
-  it('includes the system prompt from the profile', () => {
-    const profile = agentProfiles.AGENT_PROFILES.janitor;
-    const def = createAgentDefinition(profile, defaultCliConfig);
+  it('includes the system prompt from the canonical definition', () => {
+    const definition = AGENTS.janitor;
+    const def = createAgentDefinition(definition, defaultCliConfig);
 
     // System prompt must contain role text and domains
     expect(def.config.prompt).toContain('You are The Janitor');
@@ -92,10 +92,7 @@ describe('createAgentDefinition', () => {
       },
     });
 
-    const def = createAgentDefinition(
-      agentProfiles.AGENT_PROFILES.janitor,
-      config,
-    );
+    const def = createAgentDefinition(AGENTS.janitor, config);
 
     expect(def.config.model).toBe('anthropic/claude-sonnet-4-20250514');
   });
@@ -105,19 +102,13 @@ describe('createAgentDefinition', () => {
       opencode: { defaultModelId: 'openai/gpt-4o' },
     });
 
-    const def = createAgentDefinition(
-      agentProfiles.AGENT_PROFILES.hunter,
-      config,
-    );
+    const def = createAgentDefinition(AGENTS.hunter, config);
 
     expect(def.config.model).toBe('openai/gpt-4o');
   });
 
   it('omits model field when neither per-agent nor default model is set', () => {
-    const def = createAgentDefinition(
-      agentProfiles.AGENT_PROFILES.hunter,
-      defaultCliConfig,
-    );
+    const def = createAgentDefinition(AGENTS.hunter, defaultCliConfig);
 
     // defaultCliConfig has defaultModelId = '' which is falsy
     expect(def.config.model).toBeUndefined();
@@ -131,10 +122,7 @@ describe('createAgentDefinition', () => {
       },
     });
 
-    const def = createAgentDefinition(
-      agentProfiles.AGENT_PROFILES.scribe,
-      config,
-    );
+    const def = createAgentDefinition(AGENTS.scribe, config);
 
     expect(def.config.model).toBe('anthropic/claude-sonnet-4-20250514');
   });
@@ -146,8 +134,8 @@ describe('createAgentDefinition', () => {
 
 describe('buildSystemPrompt', () => {
   it('includes role, domains, and output schema sections', () => {
-    const profile = agentProfiles.AGENT_PROFILES.hunter;
-    const prompt = buildSystemPrompt(profile);
+    const definition = AGENTS.hunter;
+    const prompt = buildSystemPrompt(definition);
 
     expect(prompt).toContain('You are The Hunter');
     expect(prompt).toContain('# DOMAINS');
@@ -157,22 +145,21 @@ describe('buildSystemPrompt', () => {
     expect(prompt).toContain('"type"');
   });
 
-  it('includes rules section when profile has rules', () => {
-    const profile = agentProfiles.AGENT_PROFILES.janitor;
-    const prompt = buildSystemPrompt(profile);
+  it('includes rules section when definition has rules', () => {
+    const definition = AGENTS.janitor;
+    const prompt = buildSystemPrompt(definition);
 
     expect(prompt).toContain('# RULES');
-    expect(profile.rules).toBeDefined();
-    expect(prompt).toContain(profile.rules!);
+    expect(definition.rules).toBeDefined();
+    expect(prompt).toContain(definition.rules!);
   });
 
-  it('omits rules section when profile has no rules', () => {
-    // Create a synthetic profile without rules
-    const profile = {
-      ...agentProfiles.AGENT_PROFILES.janitor,
+  it('omits rules section when definition has no rules', () => {
+    const definition = {
+      ...AGENTS.janitor,
       rules: undefined,
     };
-    const prompt = buildSystemPrompt(profile);
+    const prompt = buildSystemPrompt(definition);
 
     expect(prompt).not.toContain('# RULES');
   });
@@ -186,9 +173,9 @@ describe('createAgentConfigMap', () => {
   it('produces a definition for every agent name', () => {
     const map = createAgentConfigMap(defaultCliConfig);
 
-    for (const name of AGENT_NAMES) {
-      expect(map[name]).toBeDefined();
-      expect(map[name].name).toBe(name);
+    for (const id of AGENT_IDS) {
+      expect(map[id]).toBeDefined();
+      expect(map[id].name).toBe(id);
     }
   });
 
@@ -196,23 +183,23 @@ describe('createAgentConfigMap', () => {
     const map = createAgentConfigMap(defaultCliConfig);
     const keys = Object.keys(map).sort();
 
-    expect(keys).toEqual([...AGENT_NAMES].sort());
+    expect(keys).toEqual([...AGENT_IDS].sort());
   });
 
   it('enforces denied permissions on every agent in the map', () => {
     const map = createAgentConfigMap(defaultCliConfig);
 
-    for (const name of AGENT_NAMES) {
-      expect(map[name].config.permission).toEqual(REVIEW_AGENT_PERMISSIONS);
-      expect(map[name].config.tools).toEqual(REVIEW_AGENT_TOOLS);
+    for (const id of AGENT_IDS) {
+      expect(map[id].config.permission).toEqual(REVIEW_AGENT_PERMISSIONS);
+      expect(map[id].config.tools).toEqual(REVIEW_AGENT_TOOLS);
     }
   });
 
   it('all agents run as subagent mode', () => {
     const map = createAgentConfigMap(defaultCliConfig);
 
-    for (const name of AGENT_NAMES) {
-      expect(map[name].config.mode).toBe('subagent');
+    for (const id of AGENT_IDS) {
+      expect(map[id].config.mode).toBe('subagent');
     }
   });
 });
