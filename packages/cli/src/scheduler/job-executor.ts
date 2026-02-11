@@ -34,11 +34,7 @@ export function selectAgents(
   return registry.agents().filter((spec) => {
     if (requestedAgent) {
       const agentConfig = config.agents[spec.agent];
-      return (
-        spec.agent === requestedAgent &&
-        agentConfig.enabled &&
-        agentConfig.trigger !== 'never'
-      );
+      return spec.agent === requestedAgent && agentConfig.enabled;
     }
     return spec.supportsTrigger(config, job.kind);
   });

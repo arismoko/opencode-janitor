@@ -15,7 +15,8 @@ export {
   AgentRuntimeConfig,
   DiffConfig,
   ScopeConfig,
-  TriggerMode,
+  ScopeIdSchema,
+  TriggerIdSchema,
 } from './schemas/config';
 export * as findingSchemas from './schemas/finding';
 export { Severity } from './schemas/finding';

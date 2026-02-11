@@ -1,4 +1,5 @@
 import {
+  AGENTS,
   type AgentName,
   type AgentProfile,
   buildReviewPrompt,
@@ -131,11 +132,15 @@ export function createBaseAgentSpec(
       const agentConfig = config.agents[agentName];
       if (!agentConfig.enabled) return false;
 
-      const trigger = agentConfig.trigger;
-      if (trigger === 'never') return false;
-      if (trigger === 'both') return kind === 'commit' || kind === 'pr';
-      if (trigger === 'manual') return kind === 'manual';
-      return trigger === kind;
+      if (kind === 'manual') {
+        return true;
+      }
+
+      const supportedByAgent = AGENTS[agentName].capabilities.autoTriggers;
+      return (
+        agentConfig.autoTriggers.includes(kind) &&
+        supportedByAgent.includes(kind)
+      );
     },
 
     maxFindings(config: CliConfig): number {
