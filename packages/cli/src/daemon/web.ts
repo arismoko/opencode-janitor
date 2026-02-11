@@ -26,6 +26,12 @@ export interface WebServerOptions {
 /** Methods that mutate state and require auth. */
 const MUTATING_METHODS = new Set(['POST', 'DELETE']);
 
+function isLoopbackHost(hostname: string): boolean {
+  return (
+    hostname === '127.0.0.1' || hostname === '::1' || hostname === 'localhost'
+  );
+}
+
 function buildCorsHeaders(origin: string): Record<string, string> {
   return {
     'access-control-allow-origin': origin,
@@ -68,6 +74,12 @@ let cachedHtml: string | null = null;
 export function createWebServer(
   options: WebServerOptions,
 ): ReturnType<typeof Bun.serve> {
+  if (options.authToken && !isLoopbackHost(options.hostname)) {
+    throw new Error(
+      `Refusing to start web dashboard on non-loopback host with auth enabled: ${options.hostname}. Use 127.0.0.1, ::1, or localhost.`,
+    );
+  }
+
   const origin = `http://${options.hostname}:${options.port}`;
   const corsHeaders = buildCorsHeaders(origin);
 

@@ -5,12 +5,14 @@ import { Header } from './components/header';
 import { KeybindingsFooter } from './components/keybindings-footer';
 import { StatusBar } from './components/status-bar';
 import {
+  buildTranscript,
   clamp,
   eventLevelRank,
   mergeEvents,
   shortRepoName,
   sleep,
   toErrorMessage,
+  wrapLines,
 } from './helpers';
 import { DETAIL_KEYMAP, GLOBAL_KEYMAP, LIST_KEYMAP } from './keymap/keymap';
 import { useScopedKeymap } from './keymap/use-scoped-keymap';
@@ -42,8 +44,7 @@ import { ReposView } from './views/repos-view';
 
 const MAX_EVENTS_BUFFER = 600;
 
-const AGENT_PICKER_OPTIONS: Array<{ key: string | null; label: string }> = [
-  { key: null, label: 'Auto (manual trigger defaults)' },
+const AGENT_PICKER_OPTIONS: Array<{ key: string; label: string }> = [
   { key: 'janitor', label: 'Janitor' },
   { key: 'hunter', label: 'Hunter' },
   { key: 'inspector', label: 'Inspector' },
@@ -169,17 +170,20 @@ export function DashboardApp(props: DashboardAppProps) {
   const [historyLoading, setHistoryLoading] = useState(false);
 
   // Auto-set detailMode based on report status
+  const selectedReportId = selectedReport?.id ?? null;
+  const selectedReportStatus = selectedReport?.status ?? null;
+
   useEffect(() => {
-    if (!selectedReport) {
+    if (!selectedReportId) {
       setDetailMode('findings');
       setHistoricalSessionEvents([]);
       return;
     }
     const isRunning =
-      selectedReport.status === 'running' || selectedReport.status === 'queued';
+      selectedReportStatus === 'running' || selectedReportStatus === 'queued';
     setDetailMode(isRunning ? 'session' : 'findings');
     setHistoricalSessionEvents([]);
-  }, [selectedReport]);
+  }, [selectedReportId, selectedReportStatus]);
 
   // Fetch historical session events for completed reports on demand
   useEffect(() => {
@@ -256,12 +260,8 @@ export function DashboardApp(props: DashboardAppProps) {
   }, [socketPath, eventsLimit, reportsLimit]);
 
   const submitReview = useCallback(
-    (repoId: string, agent: string | null) => {
-      void enqueueReview(
-        { socketPath, timeoutMs: 3000 },
-        repoId,
-        agent ?? undefined,
-      )
+    (repoId: string, agent: string) => {
+      void enqueueReview({ socketPath, timeoutMs: 3000 }, repoId, agent)
         .then((response) => {
           if (response.status !== 200) {
             const err = response.data as ErrorResponse;
@@ -501,6 +501,49 @@ export function DashboardApp(props: DashboardAppProps) {
     return events.filter((event) => eventLevelRank(event.level) >= minLevel);
   }, [events, minLevel]);
 
+  /** Session events for the selected report (filtered from in-memory events). */
+  const sessionEvents = useMemo(() => {
+    if (!selectedReport) return [];
+    const sessionId = selectedReport.sessionId;
+    const agentRunId = selectedReport.id;
+    return events.filter((ev) => {
+      // Match session topics associated with this report.
+      if (
+        !ev.topic.startsWith('session.') ||
+        (ev.agentRunId !== agentRunId &&
+          (!sessionId || ev.sessionId !== sessionId))
+      ) {
+        return false;
+      }
+      return true;
+    });
+  }, [events, selectedReport]);
+
+  const isNarrow = termCols < 108 || termRows < 24;
+  const listPaneWidth = isNarrow ? termCols : 46;
+  const detailPaneWidth =
+    focusPane === 'detail' || isNarrow
+      ? termCols
+      : termCols - listPaneWidth - 3;
+  const visibleListRows = Math.max(6, termRows - 14);
+  const visibleEventRows = Math.max(6, termRows - 14);
+  const detailVisibleFindings = Math.max(2, Math.floor((termRows - 13) / 5));
+  const detailVisibleSessionLines = Math.max(6, detailVisibleFindings * 5);
+
+  const detailSessionEvents = useMemo(
+    () =>
+      historicalSessionEvents.length > 0
+        ? historicalSessionEvents
+        : sessionEvents,
+    [historicalSessionEvents, sessionEvents],
+  );
+
+  const detailSessionLineCount = useMemo(() => {
+    const transcript = buildTranscript(detailSessionEvents);
+    const contentWidth = Math.max(20, detailPaneWidth - 4);
+    return wrapLines(transcript, contentWidth - 2).length;
+  }, [detailPaneWidth, detailSessionEvents]);
+
   const handleAction = useCallback(
     (action: string) => {
       switch (action) {
@@ -689,7 +732,13 @@ export function DashboardApp(props: DashboardAppProps) {
           if (viewMode === 'reports') {
             if (focusPane === 'detail') {
               const findingsCount = currentDetail?.data.findings.length ?? 0;
-              const maxOffset = Math.max(0, findingsCount - 1);
+              const maxOffset =
+                detailMode === 'session'
+                  ? Math.max(
+                      0,
+                      detailSessionLineCount - detailVisibleSessionLines,
+                    )
+                  : Math.max(0, findingsCount - 1);
               setDetailOffset((offset) => Math.min(maxOffset, offset + 1));
             } else {
               setReportIndex((index) =>
@@ -735,6 +784,9 @@ export function DashboardApp(props: DashboardAppProps) {
     },
     [
       currentDetail,
+      detailMode,
+      detailSessionLineCount,
+      detailVisibleSessionLines,
       filteredEvents.length,
       exit,
       focusPane,
@@ -758,34 +810,6 @@ export function DashboardApp(props: DashboardAppProps) {
   useEffect(() => {
     setRepoIndex((index) => clamp(index, 0, Math.max(0, repos.length - 1)));
   }, [repos.length]);
-
-  const isNarrow = termCols < 108 || termRows < 24;
-  const listPaneWidth = isNarrow ? termCols : 46;
-  const detailPaneWidth =
-    focusPane === 'detail' || isNarrow
-      ? termCols
-      : termCols - listPaneWidth - 3;
-  const visibleListRows = Math.max(6, termRows - 14);
-  const visibleEventRows = Math.max(6, termRows - 14);
-  const detailVisibleFindings = Math.max(2, Math.floor((termRows - 13) / 5));
-
-  /** Session events for the selected report (filtered from in-memory events). */
-  const sessionEvents = useMemo(() => {
-    if (!selectedReport) return [];
-    const sessionId = selectedReport.sessionId;
-    const agentRunId = selectedReport.id;
-    return events.filter((ev) => {
-      // Match session topics associated with this report.
-      if (
-        !ev.topic.startsWith('session.') ||
-        (ev.agentRunId !== agentRunId &&
-          (!sessionId || ev.sessionId !== sessionId))
-      ) {
-        return false;
-      }
-      return true;
-    });
-  }, [events, selectedReport]);
 
   const reposEnabled = repos.filter(
     (repo) => repo.enabled && !repo.paused,
@@ -913,10 +937,7 @@ export function DashboardApp(props: DashboardAppProps) {
           {AGENT_PICKER_OPTIONS.map((option, index) => {
             const selected = index === agentPickerIndex;
             return (
-              <Text
-                key={option.key ?? 'auto'}
-                color={selected ? 'green' : undefined}
-              >
+              <Text key={option.key} color={selected ? 'green' : undefined}>
                 {selected ? '> ' : '  '}
                 {option.label}
               </Text>
