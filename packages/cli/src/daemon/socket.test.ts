@@ -1,6 +1,9 @@
 import { describe, expect, it, mock } from 'bun:test';
 import type { EventRow } from '../db/models';
-import type { EventFilterParams, EventRowWithSession } from '../db/queries';
+import type {
+  EventFilterParams,
+  EventRowWithSession,
+} from '../db/queries/event-queries';
 import type { EnqueueReviewRequest } from '../ipc/protocol';
 import {
   type DaemonStatusSnapshot,

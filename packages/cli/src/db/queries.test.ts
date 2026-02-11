@@ -2,40 +2,48 @@ import { Database } from 'bun:sqlite';
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import type { AgentRunSummary } from './models';
 import {
-  addRepo,
-  appendEvent,
-  claimNextQueuedJob,
-  claimNextQueuedJobWithRepoLimit,
-  createAgentRun,
-  deleteAgentRun,
-  enqueueTriggerAndJob,
-  findRepoByIdOrPath,
-  getLatestEventSeq,
-  insertFindingRows,
   listDashboardAgentState,
   listDashboardReportFindings,
   listDashboardReportSummaries,
   listDashboardRepoState,
+} from './queries/dashboard-queries';
+import {
+  listReposDueForCommitCheck,
+  listReposDueForPrCheck,
+  updateProbeState,
+} from './queries/detector-queries';
+import {
+  appendEvent,
+  getLatestEventSeq,
   listEvents,
   listEventsAfterSeq,
   listEventsAfterSeqFiltered,
+} from './queries/event-queries';
+import {
+  addRepo,
+  enqueueTriggerAndJob,
+  findRepoByIdOrPath,
   listRepos,
-  listReposDueForCommitCheck,
-  listReposDueForPrCheck,
+  type NewRepo,
+  removeRepoByIdOrPath,
+  type TriggerEnqueueInput,
+  updateRepoSignals,
+} from './queries/repo-queries';
+import {
+  claimNextQueuedJob,
+  claimNextQueuedJobWithRepoLimit,
+  createAgentRun,
+  deleteAgentRun,
+  insertFindingRows,
   markAgentRunFailed,
   markAgentRunRunning,
   markAgentRunSucceeded,
   markJobFailed,
   markJobSucceeded,
-  type NewRepo,
   recoverRunningAgentRuns,
   recoverRunningJobs,
-  removeRepoByIdOrPath,
   requeueJob,
-  type TriggerEnqueueInput,
-  updateProbeState,
-  updateRepoSignals,
-} from './queries';
+} from './queries/scheduler-queries';
 
 // ---------------------------------------------------------------------------
 // Schema DDL — mirrors ensureSchema() but with literal enum values to avoid

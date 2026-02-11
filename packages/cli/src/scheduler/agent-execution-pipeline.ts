@@ -12,7 +12,7 @@ import {
   markAgentRunFailed,
   markAgentRunRunning,
   markAgentRunSucceeded,
-} from '../db/queries';
+} from '../db/queries/scheduler-queries';
 import {
   abortSession,
   createReviewSession,

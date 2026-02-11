@@ -1,5 +1,5 @@
 import type { EventRow } from '../db/models';
-import type { EventRowWithSession } from '../db/queries';
+import type { EventRowWithSession } from '../db/queries/event-queries';
 import type { EventJournalEntry } from './protocol';
 
 function parsePayload(raw: string): Record<string, unknown> {

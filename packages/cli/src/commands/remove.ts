@@ -7,7 +7,8 @@ import chalk from 'chalk';
 import type { Command } from 'commander';
 import { openDatabase } from '../db/connection';
 import { ensureSchema } from '../db/migrations';
-import { appendEvent, removeRepoByIdOrPath } from '../db/queries';
+import { appendEvent } from '../db/queries/event-queries';
+import { removeRepoByIdOrPath } from '../db/queries/repo-queries';
 
 export function registerRemoveCommand(program: Command): void {
   program

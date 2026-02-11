@@ -2,25 +2,8 @@ import chalk from 'chalk';
 import type { Command } from 'commander';
 import { loadConfig } from '../config/loader';
 import { requestJson } from '../ipc/client';
-import type {
-  ErrorResponse,
-  HealthResponse,
-  StopResponse,
-} from '../ipc/protocol';
-
-async function isRunning(socketPath: string): Promise<boolean> {
-  try {
-    const response = await requestJson<HealthResponse | ErrorResponse>({
-      socketPath,
-      path: '/v1/health',
-      method: 'GET',
-      timeoutMs: 750,
-    });
-    return response.status === 200;
-  } catch {
-    return false;
-  }
-}
+import { isRunning } from '../ipc/health';
+import type { ErrorResponse, StopResponse } from '../ipc/protocol';
 
 export function registerStopCommand(program: Command): void {
   program
