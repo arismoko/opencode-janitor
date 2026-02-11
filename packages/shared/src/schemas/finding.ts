@@ -34,8 +34,10 @@ export const BaseFinding = z.object({
 // Janitor schemas
 // ---------------------------------------------------------------------------
 
-/** Janitor domain categories */
-export const JanitorDomain = z.enum(['YAGNI', 'DRY', 'DEAD']);
+/** Janitor domain values (exported for runtime iteration) */
+export const JANITOR_DOMAIN_VALUES = ['YAGNI', 'DRY', 'DEAD'] as const;
+/** Janitor domain categories (catch fallback absorbs LLM domain drift) */
+export const JanitorDomain = z.enum(JANITOR_DOMAIN_VALUES).catch('YAGNI');
 export type JanitorDomain = z.infer<typeof JanitorDomain>;
 
 /** A single janitor finding */
@@ -54,8 +56,10 @@ export type JanitorOutput = z.infer<typeof JanitorOutput>;
 // Hunter schemas
 // ---------------------------------------------------------------------------
 
-/** Hunter domain categories */
-export const HunterDomain = z.enum(['BUG', 'SECURITY', 'CORRECTNESS']);
+/** Hunter domain values (exported for runtime iteration) */
+export const HUNTER_DOMAIN_VALUES = ['BUG', 'SECURITY', 'CORRECTNESS'] as const;
+/** Hunter domain categories (catch fallback absorbs LLM domain drift) */
+export const HunterDomain = z.enum(HUNTER_DOMAIN_VALUES).catch('BUG');
 export type HunterDomain = z.infer<typeof HunterDomain>;
 
 /** A single hunter finding */
@@ -74,8 +78,14 @@ export type HunterOutput = z.infer<typeof HunterOutput>;
 // Inspector schemas
 // ---------------------------------------------------------------------------
 
-/** Inspector domain categories */
-export const InspectorDomain = z.enum(['COMPLEXITY', 'DESIGN', 'SMELL']);
+/** Inspector domain values (exported for runtime iteration) */
+export const INSPECTOR_DOMAIN_VALUES = [
+  'COMPLEXITY',
+  'DESIGN',
+  'SMELL',
+] as const;
+/** Inspector domain categories (catch fallback absorbs LLM domain drift) */
+export const InspectorDomain = z.enum(INSPECTOR_DOMAIN_VALUES).catch('SMELL');
 export type InspectorDomain = z.infer<typeof InspectorDomain>;
 
 /** A single inspector finding */
@@ -94,8 +104,10 @@ export type InspectorOutput = z.infer<typeof InspectorOutput>;
 // Scribe schemas
 // ---------------------------------------------------------------------------
 
-/** Scribe domain categories */
-export const ScribeDomain = z.enum(['DRIFT', 'GAP', 'RELEASE']);
+/** Scribe domain values (exported for runtime iteration) */
+export const SCRIBE_DOMAIN_VALUES = ['DRIFT', 'GAP', 'RELEASE'] as const;
+/** Scribe domain categories (catch fallback absorbs LLM domain drift) */
+export const ScribeDomain = z.enum(SCRIBE_DOMAIN_VALUES).catch('GAP');
 export type ScribeDomain = z.infer<typeof ScribeDomain>;
 
 /** A single scribe finding */

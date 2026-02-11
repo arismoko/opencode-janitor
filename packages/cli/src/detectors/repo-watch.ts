@@ -178,14 +178,11 @@ async function probePr(
       ),
     };
 
-    // Compare PR numbers only — same PR number = skip, regardless of head SHA.
-    // prKey format is "number:headSha"; we dedup on the number portion so that
-    // pushes to an open PR don't re-trigger hunter on the full PR diff.
-    const currentPrNumber = prKey?.split(':')[0];
-    const lastPrNumber = repo.last_pr_key?.split(':')[0];
-
-    if (!prKey || currentPrNumber === lastPrNumber) {
-      // Still tracking the same PR (or no PR) — update stored key but don't enqueue.
+    // Dedup on full prKey (number:headSha) — each push to the PR gets a new
+    // review. This matches the old plugin behavior where push detection
+    // triggered hunter on every new head commit.
+    if (!prKey || prKey === repo.last_pr_key) {
+      // No PR on this branch, or same head sha — update stored key but don't enqueue.
       if (prKey) stateUpdate.lastPrKey = prKey;
       updateProbeState(db, repo.id, stateUpdate);
       return;

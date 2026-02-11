@@ -109,13 +109,14 @@ export function resolveCurrentPrKey(repoPath: string): string | null {
       'pr',
       'view',
       '--json',
-      'number,headRefOid',
+      'number,headRefOid,state',
       '--jq',
-      '(.number | tostring) + ":" + .headRefOid',
+      'select(.state == "OPEN") | (.number | tostring) + ":" + .headRefOid',
     ],
     cwd: repoPath,
     stdout: 'pipe',
     stderr: 'pipe',
+    env: { ...process.env, GH_PROMPT_DISABLED: '1' },
   });
 
   if (proc.exitCode !== 0) {
@@ -134,6 +135,7 @@ const DEFAULT_PROBE_TIMEOUT_MS = 10_000;
 
 interface AsyncGitResult {
   stdout: string;
+  stderr: string;
   exitCode: number;
 }
 
@@ -154,8 +156,11 @@ async function runGitAsync(
 
   try {
     const exitCode = await proc.exited;
-    const stdout = await new Response(proc.stdout).text();
-    return { stdout: stdout.trim(), exitCode };
+    const [stdout, stderr] = await Promise.all([
+      new Response(proc.stdout).text(),
+      new Response(proc.stderr).text(),
+    ]);
+    return { stdout: stdout.trim(), stderr: stderr.trim(), exitCode };
   } finally {
     clearTimeout(timer);
   }
@@ -171,6 +176,7 @@ async function runGhAsync(
     cwd,
     stdout: 'pipe',
     stderr: 'pipe',
+    env: { ...process.env, GH_PROMPT_DISABLED: '1' },
   });
 
   const timer = setTimeout(() => {
@@ -179,8 +185,11 @@ async function runGhAsync(
 
   try {
     const exitCode = await proc.exited;
-    const stdout = await new Response(proc.stdout).text();
-    return { stdout: stdout.trim(), exitCode };
+    const [stdout, stderr] = await Promise.all([
+      new Response(proc.stdout).text(),
+      new Response(proc.stderr).text(),
+    ]);
+    return { stdout: stdout.trim(), stderr: stderr.trim(), exitCode };
   } finally {
     clearTimeout(timer);
   }
@@ -213,16 +222,25 @@ export async function resolveCurrentPrKeyAsync(
       'pr',
       'view',
       '--json',
-      'number,headRefOid',
+      'number,headRefOid,state',
       '--jq',
-      '(.number | tostring) + ":" + .headRefOid',
+      'select(.state == "OPEN") | (.number | tostring) + ":" + .headRefOid',
     ],
     timeoutMs,
   );
 
-  if (result.exitCode !== 0) {
+  if (result.exitCode === 0) {
+    return result.stdout || null;
+  }
+
+  // exit 1 = no PR for current branch (expected, not an error)
+  if (result.exitCode === 1) {
     return null;
   }
 
-  return result.stdout || null;
+  // exit > 1 = gh CLI error (auth, network, rate limit) — surface as throw
+  // so probePr logs a detector.error event instead of silently treating as "no PR"
+  throw new Error(
+    `gh pr view failed (exit ${result.exitCode}): ${result.stderr.slice(0, 200) || 'no stderr'}`,
+  );
 }

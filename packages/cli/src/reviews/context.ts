@@ -48,6 +48,7 @@ function runGh(cwd: string, args: string[]): string {
     cwd,
     stdout: 'pipe',
     stderr: 'pipe',
+    env: { ...process.env, GH_PROMPT_DISABLED: '1' },
   });
 
   const stdout = proc.stdout.toString('utf8').trim();

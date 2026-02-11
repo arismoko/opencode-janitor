@@ -32,15 +32,6 @@ export const SchedulerSection = z.object({
   retryBackoffMs: z.number().int().min(100).default(3000),
 });
 
-export const GitSection = z.object({
-  commitDebounceMs: z.number().int().min(0).default(1200),
-  commitPollSec: z.number().int().min(1).default(15),
-  prPollSec: z.number().int().min(5).default(20),
-  prBaseBranch: z.string().default('main'),
-  enableFsWatch: z.boolean().default(true),
-  enableGhPr: z.boolean().default(true),
-});
-
 export const DetectorSection = z.object({
   minPollSec: z.number().int().min(1).default(15),
   maxPollSec: z.number().int().min(1).default(60),
@@ -82,7 +73,6 @@ export const AgentsSection = z.object({
 export const CliConfigSchema = z.object({
   daemon: DaemonSection.prefault({}),
   scheduler: SchedulerSection.prefault({}),
-  git: GitSection.prefault({}),
   detector: DetectorSection.prefault({}),
   opencode: OpencodeSection.prefault({}),
   scope: ScopeSection.prefault({}),

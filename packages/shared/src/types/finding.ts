@@ -16,11 +16,10 @@ import type {
   Severity as _Severity,
 } from '../schemas/finding';
 import {
-  HunterDomain as _HunterDomainSchema,
-  InspectorDomain as _InspectorDomainSchema,
-  JanitorDomain as _JanitorDomainSchema,
-  ScribeDomain as _ScribeDomainSchema,
   Severity as _SeveritySchema,
+  HUNTER_DOMAIN_VALUES,
+  INSPECTOR_DOMAIN_VALUES,
+  SCRIBE_DOMAIN_VALUES,
 } from '../schemas/finding';
 
 // ---------------------------------------------------------------------------
@@ -41,12 +40,10 @@ export type ScribeFinding = _ScribeFinding;
 // Runtime domain values
 // ---------------------------------------------------------------------------
 
-export const HUNTER_DOMAINS: readonly HunterDomain[] =
-  _HunterDomainSchema.options;
+export const HUNTER_DOMAINS: readonly HunterDomain[] = HUNTER_DOMAIN_VALUES;
 export const INSPECTOR_DOMAINS: readonly InspectorDomain[] =
-  _InspectorDomainSchema.options;
-export const SCRIBE_DOMAINS: readonly ScribeDomain[] =
-  _ScribeDomainSchema.options;
+  INSPECTOR_DOMAIN_VALUES;
+export const SCRIBE_DOMAINS: readonly ScribeDomain[] = SCRIBE_DOMAIN_VALUES;
 export const SEVERITIES: readonly Severity[] = _SeveritySchema.options;
 
 // ---------------------------------------------------------------------------
