@@ -186,12 +186,18 @@ export function handleApiRequest(
         body && typeof body === 'object' && 'agent' in body
           ? (body as { agent?: unknown }).agent
           : undefined;
-      const validAgent =
-        typeof agent === 'string' && agent.trim().length > 0
-          ? agent.trim()
-          : undefined;
 
-      if (validAgent && !VALID_AGENT_NAMES.has(validAgent)) {
+      if (typeof agent !== 'string' || agent.trim().length === 0) {
+        return errorResponse(
+          400,
+          'INVALID_AGENT',
+          '`agent` is required and must be one of janitor, hunter, inspector, scribe',
+        );
+      }
+
+      const validAgent = agent.trim();
+
+      if (!VALID_AGENT_NAMES.has(validAgent)) {
         return errorResponse(
           400,
           'INVALID_AGENT',
@@ -199,10 +205,28 @@ export function handleApiRequest(
         );
       }
 
+      const prRaw =
+        body && typeof body === 'object' && 'pr' in body
+          ? (body as { pr?: unknown }).pr
+          : undefined;
+      const pr =
+        typeof prRaw === 'number' && Number.isInteger(prRaw) && prRaw > 0
+          ? prRaw
+          : undefined;
+
+      if (prRaw !== undefined && !pr) {
+        return errorResponse(
+          400,
+          'INVALID_PR',
+          '`pr` must be a positive integer',
+        );
+      }
+
       try {
         const response = await options.onEnqueueReview({
           repoOrId,
           agent: validAgent,
+          pr,
         });
         return json(200, response);
       } catch (error) {

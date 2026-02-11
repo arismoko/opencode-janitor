@@ -12,7 +12,7 @@ import { registerConfigCommand } from './commands/config';
 import { registerDashboardCommand } from './commands/dashboard';
 import { registerLogCommand } from './commands/log';
 import { registerRemoveCommand } from './commands/remove';
-import { registerReviewCommand } from './commands/review';
+import { registerAgentCommands } from './commands/review';
 import { registerStartCommand } from './commands/start';
 import { registerStatusCommand } from './commands/status';
 import { registerStopCommand } from './commands/stop';
@@ -36,7 +36,7 @@ registerDashboardCommand(program);
 registerStartCommand(program);
 registerStopCommand(program);
 registerStatusCommand(program);
-registerReviewCommand(program);
+registerAgentCommands(program);
 
 program
   .command('daemon', { hidden: true })

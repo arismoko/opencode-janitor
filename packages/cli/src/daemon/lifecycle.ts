@@ -1,5 +1,5 @@
 import { resolve as resolvePath } from 'node:path';
-import { manualKey } from '@opencode-janitor/shared';
+import { manualKey, prKey } from '@opencode-janitor/shared';
 import {
   appendEvent,
   deleteAgentRun,
@@ -74,7 +74,7 @@ export async function runDaemon(options: RunDaemonOptions): Promise<void> {
       onStopRequested: () => {
         shutdown();
       },
-      onEnqueueReview: async ({ repoOrId, agent }) => {
+      onEnqueueReview: async ({ repoOrId, agent, pr }) => {
         const normalized = resolvePath(repoOrId);
         const repo =
           findRepoByIdOrPath(rc.db, normalized) ??
@@ -87,26 +87,27 @@ export async function runDaemon(options: RunDaemonOptions): Promise<void> {
         }
 
         const sha = resolveHeadSha(repo.path);
-        const subjectKey = manualKey(String(Date.now()), sha);
+        const subjectKey = pr
+          ? prKey(pr, sha)
+          : manualKey(String(Date.now()), sha);
         const enqueued = enqueueTriggerAndJob(rc.db, {
           repoId: repo.id,
           kind: 'manual',
           source: 'cli',
           subjectKey,
-          payload: { sha, manual: true, ...(agent ? { agent } : {}) },
+          payload: { sha, manual: true, agent, ...(pr ? { pr } : {}) },
           maxAttempts: rc.config.scheduler.maxAttempts,
         });
 
         if (enqueued) {
           rc.scheduler.wake();
+          const prLabel = pr ? ` PR #${pr}` : '';
           appendEvent(rc.db, {
             eventType: 'review.enqueued',
             repoId: repo.id,
-            message: agent
-              ? `Manual ${agent} review enqueued for ${sha.slice(0, 10)}`
-              : `Manual review enqueued for ${sha.slice(0, 10)}`,
+            message: `Manual ${agent}${prLabel} review enqueued for ${sha.slice(0, 10)}`,
             level: 'info',
-            payload: { sha, subjectKey, ...(agent ? { agent } : {}) },
+            payload: { sha, subjectKey, agent, ...(pr ? { pr } : {}) },
           });
         }
 

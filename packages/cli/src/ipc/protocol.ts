@@ -31,8 +31,10 @@ export interface StopResponse {
 
 export interface EnqueueReviewRequest {
   repoOrId: string;
-  /** Optional agent name to run (janitor/hunter/inspector/scribe). Omit to run all matching agents. */
-  agent?: string;
+  /** Agent name to run (janitor/hunter/inspector/scribe). */
+  agent: string;
+  /** PR number for hunter reviews. When set, builds PR-aware context via prKey(). */
+  pr?: number;
 }
 
 export interface DeleteReportRequest {
