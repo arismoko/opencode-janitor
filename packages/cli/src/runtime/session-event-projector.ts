@@ -1,7 +1,7 @@
 import type { Database } from 'bun:sqlite';
 import type { Event } from '@opencode-ai/sdk';
 import { appendEvent } from '../db/queries/event-queries';
-import { findAgentRunContextBySessionId } from '../db/queries/scheduler-queries';
+import { findReviewRunContextBySessionId } from '../db/queries/review-run-queries';
 import { getSessionId } from './session-event-utils';
 
 export interface SessionEventProjector {
@@ -16,13 +16,13 @@ export function createSessionEventProjector(
       const sessionId = getSessionId(event);
       if (!sessionId) return;
 
-      const ctx = findAgentRunContextBySessionId(db, sessionId);
+      const ctx = findReviewRunContextBySessionId(db, sessionId);
       if (!ctx) return;
 
       const base = {
         repoId: ctx.repoId,
-        jobId: ctx.jobId,
-        agentRunId: ctx.agentRunId,
+        triggerEventId: ctx.triggerEventId,
+        reviewRunId: ctx.reviewRunId,
       };
 
       switch (event.type) {

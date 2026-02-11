@@ -15,7 +15,7 @@ export type ValidationErrorCode =
   | 'INVALID_SCOPE'
   | 'INVALID_SCOPE_INPUT'
   | 'INVALID_PR'
-  | 'INVALID_AGENT_RUN_ID';
+  | 'INVALID_REVIEW_RUN_ID';
 
 export class ValidationError extends Error {
   readonly code: ValidationErrorCode;
@@ -49,13 +49,13 @@ export function parseQueryInt(
 export function parseFilterParams(url: URL): EventFilterParams {
   const filters: EventFilterParams = {};
   const repoId = url.searchParams.get('repoId');
-  const jobId = url.searchParams.get('jobId');
-  const agentRunId = url.searchParams.get('agentRunId');
+  const triggerEventId = url.searchParams.get('triggerEventId');
+  const reviewRunId = url.searchParams.get('reviewRunId');
   const topic = url.searchParams.get('topic');
   const sessionId = url.searchParams.get('sessionId');
   if (repoId) filters.repoId = repoId;
-  if (jobId) filters.jobId = jobId;
-  if (agentRunId) filters.agentRunId = agentRunId;
+  if (triggerEventId) filters.triggerEventId = triggerEventId;
+  if (reviewRunId) filters.reviewRunId = reviewRunId;
   if (topic) filters.topic = topic;
   if (sessionId) filters.sessionId = sessionId;
   return filters;
@@ -77,8 +77,8 @@ export function requireString(value: unknown, field: string): string {
     const code =
       field === 'repoOrId'
         ? 'INVALID_REPO'
-        : field === 'agentRunId'
-          ? 'INVALID_AGENT_RUN_ID'
+        : field === 'reviewRunId'
+          ? 'INVALID_REVIEW_RUN_ID'
           : 'INVALID_BODY';
     throw new ValidationError(
       code,

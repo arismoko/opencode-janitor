@@ -4,10 +4,7 @@ import { acquireProcessLock } from '../daemon/lock';
 import { openDatabase } from '../db/connection';
 import { ensureSchema } from '../db/migrations';
 import { appendEvent } from '../db/queries/event-queries';
-import {
-  recoverRunningAgentRuns,
-  recoverRunningJobs,
-} from '../db/queries/scheduler-queries';
+import { recoverRunningReviewRuns } from '../db/queries/review-run-queries';
 import { startScheduler } from '../scheduler/worker';
 import { startTriggerEngine } from '../triggers/engine';
 import { createAgentConfigMap } from './agent-factory';
@@ -23,8 +20,7 @@ export interface BootstrapRuntimeOptions {
 
 export interface BootstrapRuntimeResult {
   rc: RuntimeContext;
-  recoveredJobs: number;
-  recoveredAgentRuns: number;
+  recoveredReviewRuns: number;
 }
 
 export interface ShutdownRuntimeOptions {
@@ -60,8 +56,7 @@ export async function bootstrapRuntime(
   const db = openDatabase(dbPath);
 
   ensureSchema(db);
-  const recoveredJobs = recoverRunningJobs(db);
-  const recoveredAgentRuns = recoverRunningAgentRuns(db);
+  const recoveredReviewRuns = recoverRunningReviewRuns(db);
 
   const agentDefinitions = createAgentConfigMap(config);
   const agentConfigEntries = Object.fromEntries(
@@ -120,8 +115,7 @@ export async function bootstrapRuntime(
         watch,
         scheduler,
       },
-      recoveredJobs,
-      recoveredAgentRuns,
+      recoveredReviewRuns,
     };
   } catch (error) {
     try {

@@ -1,7 +1,7 @@
 import type { Database } from 'bun:sqlite';
 import { makeId } from '../../utils/ids';
 import { nowMs } from '../../utils/time';
-import type { ReviewRunRow } from '../models';
+import type { FindingRow, ReviewRunRow } from '../models';
 
 export interface NewReviewRun {
   repoId: string;
@@ -29,6 +29,13 @@ export interface QueuedReviewRunRow {
   trigger_id: 'commit' | 'pr' | 'manual';
   subject: string;
   payload_json: string;
+}
+
+export interface ReviewRunContext {
+  reviewRunId: string;
+  triggerEventId: string;
+  repoId: string;
+  agent: string;
 }
 
 export function enqueueReviewRun(
@@ -153,6 +160,28 @@ export function markReviewRunRunning(
   ).run(sessionId ?? null, nowMs(), runId);
 }
 
+export function recoverRunningReviewRuns(db: Database): number {
+  const result = db
+    .query(
+      `
+        UPDATE review_runs
+        SET
+          status = 'queued',
+          session_id = NULL,
+          started_at = NULL,
+          finished_at = NULL,
+          outcome = NULL,
+          summary_json = NULL,
+          error_code = NULL,
+          error_message = NULL
+        WHERE status = 'running'
+      `,
+    )
+    .run() as { changes?: number };
+
+  return result.changes ?? 0;
+}
+
 export function markReviewRunSucceeded(
   db: Database,
   runId: string,
@@ -220,6 +249,63 @@ export function requeueReviewRun(
   ).run(errorCode, errorMessage, nextAttemptAt, runId);
 }
 
+export function replaceReviewRunFindings(
+  db: Database,
+  reviewRunId: string,
+  rows: Array<
+    Omit<FindingRow, 'id' | 'created_at' | 'review_run_id'> & {
+      review_run_id?: string;
+    }
+  >,
+): void {
+  const now = nowMs();
+  const deleteStmt = db.query('DELETE FROM findings WHERE review_run_id = ?');
+  const insertStmt = db.query(
+    `
+      INSERT INTO findings (
+        id, repo_id, review_run_id, agent, severity, domain,
+        location, evidence, prescription, fingerprint, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `,
+  );
+
+  db.transaction(() => {
+    deleteStmt.run(reviewRunId);
+    for (const row of rows) {
+      insertStmt.run(
+        makeId('fnd'),
+        row.repo_id,
+        reviewRunId,
+        row.agent,
+        row.severity,
+        row.domain,
+        row.location,
+        row.evidence,
+        row.prescription,
+        row.fingerprint,
+        now,
+      );
+    }
+  })();
+}
+
+export function deleteReviewRun(db: Database, reviewRunId: string): boolean {
+  return db.transaction(() => {
+    db.query('DELETE FROM findings WHERE review_run_id = ?').run(reviewRunId);
+    const result = db
+      .query(
+        `
+          DELETE FROM review_runs
+          WHERE id = ?
+            AND status IN ('queued', 'succeeded', 'failed', 'cancelled')
+        `,
+      )
+      .run(reviewRunId) as { changes?: number };
+
+    return (result.changes ?? 0) > 0;
+  })();
+}
+
 export function getReviewRunBySessionId(
   db: Database,
   sessionId: string,
@@ -229,6 +315,39 @@ export function getReviewRunBySessionId(
       .query('SELECT * FROM review_runs WHERE session_id = ? LIMIT 1')
       .get(sessionId) as ReviewRunRow | null) ?? null
   );
+}
+
+export function findReviewRunContextBySessionId(
+  db: Database,
+  sessionId: string,
+): ReviewRunContext | null {
+  const row = db
+    .query(
+      `
+        SELECT id, trigger_event_id, repo_id, agent
+        FROM review_runs
+        WHERE session_id = ?
+          AND status = 'running'
+        LIMIT 1
+      `,
+    )
+    .get(sessionId) as {
+    id: string;
+    trigger_event_id: string;
+    repo_id: string;
+    agent: string;
+  } | null;
+
+  if (!row) {
+    return null;
+  }
+
+  return {
+    reviewRunId: row.id,
+    triggerEventId: row.trigger_event_id,
+    repoId: row.repo_id,
+    agent: row.agent,
+  };
 }
 
 export function getReviewRunById(

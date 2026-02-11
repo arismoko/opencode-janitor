@@ -1,9 +1,9 @@
-import type { AgentRunOutcome } from '../db/models';
+import type { ReviewRunOutcome } from '../db/models';
 
 type ErrorType = 'transient' | 'terminal' | 'cancelled' | 'unknown';
 
 export interface FailureClassification {
-  outcome: Exclude<AgentRunOutcome, 'succeeded'>;
+  outcome: Exclude<ReviewRunOutcome, 'succeeded'>;
   retryable: boolean;
   errorCode: string;
   errorType: Exclude<ErrorType, 'unknown'>;

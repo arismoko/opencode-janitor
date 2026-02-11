@@ -29,7 +29,7 @@ export function useReportDetail({
     }
 
     api(
-      `/v1/dashboard/report?agentRunId=${encodeURIComponent(selectedReport.id)}&findingsLimit=300`,
+      `/v1/dashboard/report?reviewRunId=${encodeURIComponent(selectedReport.id)}&findingsLimit=300`,
     )
       .then((data) => setDetail(data))
       .catch((error) => onErrorRef.current?.(error));
@@ -46,7 +46,7 @@ export function useReportDetail({
     }
 
     api(
-      `/v1/events?afterSeq=0&limit=500&agentRunId=${encodeURIComponent(selectedReport.id)}`,
+      `/v1/events?afterSeq=0&limit=500&reviewRunId=${encodeURIComponent(selectedReport.id)}`,
     )
       .then((data) => setHistoricalSession(data.events || []))
       .catch(() => setHistoricalSession([]));
@@ -58,7 +58,7 @@ export function useReportDetail({
     const inMemory = events.filter(
       (event) =>
         event.topic?.startsWith('session.') &&
-        (event.agentRunId === selectedReport.id ||
+        (event.reviewRunId === selectedReport.id ||
           (selectedReport.sessionId &&
             event.sessionId === selectedReport.sessionId)),
     );

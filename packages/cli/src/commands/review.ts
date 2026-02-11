@@ -72,7 +72,7 @@ async function runAgent(
     }
 
     const payload = response.data as EnqueueReviewResponse;
-    const { enqueued, repoPath, sha, subjectKey } = payload;
+    const { enqueued, repoPath, sha, subject } = payload;
     const prNumber =
       scope === 'pr' && typeof input?.prNumber === 'number'
         ? input.prNumber
@@ -85,7 +85,7 @@ async function runAgent(
           repoId: payload.repoId,
           repoPath,
           sha,
-          subjectKey,
+          subject,
           agent,
           ...(scope ? { scope } : {}),
           ...(input ? { input } : {}),

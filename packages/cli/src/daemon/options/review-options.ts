@@ -71,13 +71,13 @@ export function createReviewOptions(rc: RuntimeContext): ReviewApi {
         sha: payload.sha,
         prNumber: payload.prNumber,
       });
-      const subjectKey = MANUAL_TRIGGER_MODULE.buildSubject(manualPayload);
+      const subject = MANUAL_TRIGGER_MODULE.buildSubject(manualPayload);
 
       const inserted = insertTriggerEvent(rc.db, {
         repoId: repo.id,
         triggerId: 'manual',
         eventKey: makeId('manual'),
-        subject: subjectKey,
+        subject,
         payloadJson: JSON.stringify(manualPayload),
         source: 'cli',
         detectedAt: Date.now(),
@@ -99,7 +99,7 @@ export function createReviewOptions(rc: RuntimeContext): ReviewApi {
           level: 'info',
           payload: {
             sha,
-            subjectKey,
+            subject,
             agent,
             ...(scope ? { scope } : {}),
             ...(input ? { input } : {}),
@@ -114,7 +114,7 @@ export function createReviewOptions(rc: RuntimeContext): ReviewApi {
         repoId: repo.id,
         repoPath: repo.path,
         sha,
-        subjectKey,
+        subject,
       };
     },
   };

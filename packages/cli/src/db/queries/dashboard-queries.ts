@@ -7,9 +7,6 @@ export interface DashboardRepoStateRow {
   enabled: 0 | 1;
   paused: 0 | 1;
   default_branch: string;
-  idle_streak: number;
-  next_commit_check_at: number;
-  next_pr_check_at: number;
   queued_jobs: number;
   running_jobs: number;
   latest_event_ts: number | null;
@@ -28,8 +25,8 @@ export interface DashboardReportSummaryRow {
   id: string;
   repo_id: string;
   repo_path: string;
-  job_id: string;
-  subject_key: string | null;
+  trigger_event_id: string;
+  subject: string | null;
   agent: AgentName;
   session_id: string | null;
   status: 'queued' | 'running' | 'succeeded' | 'failed' | 'skipped';
@@ -57,8 +54,8 @@ export interface DashboardReportFindingRow {
   id: string;
   repo_id: string;
   repo_path: string;
-  job_id: string;
-  agent_run_id: string;
+  trigger_event_id: string;
+  review_run_id: string;
   agent: AgentName;
   severity: 'P0' | 'P1' | 'P2' | 'P3';
   domain: string;
@@ -78,9 +75,6 @@ export function listDashboardRepoState(db: Database): DashboardRepoStateRow[] {
         r.enabled,
         r.paused,
         r.default_branch,
-        r.idle_streak,
-        r.next_commit_check_at,
-        r.next_pr_check_at,
         COALESCE(jc.queued_jobs, 0)  AS queued_jobs,
         COALESCE(jc.running_jobs, 0) AS running_jobs,
         ev.latest_event_ts
@@ -131,8 +125,8 @@ const REPORT_SUMMARY_BASE_SELECT = `
     rr.id,
     rr.repo_id,
     r.path AS repo_path,
-    rr.trigger_event_id AS job_id,
-    te.subject AS subject_key,
+    rr.trigger_event_id,
+    te.subject,
     rr.agent,
     rr.session_id,
     rr.status,
@@ -178,7 +172,7 @@ export function listDashboardReportSummaries(
 
 export function getDashboardReportDetail(
   db: Database,
-  agentRunId: string,
+  reviewRunId: string,
 ): DashboardReportDetailRow | null {
   return (
     (db
@@ -189,13 +183,13 @@ export function getDashboardReportDetail(
       LIMIT 1
       `,
       )
-      .get(agentRunId) as DashboardReportDetailRow | null) ?? null
+      .get(reviewRunId) as DashboardReportDetailRow | null) ?? null
   );
 }
 
 export function listDashboardReportFindings(
   db: Database,
-  agentRunId: string,
+  reviewRunId: string,
   limit: number,
 ): DashboardReportFindingRow[] {
   return db
@@ -205,8 +199,8 @@ export function listDashboardReportFindings(
         f.id,
         f.repo_id,
         r.path AS repo_path,
-        f.job_id,
-        COALESCE(f.review_run_id, f.agent_run_id) AS agent_run_id,
+        rr.trigger_event_id,
+        f.review_run_id,
         f.agent,
         f.severity,
         f.domain,
@@ -215,6 +209,7 @@ export function listDashboardReportFindings(
         f.prescription,
         f.created_at
       FROM findings f
+      JOIN review_runs rr ON rr.id = f.review_run_id
       JOIN repos r ON r.id = f.repo_id
       WHERE f.review_run_id = ?
       ORDER BY
@@ -228,5 +223,5 @@ export function listDashboardReportFindings(
       LIMIT ?
       `,
     )
-    .all(agentRunId, limit) as DashboardReportFindingRow[];
+    .all(reviewRunId, limit) as DashboardReportFindingRow[];
 }

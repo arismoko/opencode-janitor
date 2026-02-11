@@ -49,10 +49,10 @@ export interface DashboardApi {
     reportsLimit: number,
   ) => DashboardSnapshotResponse;
   getDashboardReportDetail: (
-    agentRunId: string,
+    reviewRunId: string,
     findingsLimit: number,
   ) => DashboardReportDetailResponse | null;
-  onDeleteReport: (agentRunId: string) => DeleteReportResponse;
+  onDeleteReport: (reviewRunId: string) => DeleteReportResponse;
 }
 
 export interface CapabilitiesApi {

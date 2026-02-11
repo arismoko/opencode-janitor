@@ -24,5 +24,4 @@ export * from './triggers';
 export * from './types/agent';
 export * as findingTypes from './types/finding';
 export * from './types/review';
-export * from './types/trigger';
 export * from './utils/format-helpers';

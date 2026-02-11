@@ -47,6 +47,9 @@ describe('frontend asset loading', () => {
   });
 
   it('loads extracted state module assets', () => {
+    const capabilities = getFrontendAsset(
+      '/_dashboard/state/use-capabilities.js',
+    );
     const reportDetail = getFrontendAsset(
       '/_dashboard/state/use-report-detail.js',
     );
@@ -54,6 +57,8 @@ describe('frontend asset loading', () => {
       '/_dashboard/state/use-report-selection.js',
     );
     const flash = getFrontendAsset('/_dashboard/state/use-flash.js');
+    expect(capabilities).toBeDefined();
+    expect(capabilities?.body).toContain('export function useCapabilities');
     expect(reportDetail).toBeDefined();
     expect(reportDetail?.body).toContain('export function useReportDetail');
     expect(reportSelection).toBeDefined();
@@ -65,6 +70,9 @@ describe('frontend asset loading', () => {
   });
 
   it('loads extracted component and selector assets', () => {
+    const capabilityModal = getFrontendAsset(
+      '/_dashboard/components/capability-driven-manual-modal.js',
+    );
     const header = getFrontendAsset(
       '/_dashboard/components/dashboard-header.js',
     );
@@ -74,12 +82,22 @@ describe('frontend asset loading', () => {
     const selectors = getFrontendAsset(
       '/_dashboard/selectors/dashboard-selectors.js',
     );
+    expect(capabilityModal).toBeDefined();
+    expect(capabilityModal?.body).toContain(
+      'export function CapabilityDrivenManualModal',
+    );
     expect(header).toBeDefined();
     expect(header?.body).toContain('export function renderDashboardHeader');
     expect(modal).toBeDefined();
     expect(modal?.body).toContain('export function renderManualReviewModal');
     expect(selectors).toBeDefined();
     expect(selectors?.body).toContain('export function selectFilteredActivity');
+  });
+
+  it('loads ui constants asset', () => {
+    const constants = getFrontendAsset('/_dashboard/ui-constants.js');
+    expect(constants).toBeDefined();
+    expect(constants?.body).toContain('export const BADGE');
   });
 
   it('loads nested reports subview module assets', () => {

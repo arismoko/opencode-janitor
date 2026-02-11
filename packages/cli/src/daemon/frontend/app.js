@@ -103,7 +103,7 @@ function App() {
     try {
       await api('/v1/dashboard/report', {
         method: 'DELETE',
-        body: JSON.stringify({ agentRunId: selectedReport.id }),
+        body: JSON.stringify({ reviewRunId: selectedReport.id }),
       });
       showFlash('Report deleted');
       setSelectedReportId(null);

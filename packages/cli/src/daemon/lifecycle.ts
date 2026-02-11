@@ -34,8 +34,7 @@ function buildStatusSnapshot(
 }
 
 export async function runDaemon(options: RunDaemonOptions): Promise<void> {
-  const { rc, recoveredJobs, recoveredAgentRuns } =
-    await bootstrapRuntime(options);
+  const { rc, recoveredReviewRuns } = await bootstrapRuntime(options);
 
   let draining = false;
   let resolved = false;
@@ -83,10 +82,9 @@ export async function runDaemon(options: RunDaemonOptions): Promise<void> {
       message: 'Daemon started',
       level: 'info',
       payload:
-        recoveredJobs > 0 || recoveredAgentRuns > 0
+        recoveredReviewRuns > 0
           ? {
-              recoveredJobs,
-              recoveredAgentRuns,
+              recoveredReviewRuns,
               webUrl: toWebUrl(
                 rc.config.daemon.webHost,
                 rc.config.daemon.webPort,

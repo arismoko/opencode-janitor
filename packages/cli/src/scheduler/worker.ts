@@ -9,9 +9,9 @@ import {
   markReviewRunRunning,
   markReviewRunSucceeded,
   type QueuedReviewRunRow,
+  replaceReviewRunFindings,
   requeueReviewRun,
 } from '../db/queries/review-run-queries';
-import { insertFindingRows } from '../db/queries/scheduler-queries';
 import { buildTriggerContextFromPayload } from '../reviews/context';
 import {
   abortSession,
@@ -108,25 +108,19 @@ async function processRun(
     run.payload_json,
   );
 
-  const pseudoJob = {
+  const runtimeRun = {
     id: run.id,
     repo_id: run.repo_id,
-    trigger_id: run.trigger_event_id,
-    dedupe_key: `${run.trigger_id}:${run.subject}`,
-    attempt: run.attempt,
-    max_attempts: run.max_attempts,
-    next_attempt_at: run.next_attempt_at,
-    queued_at: run.queued_at,
+    trigger_event_id: run.trigger_event_id,
+    trigger_id: run.trigger_id,
+    scope: run.scope as 'commit-diff' | 'workspace-diff' | 'repo' | 'pr',
     path: run.path,
     default_branch: run.default_branch,
-    kind: run.trigger_id,
-    subject_key: run.subject,
-    payload_json: run.payload_json,
   };
 
   const prepared = spec.prepareContext({
     config,
-    job: pseudoJob,
+    run: runtimeRun,
     trigger,
   });
   const prompt = spec.buildPrompt({ preparedContext: prepared });
@@ -170,20 +164,12 @@ async function processRun(
     });
     const parsed = spec.parseOutput(rawOutput);
     const findings = spec.onSuccess({
-      job: pseudoJob,
-      runId: run.id,
+      run: runtimeRun,
+      reviewRunId: run.id,
       output: parsed,
     });
 
-    insertFindingRows(
-      db,
-      findings.map((finding) => ({
-        ...finding,
-        job_id: null,
-        agent_run_id: null,
-        review_run_id: run.id,
-      })),
-    );
+    replaceReviewRunFindings(db, run.id, findings);
 
     markReviewRunSucceeded(
       db,

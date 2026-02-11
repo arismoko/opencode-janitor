@@ -1,7 +1,6 @@
 import {
   AGENT_IDS,
   type AgentId,
-  type ScopeId,
   type TriggerContext,
 } from '@opencode-janitor/shared';
 import {
@@ -14,19 +13,6 @@ import type {
 } from './agent-runtime-spec';
 import { createAgentSpecFromDefinition } from './agent-spec-from-definition';
 import { buildReviewRunContext } from './review-run-context';
-
-function resolveScope(input: PrepareContextInput): ScopeId {
-  if (input.job.scope === 'repo') {
-    return 'repo';
-  }
-  if (input.job.scope === 'workspace-diff') {
-    return 'workspace-diff';
-  }
-  if (input.job.scope === 'pr') {
-    return 'pr';
-  }
-  return 'commit-diff';
-}
 
 function buildTriggerMetadata(input: PrepareContextInput): string[] {
   const metadata = [
@@ -56,7 +42,7 @@ function buildPreparedContext(
   input: PrepareContextInput,
   agent: AgentId,
 ): PreparedAgentContext {
-  const scope = resolveScope(input);
+  const scope = input.run.scope;
   const hasWorkspaceDiff =
     input.trigger.commitContext.changedFiles.length > 0 ||
     input.trigger.commitContext.patch.trim().length > 0;
@@ -66,8 +52,8 @@ function buildPreparedContext(
       agent,
       trigger: input.trigger.kind,
       scope,
-      repoPath: input.job.path,
-      defaultBranch: input.job.default_branch,
+      repoPath: input.run.path,
+      defaultBranch: input.run.default_branch,
       hasWorkspaceDiff,
       triggerContext: toSharedTriggerContext(input),
       reviewContext: {
@@ -91,8 +77,8 @@ function buildPreparedContext(
     agent,
     trigger: input.trigger.kind,
     scope,
-    repoPath: input.job.path,
-    defaultBranch: input.job.default_branch,
+    repoPath: input.run.path,
+    defaultBranch: input.run.default_branch,
     hasWorkspaceDiff,
     triggerContext: toSharedTriggerContext(input),
     reviewContext: {

@@ -6,6 +6,7 @@ import {
   parseAgentOutput,
   type ReviewContext,
   type TriggerId,
+  toAgentProfile,
 } from '@opencode-janitor/shared';
 import type {
   AgentRuntimeSpec,
@@ -44,21 +45,9 @@ function buildPromptConfig(
     promptHints: definition.reviewPromptHints
       ? definition.reviewPromptHints({
           trigger: input.trigger.kind,
-          scope:
-            input.trigger.kind === 'pr'
-              ? 'pr'
-              : input.trigger.kind === 'manual'
-                ? definition.resolveManualScope({
-                    trigger: 'manual',
-                    requestedScope:
-                      input.job.kind === 'manual' ? 'repo' : undefined,
-                    hasWorkspaceDiff:
-                      input.trigger.commitContext.changedFiles.length > 0 ||
-                      input.trigger.commitContext.patch.trim().length > 0,
-                  })
-                : 'commit-diff',
-          repoPath: input.job.path,
-          defaultBranch: input.job.default_branch,
+          scope: input.run.scope,
+          repoPath: input.run.path,
+          defaultBranch: input.run.default_branch,
           hasWorkspaceDiff:
             input.trigger.commitContext.changedFiles.length > 0 ||
             input.trigger.commitContext.patch.trim().length > 0,
@@ -77,14 +66,7 @@ export function createAgentSpecFromDefinition(
 
   return {
     agent: definition.id,
-    profile: {
-      name: definition.id,
-      description: definition.description,
-      role: definition.role,
-      domains: definition.domains,
-      rules: definition.rules,
-      outputSchema: definition.outputSchema,
-    },
+    profile: toAgentProfile(definition.id),
     configKey: definition.id,
     supportsTrigger(config, kind) {
       const agentConfig = config.agents[definition.id];
@@ -142,9 +124,7 @@ export function createAgentSpecFromDefinition(
     },
     onSuccess(input: SuccessInput): PersistableFindingRow[] {
       return input.output.findings.map((finding) => ({
-        repo_id: input.job.repo_id,
-        job_id: input.job.id,
-        agent_run_id: input.runId,
+        repo_id: input.run.repo_id,
         agent: definition.id,
         severity: finding.severity,
         domain: finding.domain,

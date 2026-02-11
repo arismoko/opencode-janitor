@@ -48,13 +48,13 @@ export interface EnqueueReviewRequest {
 }
 
 export interface DeleteReportRequest {
-  agentRunId: string;
+  reviewRunId: string;
 }
 
 export interface DeleteReportResponse {
   ok: true;
   deleted: boolean;
-  agentRunId: string;
+  reviewRunId: string;
 }
 
 export interface EnqueueReviewResponse {
@@ -63,7 +63,7 @@ export interface EnqueueReviewResponse {
   repoId: string;
   repoPath: string;
   sha: string;
-  subjectKey: string;
+  subject: string;
 }
 
 export interface EventJournalEntry {
@@ -72,8 +72,8 @@ export interface EventJournalEntry {
   level: 'debug' | 'info' | 'warn' | 'error';
   topic: string;
   repoId: string | null;
-  jobId: string | null;
-  agentRunId: string | null;
+  triggerEventId: string | null;
+  reviewRunId: string | null;
   sessionId: string | null;
   message: string;
   payload: Record<string, unknown>;
@@ -103,9 +103,6 @@ export interface DashboardRepoState {
   enabled: boolean;
   paused: boolean;
   defaultBranch: string;
-  idleStreak: number;
-  nextCommitCheckAt: number;
-  nextPrCheckAt: number;
   queuedJobs: number;
   runningJobs: number;
   latestEventTs: number | null;
@@ -124,8 +121,8 @@ export interface DashboardReportSummary {
   id: string;
   repoId: string;
   repoPath: string;
-  jobId: string;
-  subjectKey: string | null;
+  triggerEventId: string;
+  subject: string | null;
   agent: AgentName;
   sessionId: string | null;
   status: 'queued' | 'running' | 'succeeded' | 'failed' | 'skipped';
@@ -149,8 +146,8 @@ export interface DashboardFinding {
   id: string;
   repoId: string;
   repoPath: string;
-  jobId: string;
-  agentRunId: string;
+  triggerEventId: string;
+  reviewRunId: string;
   agent: AgentName;
   severity: 'P0' | 'P1' | 'P2' | 'P3';
   domain: string;

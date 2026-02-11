@@ -48,8 +48,6 @@ function makeEventRow(overrides: Partial<EventRow> = {}): EventRow {
     level: 'info',
     event_type: 'test.event',
     repo_id: 'repo-1',
-    job_id: 'job-1',
-    agent_run_id: 'run-1',
     trigger_event_id: 'event-1',
     review_run_id: 'rrn-1',
     message: 'test event',
@@ -93,7 +91,7 @@ function stubOptions(
         repoId: 'repo-1',
         repoPath: '/tmp/repo',
         sha: 'abc123',
-        subjectKey: `${req.agent}:${req.repoOrId}`,
+        subject: `${req.agent}:${req.repoOrId}`,
       })),
     },
     event: {
@@ -128,12 +126,12 @@ function stubOptions(
         }),
       ),
       getDashboardReportDetail: mock(
-        (_agentRunId: string, _findingsLimit: number) => null,
+        (_reviewRunId: string, _findingsLimit: number) => null,
       ),
-      onDeleteReport: mock((_agentRunId: string) => ({
+      onDeleteReport: mock((_reviewRunId: string) => ({
         ok: true as const,
         deleted: true,
-        agentRunId: _agentRunId,
+        reviewRunId: _reviewRunId,
       })),
     },
     capabilities: {
@@ -266,31 +264,33 @@ describe('parseFilterParams', () => {
 
   it('parses multiple filters', () => {
     const url = new URL(
-      'http://localhost/v1/events?repoId=repo-1&jobId=job-1&topic=review',
+      'http://localhost/v1/events?repoId=repo-1&triggerEventId=event-1&topic=review',
     );
     expect(parseFilterParams(url)).toEqual({
       repoId: 'repo-1',
-      jobId: 'job-1',
+      triggerEventId: 'event-1',
       topic: 'review',
     });
   });
 
   it('parses all five filter params', () => {
     const url = new URL(
-      'http://localhost/v1/events?repoId=r&jobId=j&agentRunId=a&topic=t&sessionId=s',
+      'http://localhost/v1/events?repoId=r&triggerEventId=e&reviewRunId=rn&topic=t&sessionId=s',
     );
     expect(parseFilterParams(url)).toEqual({
       repoId: 'r',
-      jobId: 'j',
-      agentRunId: 'a',
+      triggerEventId: 'e',
+      reviewRunId: 'rn',
       topic: 't',
       sessionId: 's',
     });
   });
 
   it('ignores empty string values', () => {
-    const url = new URL('http://localhost/v1/events?repoId=&jobId=job-1');
-    expect(parseFilterParams(url)).toEqual({ jobId: 'job-1' });
+    const url = new URL(
+      'http://localhost/v1/events?repoId=&triggerEventId=event-1',
+    );
+    expect(parseFilterParams(url)).toEqual({ triggerEventId: 'event-1' });
   });
 
   it('ignores unknown params', () => {
@@ -858,7 +858,7 @@ describe('GET /v1/events — filter routing', () => {
     const opts = stubOptions();
     const { request, url } = makeRequest(
       'GET',
-      '/v1/events?repoId=repo-1&jobId=job-1',
+      '/v1/events?repoId=repo-1&triggerEventId=event-1',
     );
     handleApiRequest(request, url, opts);
     expect(opts.event.listEventsAfterSeqFiltered).toHaveBeenCalled();
@@ -918,23 +918,23 @@ describe('GET /v1/dashboard/snapshot', () => {
 // ---------------------------------------------------------------------------
 
 describe('GET /v1/dashboard/report', () => {
-  it('rejects missing agentRunId', async () => {
+  it('rejects missing reviewRunId', async () => {
     const { request, url } = makeRequest('GET', '/v1/dashboard/report');
     const resp = handleApiRequest(request, url, stubOptions()) as Response;
     expect(resp.status).toBe(400);
     const body = (await resp.json()) as { error: { code: string } };
-    expect(body.error.code).toBe('INVALID_AGENT_RUN_ID');
+    expect(body.error.code).toBe('INVALID_REVIEW_RUN_ID');
   });
 
-  it('rejects empty agentRunId', async () => {
+  it('rejects empty reviewRunId', async () => {
     const { request, url } = makeRequest(
       'GET',
-      '/v1/dashboard/report?agentRunId=',
+      '/v1/dashboard/report?reviewRunId=',
     );
     const resp = handleApiRequest(request, url, stubOptions()) as Response;
     expect(resp.status).toBe(400);
     const body = (await resp.json()) as { error: { code: string } };
-    expect(body.error.code).toBe('INVALID_AGENT_RUN_ID');
+    expect(body.error.code).toBe('INVALID_REVIEW_RUN_ID');
   });
 
   it('returns 404 when report not found', async () => {
@@ -945,7 +945,7 @@ describe('GET /v1/dashboard/report', () => {
     });
     const { request, url } = makeRequest(
       'GET',
-      '/v1/dashboard/report?agentRunId=nonexistent',
+      '/v1/dashboard/report?reviewRunId=nonexistent',
     );
     const resp = handleApiRequest(request, url, opts) as Response;
     expect(resp.status).toBe(404);
@@ -957,7 +957,7 @@ describe('GET /v1/dashboard/report', () => {
     const opts = stubOptions();
     const { request, url } = makeRequest(
       'GET',
-      '/v1/dashboard/report?agentRunId=run-1&findingsLimit=9999',
+      '/v1/dashboard/report?reviewRunId=run-1&findingsLimit=9999',
     );
     handleApiRequest(request, url, opts);
     expect(opts.dashboard.getDashboardReportDetail).toHaveBeenCalledWith(
@@ -988,7 +988,7 @@ describe('DELETE /v1/dashboard/report', () => {
     expect(body.error.code).toBe('INVALID_BODY');
   });
 
-  it('rejects missing agentRunId in body', async () => {
+  it('rejects missing reviewRunId in body', async () => {
     const { request, url } = makeRequest('DELETE', '/v1/dashboard/report', {});
     const resp = (await handleApiRequest(
       request,
@@ -997,12 +997,12 @@ describe('DELETE /v1/dashboard/report', () => {
     )) as Response;
     expect(resp.status).toBe(400);
     const body = (await resp.json()) as { error: { code: string } };
-    expect(body.error.code).toBe('INVALID_AGENT_RUN_ID');
+    expect(body.error.code).toBe('INVALID_REVIEW_RUN_ID');
   });
 
-  it('rejects empty agentRunId in body', async () => {
+  it('rejects empty reviewRunId in body', async () => {
     const { request, url } = makeRequest('DELETE', '/v1/dashboard/report', {
-      agentRunId: '',
+      reviewRunId: '',
     });
     const resp = (await handleApiRequest(
       request,
@@ -1011,24 +1011,24 @@ describe('DELETE /v1/dashboard/report', () => {
     )) as Response;
     expect(resp.status).toBe(400);
     const body = (await resp.json()) as { error: { code: string } };
-    expect(body.error.code).toBe('INVALID_AGENT_RUN_ID');
+    expect(body.error.code).toBe('INVALID_REVIEW_RUN_ID');
   });
 
-  it('succeeds with valid agentRunId', async () => {
+  it('succeeds with valid reviewRunId', async () => {
     const opts = stubOptions();
     const { request, url } = makeRequest('DELETE', '/v1/dashboard/report', {
-      agentRunId: 'run-42',
+      reviewRunId: 'run-42',
     });
     const resp = (await handleApiRequest(request, url, opts)) as Response;
     expect(resp.status).toBe(200);
     const body = (await resp.json()) as {
       ok: boolean;
       deleted: boolean;
-      agentRunId: string;
+      reviewRunId: string;
     };
     expect(body.ok).toBe(true);
     expect(body.deleted).toBe(true);
-    expect(body.agentRunId).toBe('run-42');
+    expect(body.reviewRunId).toBe('run-42');
   });
 
   it('surfaces onDeleteReport errors as 400', async () => {
@@ -1040,7 +1040,7 @@ describe('DELETE /v1/dashboard/report', () => {
       },
     });
     const { request, url } = makeRequest('DELETE', '/v1/dashboard/report', {
-      agentRunId: 'run-1',
+      reviewRunId: 'run-1',
     });
     const resp = (await handleApiRequest(request, url, opts)) as Response;
     expect(resp.status).toBe(400);

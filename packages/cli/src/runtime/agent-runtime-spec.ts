@@ -11,12 +11,11 @@ import type {
   CommitContext,
   PromptConfig,
   ReviewContext,
+  ScopeId,
+  TriggerId,
 } from '@opencode-janitor/shared';
-import type { z } from 'zod';
 import type { CliConfig } from '../config/schema';
-import type { FindingRow, QueuedJobRow } from '../db/models';
-
-export type ReviewTriggerKind = 'commit' | 'pr' | 'manual';
+import type { FindingRow } from '../db/models';
 
 // ---------------------------------------------------------------------------
 // Trigger-discriminated context input
@@ -68,7 +67,15 @@ export interface ParsedAgentOutput {
 
 export interface PrepareContextInput {
   config: CliConfig;
-  job: QueuedJobRow;
+  run: {
+    id: string;
+    repo_id: string;
+    trigger_event_id: string;
+    trigger_id: TriggerId;
+    scope: ScopeId;
+    path: string;
+    default_branch: string;
+  };
   trigger: TriggerContext;
 }
 
@@ -82,12 +89,15 @@ export interface BuildPromptInput {
 }
 
 export interface SuccessInput {
-  job: QueuedJobRow;
-  runId: string;
+  run: PrepareContextInput['run'];
+  reviewRunId: string;
   output: ParsedAgentOutput;
 }
 
-export type PersistableFindingRow = Omit<FindingRow, 'id' | 'created_at'>;
+export type PersistableFindingRow = Omit<
+  FindingRow,
+  'id' | 'created_at' | 'review_run_id'
+>;
 
 // ---------------------------------------------------------------------------
 // Runtime spec interface
@@ -104,7 +114,7 @@ export interface AgentRuntimeSpec {
   configKey: AgentName;
 
   /** Whether this spec can handle the given trigger kind. */
-  supportsTrigger(config: CliConfig, kind: ReviewTriggerKind): boolean;
+  supportsTrigger(config: CliConfig, kind: TriggerId): boolean;
 
   /** Maximum findings from config. */
   maxFindings(config: CliConfig): number;
