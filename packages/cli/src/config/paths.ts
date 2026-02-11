@@ -5,7 +5,11 @@ import { mkdirSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 
-const APP_NAME = 'opencode';
+/** Config lives under the opencode umbrella: ~/.config/opencode/ */
+const CONFIG_DIR_NAME = 'opencode';
+
+/** State (DB, PID) uses the full app name: ~/.local/state/opencode-janitor/ */
+const STATE_DIR_NAME = 'opencode-janitor';
 
 function xdgConfigHome(): string {
   return process.env['XDG_CONFIG_HOME'] || join(homedir(), '.config');
@@ -17,12 +21,12 @@ function xdgStateHome(): string {
 
 /** Directory for CLI config files. */
 export function configDir(): string {
-  return join(xdgConfigHome(), APP_NAME);
+  return join(xdgConfigHome(), CONFIG_DIR_NAME);
 }
 
 /** Directory for CLI runtime state (db, pid, logs). */
 export function stateDir(): string {
-  return join(xdgStateHome(), APP_NAME);
+  return join(xdgStateHome(), STATE_DIR_NAME);
 }
 
 /** Default path to the CLI JSON config file. */
