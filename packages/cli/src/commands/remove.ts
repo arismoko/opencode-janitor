@@ -6,7 +6,7 @@ import { resolve } from 'node:path';
 import chalk from 'chalk';
 import type { Command } from 'commander';
 import { openDatabase } from '../db/connection';
-import { runMigrations } from '../db/migrations';
+import { ensureSchema } from '../db/migrations';
 import { appendEvent, removeRepoByIdOrPath } from '../db/queries';
 
 export function registerRemoveCommand(program: Command): void {
@@ -20,7 +20,7 @@ export function registerRemoveCommand(program: Command): void {
         const lookup = existsSync(asPath) ? asPath : repoOrId;
 
         const db = openDatabase();
-        runMigrations(db);
+        ensureSchema(db);
 
         const removed = removeRepoByIdOrPath(db, lookup);
         if (!removed) {

@@ -5,7 +5,7 @@ import { resolve } from 'node:path';
 import chalk from 'chalk';
 import type { Command } from 'commander';
 import { openDatabase } from '../db/connection';
-import { runMigrations } from '../db/migrations';
+import { ensureSchema } from '../db/migrations';
 import { addRepo, appendEvent } from '../db/queries';
 import {
   resolveDefaultBranch,
@@ -25,7 +25,7 @@ export function registerAddCommand(program: Command): void {
         const defaultBranch = resolveDefaultBranch(repoRoot);
 
         const db = openDatabase();
-        runMigrations(db);
+        ensureSchema(db);
 
         const repo = addRepo(db, { path: repoRoot, gitDir, defaultBranch });
         appendEvent(db, {

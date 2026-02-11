@@ -3,7 +3,7 @@ import { loadConfig } from '../config/loader';
 import { defaultDbPath } from '../config/paths';
 import { acquireProcessLock } from '../daemon/lock';
 import { openDatabase } from '../db/connection';
-import { runMigrations } from '../db/migrations';
+import { ensureSchema } from '../db/migrations';
 import {
   appendEvent,
   findAgentRunContextBySessionId,
@@ -60,7 +60,7 @@ export async function bootstrapRuntime(
   const dbPath = defaultDbPath();
   const db = openDatabase(dbPath);
 
-  runMigrations(db);
+  ensureSchema(db);
   const recoveredJobs = recoverRunningJobs(db);
   const recoveredAgentRuns = recoverRunningAgentRuns(db);
 

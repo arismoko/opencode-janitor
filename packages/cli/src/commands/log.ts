@@ -5,7 +5,7 @@ import chalk from 'chalk';
 import type { Command } from 'commander';
 import { loadConfig } from '../config/loader';
 import { openDatabase } from '../db/connection';
-import { runMigrations } from '../db/migrations';
+import { ensureSchema } from '../db/migrations';
 import { listEvents } from '../db/queries';
 import { requestSse } from '../ipc/client';
 import { toEventEntry } from '../ipc/event-entry';
@@ -22,7 +22,7 @@ function printEvent(event: EventJournalEntry): void {
 
 function readRecentEvents(limit: number): EventJournalEntry[] {
   const db = openDatabase();
-  runMigrations(db);
+  ensureSchema(db);
   const rows = listEvents(db, limit);
   db.close();
   return rows.map((row) => toEventEntry(row));
