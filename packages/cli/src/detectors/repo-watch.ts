@@ -286,10 +286,16 @@ export function startRepoWatch(opts: RepoWatchOptions): RepoWatchHandle {
     }
   }, TICK_INTERVAL_MS);
 
-  // Prime: run first tick immediately.
-  tick(opts).catch(() => {
-    // Errors are handled per-repo in probeCommit/probePr.
-  });
+  // Prime: run first tick immediately, guarded by tickBusy so the
+  // interval handler cannot start a concurrent tick if it fires first.
+  tickBusy = true;
+  tick(opts)
+    .catch(() => {
+      // Errors are handled per-repo in probeCommit/probePr.
+    })
+    .finally(() => {
+      tickBusy = false;
+    });
 
   return {
     stop: () => {

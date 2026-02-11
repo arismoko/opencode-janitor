@@ -1056,6 +1056,7 @@
         const [repoQuery, setRepoQuery] = useState('');
         const [repoHighlight, setRepoHighlight] = useState(0);
         const reconnectRef = useRef(500);
+        const latestSeqRef = useRef(0);
         const repoPickerRef = useRef(null);
         const repoInputRef = useRef(null);
 
@@ -1068,7 +1069,7 @@
           const data = await api('/v1/dashboard/snapshot?eventsLimit=120&reportsLimit=60');
           setSnapshot(data);
           setEvents((prev) => mergeEvents(prev, data.events));
-          setLatestSeq((seq) => Math.max(seq, data.latestSeq));
+          setLatestSeq((seq) => { const next = Math.max(seq, data.latestSeq); latestSeqRef.current = next; return next; });
           setSelectedReportId((id) => id ?? data.reports?.[0]?.id ?? null);
         };
 
@@ -1085,13 +1086,13 @@
           const connect = () => {
             if (stop) return;
             setStreamState('connecting');
-            const stream = new EventSource(`/v1/events/stream?afterSeq=${latestSeq}`);
+            const stream = new EventSource(`/v1/events/stream?afterSeq=${latestSeqRef.current}`);
 
             stream.addEventListener('ready', (event) => {
               setStreamState('live');
               reconnectRef.current = 500;
               const payload = JSON.parse(event.data);
-              if (typeof payload.afterSeq === 'number') setLatestSeq((s) => Math.max(s, payload.afterSeq));
+              if (typeof payload.afterSeq === 'number') setLatestSeq((s) => { const next = Math.max(s, payload.afterSeq); latestSeqRef.current = next; return next; });
             });
 
             stream.addEventListener('heartbeat', () => {
@@ -1101,7 +1102,7 @@
             stream.addEventListener('event', (event) => {
               setStreamState('live');
               const payload = JSON.parse(event.data);
-              setLatestSeq((s) => Math.max(s, payload.eventId || 0));
+              setLatestSeq((s) => { const next = Math.max(s, payload.eventId || 0); latestSeqRef.current = next; return next; });
               setEvents((prev) => mergeEvents(prev, [payload]));
             });
 
