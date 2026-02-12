@@ -7,15 +7,15 @@ export interface NewEvent {
   message: string;
   level?: EventRow['level'];
   repoId?: string;
-  jobId?: string;
-  agentRunId?: string;
+  triggerEventId?: string;
+  reviewRunId?: string;
   payload?: Record<string, unknown>;
 }
 
 export interface EventFilterParams {
   repoId?: string;
-  jobId?: string;
-  agentRunId?: string;
+  triggerEventId?: string;
+  reviewRunId?: string;
   topic?: string;
   sessionId?: string;
 }
@@ -30,7 +30,7 @@ export function appendEvent(db: Database, event: NewEvent): void {
   db.query(
     `
       INSERT INTO event_journal (
-        ts, level, event_type, repo_id, job_id, agent_run_id, message, payload_json
+        ts, level, event_type, repo_id, trigger_event_id, review_run_id, message, payload_json
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     `,
   ).run(
@@ -38,8 +38,8 @@ export function appendEvent(db: Database, event: NewEvent): void {
     event.level ?? 'info',
     event.eventType,
     event.repoId ?? null,
-    event.jobId ?? null,
-    event.agentRunId ?? null,
+    event.triggerEventId ?? null,
+    event.reviewRunId ?? null,
     event.message,
     JSON.stringify(payload),
   );
@@ -49,6 +49,13 @@ export function listEvents(db: Database, limit: number): EventRow[] {
   return db
     .query('SELECT * FROM event_journal ORDER BY seq DESC LIMIT ?')
     .all(limit) as EventRow[];
+}
+
+export function clearEvents(db: Database): { deleted: number } {
+  const result = db.query('DELETE FROM event_journal').run() as {
+    changes?: number;
+  };
+  return { deleted: result.changes ?? 0 };
 }
 
 export function getLatestEventSeq(db: Database): number {
@@ -81,29 +88,29 @@ export function listEventsAfterSeqFiltered(
     conditions.push('e.repo_id = ?');
     params.push(filters.repoId);
   }
-  if (filters?.jobId) {
-    conditions.push('e.job_id = ?');
-    params.push(filters.jobId);
+  if (filters?.triggerEventId) {
+    conditions.push('e.trigger_event_id = ?');
+    params.push(filters.triggerEventId);
   }
-  if (filters?.agentRunId) {
-    conditions.push('e.agent_run_id = ?');
-    params.push(filters.agentRunId);
+  if (filters?.reviewRunId) {
+    conditions.push('e.review_run_id = ?');
+    params.push(filters.reviewRunId);
   }
   if (filters?.topic) {
     conditions.push('e.event_type = ?');
     params.push(filters.topic);
   }
   if (filters?.sessionId) {
-    conditions.push('ar.session_id = ?');
+    conditions.push('rr.session_id = ?');
     params.push(filters.sessionId);
   }
 
   params.push(limit);
 
   const sql = `
-    SELECT e.*, ar.session_id
+    SELECT e.*, rr.session_id
     FROM event_journal e
-    LEFT JOIN agent_runs ar ON ar.id = e.agent_run_id
+    LEFT JOIN review_runs rr ON rr.id = e.review_run_id
     WHERE ${conditions.join(' AND ')}
     ORDER BY e.seq ASC
     LIMIT ?

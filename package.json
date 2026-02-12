@@ -6,9 +6,9 @@
     "packages/*"
   ],
   "scripts": {
-    "build": "bun run --filter './packages/*' build",
-    "typecheck": "bun run --filter './packages/*' typecheck",
-    "test": "bun run --filter './packages/*' test",
+    "build": "bun run --filter @opencode-janitor/shared check:agents-manifest && bun run --filter './packages/*' build",
+    "typecheck": "bun run --filter @opencode-janitor/shared check:agents-manifest && bun run --filter './packages/*' typecheck",
+    "test": "bun run --filter @opencode-janitor/shared check:agents-manifest && bun run --filter './packages/*' test",
     "lint": "biome lint .",
     "format": "biome format . --write",
     "check": "biome check --write .",

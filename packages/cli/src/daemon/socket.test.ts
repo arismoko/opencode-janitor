@@ -1,10 +1,15 @@
 import { describe, expect, it, mock } from 'bun:test';
+import { AGENT_IDS, AGENTS } from '@opencode-janitor/shared';
 import type { EventRow } from '../db/models';
 import type {
   EventFilterParams,
   EventRowWithSession,
 } from '../db/queries/event-queries';
-import type { EnqueueReviewRequest } from '../ipc/protocol';
+import type {
+  EnqueueReviewRequest,
+  GetPrDetailRequest,
+  ListPrsRequest,
+} from '../ipc/protocol';
 import {
   type DaemonStatusSnapshot,
   errorResponse,
@@ -16,11 +21,18 @@ import {
   sseChunk,
 } from './socket';
 import type {
+  CapabilitiesApi,
   DashboardApi,
   EventApi,
   LifecycleApi,
+  PrApi,
   ReviewApi,
 } from './socket-types';
+
+const defaultAgent = AGENT_IDS[0];
+const prAgent =
+  AGENT_IDS.find((id) => AGENTS[id].capabilities.manualScopes.includes('pr')) ??
+  defaultAgent;
 
 // ---------------------------------------------------------------------------
 // Test helpers
@@ -46,8 +58,8 @@ function makeEventRow(overrides: Partial<EventRow> = {}): EventRow {
     level: 'info',
     event_type: 'test.event',
     repo_id: 'repo-1',
-    job_id: 'job-1',
-    agent_run_id: 'run-1',
+    trigger_event_id: 'event-1',
+    review_run_id: 'rrn-1',
     message: 'test event',
     payload_json: '{}',
     ...overrides,
@@ -70,6 +82,8 @@ interface SocketServerOverrides {
   review?: Partial<ReviewApi>;
   event?: Partial<EventApi>;
   dashboard?: Partial<DashboardApi>;
+  capabilities?: Partial<CapabilitiesApi>;
+  pr?: Partial<PrApi>;
 }
 
 function stubOptions(
@@ -88,8 +102,21 @@ function stubOptions(
         repoId: 'repo-1',
         repoPath: '/tmp/repo',
         sha: 'abc123',
-        subjectKey: `${req.agent}:${req.repoOrId}`,
+        subject: `${req.agent}:${req.repoOrId}`,
       })),
+      onStopReview: mock(async ({ reviewRunId }: { reviewRunId: string }) => ({
+        ok: true as const,
+        stopped: true,
+        reviewRunId,
+      })),
+      onResumeReview: mock(
+        async ({ reviewRunId }: { reviewRunId: string }) => ({
+          ok: true as const,
+          resumed: true,
+          reviewRunId,
+          status: 'queued' as const,
+        }),
+      ),
     },
     event: {
       listEventsAfterSeq: mock((_afterSeq: number, _limit: number) => [
@@ -102,6 +129,7 @@ function stubOptions(
           _filters?: EventFilterParams,
         ): EventRowWithSession[] => [makeEventRowWithSession()],
       ),
+      clearEvents: mock(() => ({ deleted: 1 })),
     },
     dashboard: {
       getDashboardSnapshot: mock(
@@ -123,12 +151,91 @@ function stubOptions(
         }),
       ),
       getDashboardReportDetail: mock(
-        (_agentRunId: string, _findingsLimit: number) => null,
+        (_reviewRunId: string, _findingsLimit: number) => null,
       ),
-      onDeleteReport: mock((_agentRunId: string) => ({
+      onDeleteReport: mock((_reviewRunId: string) => ({
         ok: true as const,
         deleted: true,
-        agentRunId: _agentRunId,
+        reviewRunId: _reviewRunId,
+      })),
+    },
+    capabilities: {
+      getCapabilities: mock(() => ({
+        ok: true as const,
+        generatedAt: Date.now(),
+        agents: [],
+        scopes: [],
+        triggers: [],
+      })),
+    },
+    pr: {
+      listPrs: mock(async (_request: ListPrsRequest) => ({
+        ok: true as const,
+        generatedAt: Date.now(),
+        items: [
+          {
+            number: 101,
+            title: 'Improve scheduler flow',
+            state: 'OPEN',
+            url: 'https://example.test/pr/101',
+            authorLogin: 'octocat',
+            isDraft: false,
+            reviewDecision: null,
+            mergeable: 'MERGEABLE',
+            updatedAt: new Date().toISOString(),
+            requestedReviewers: [],
+          },
+        ],
+      })),
+      getPrDetail: mock(async ({ prNumber }: GetPrDetailRequest) => ({
+        ok: true as const,
+        generatedAt: Date.now(),
+        detail: {
+          number: prNumber,
+          title: `PR #${prNumber}`,
+          state: 'OPEN',
+          url: `https://example.test/pr/${prNumber}`,
+          authorLogin: 'octocat',
+          isDraft: false,
+          reviewDecision: null,
+          mergeable: 'MERGEABLE',
+          updatedAt: new Date().toISOString(),
+          requestedReviewers: ['alice'],
+          body: 'Detail body',
+          baseRefName: 'main',
+          headRefName: 'feature/pr-tab',
+          additions: 10,
+          deletions: 2,
+          changedFiles: 3,
+          commits: 1,
+          commitHistory: [],
+          merged: false,
+          mergeStateStatus: 'CLEAN',
+          issueComments: [],
+          reviewComments: [],
+        },
+      })),
+      mergePr: mock(async ({ prNumber }) => ({
+        ok: true as const,
+        merged: true,
+        prNumber,
+      })),
+      commentPr: mock(async ({ prNumber }) => ({
+        ok: true as const,
+        commented: true,
+        prNumber,
+      })),
+      requestReviewers: mock(async ({ prNumber, reviewers }) => ({
+        ok: true as const,
+        requested: true,
+        prNumber,
+        reviewers,
+      })),
+      replyReviewComment: mock(async ({ prNumber, commentId }) => ({
+        ok: true as const,
+        replied: true,
+        prNumber,
+        commentId,
       })),
     },
   };
@@ -140,6 +247,8 @@ function stubOptions(
     review: { ...base.review, ...(overrides.review ?? {}) },
     event: { ...base.event, ...(overrides.event ?? {}) },
     dashboard: { ...base.dashboard, ...(overrides.dashboard ?? {}) },
+    capabilities: { ...base.capabilities, ...(overrides.capabilities ?? {}) },
+    pr: { ...base.pr, ...(overrides.pr ?? {}) },
   };
 }
 
@@ -251,31 +360,33 @@ describe('parseFilterParams', () => {
 
   it('parses multiple filters', () => {
     const url = new URL(
-      'http://localhost/v1/events?repoId=repo-1&jobId=job-1&topic=review',
+      'http://localhost/v1/events?repoId=repo-1&triggerEventId=event-1&topic=review',
     );
     expect(parseFilterParams(url)).toEqual({
       repoId: 'repo-1',
-      jobId: 'job-1',
+      triggerEventId: 'event-1',
       topic: 'review',
     });
   });
 
   it('parses all five filter params', () => {
     const url = new URL(
-      'http://localhost/v1/events?repoId=r&jobId=j&agentRunId=a&topic=t&sessionId=s',
+      'http://localhost/v1/events?repoId=r&triggerEventId=e&reviewRunId=rn&topic=t&sessionId=s',
     );
     expect(parseFilterParams(url)).toEqual({
       repoId: 'r',
-      jobId: 'j',
-      agentRunId: 'a',
+      triggerEventId: 'e',
+      reviewRunId: 'rn',
       topic: 't',
       sessionId: 's',
     });
   });
 
   it('ignores empty string values', () => {
-    const url = new URL('http://localhost/v1/events?repoId=&jobId=job-1');
-    expect(parseFilterParams(url)).toEqual({ jobId: 'job-1' });
+    const url = new URL(
+      'http://localhost/v1/events?repoId=&triggerEventId=event-1',
+    );
+    expect(parseFilterParams(url)).toEqual({ triggerEventId: 'event-1' });
   });
 
   it('ignores unknown params', () => {
@@ -391,8 +502,14 @@ describe('handleApiRequest — method validation', () => {
     expect(result).toBeNull();
   });
 
-  it('returns null for POST to GET-only /v1/events', () => {
+  it('returns null for POST to /v1/events', () => {
     const { request, url } = makeRequest('POST', '/v1/events');
+    const result = handleApiRequest(request, url, stubOptions());
+    expect(result).toBeNull();
+  });
+
+  it('returns null for PUT to /v1/events', () => {
+    const { request, url } = makeRequest('PUT', '/v1/events');
     const result = handleApiRequest(request, url, stubOptions());
     expect(result).toBeNull();
   });
@@ -418,7 +535,7 @@ describe('POST /v1/reviews/enqueue — input validation', () => {
   it('accepts valid request with repoOrId and agent', async () => {
     const { request, url } = makeRequest('POST', '/v1/reviews/enqueue', {
       repoOrId: 'my-repo',
-      agent: 'janitor',
+      agent: defaultAgent,
     });
     const resp = (await handleApiRequest(
       request,
@@ -431,26 +548,46 @@ describe('POST /v1/reviews/enqueue — input validation', () => {
     expect(body.enqueued).toBe(true);
   });
 
-  it('accepts valid request with pr field', async () => {
+  it('accepts valid request with scope/input fields', async () => {
     const opts = stubOptions();
     const { request, url } = makeRequest('POST', '/v1/reviews/enqueue', {
       repoOrId: 'my-repo',
-      agent: 'hunter',
-      pr: 42,
+      agent: prAgent,
+      scope: 'pr',
+      input: { prNumber: 42 },
     });
     const resp = (await handleApiRequest(request, url, opts)) as Response;
     expect(resp.status).toBe(200);
-    // Verify the pr was passed through
+    // Verify scope/input were passed through
     expect(opts.review.onEnqueueReview).toHaveBeenCalledWith({
       repoOrId: 'my-repo',
-      agent: 'hunter',
-      pr: 42,
+      agent: prAgent,
+      scope: 'pr',
+      input: { prNumber: 42 },
+    });
+  });
+
+  it('accepts note and focusPath fields and forwards them', async () => {
+    const opts = stubOptions();
+    const { request, url } = makeRequest('POST', '/v1/reviews/enqueue', {
+      repoOrId: 'my-repo',
+      agent: prAgent,
+      note: 'DO NOTHING JUST SAY HI :3',
+      focusPath: 'src/features/payments',
+    });
+    const resp = (await handleApiRequest(request, url, opts)) as Response;
+    expect(resp.status).toBe(200);
+    expect(opts.review.onEnqueueReview).toHaveBeenCalledWith({
+      repoOrId: 'my-repo',
+      agent: prAgent,
+      note: 'DO NOTHING JUST SAY HI :3',
+      focusPath: 'src/features/payments',
     });
   });
 
   it('rejects missing repoOrId', async () => {
     const { request, url } = makeRequest('POST', '/v1/reviews/enqueue', {
-      agent: 'janitor',
+      agent: defaultAgent,
     });
     const resp = (await handleApiRequest(
       request,
@@ -465,7 +602,7 @@ describe('POST /v1/reviews/enqueue — input validation', () => {
   it('rejects empty repoOrId', async () => {
     const { request, url } = makeRequest('POST', '/v1/reviews/enqueue', {
       repoOrId: '',
-      agent: 'janitor',
+      agent: defaultAgent,
     });
     const resp = (await handleApiRequest(
       request,
@@ -480,7 +617,7 @@ describe('POST /v1/reviews/enqueue — input validation', () => {
   it('rejects whitespace-only repoOrId', async () => {
     const { request, url } = makeRequest('POST', '/v1/reviews/enqueue', {
       repoOrId: '   ',
-      agent: 'janitor',
+      agent: defaultAgent,
     });
     const resp = (await handleApiRequest(
       request,
@@ -495,7 +632,7 @@ describe('POST /v1/reviews/enqueue — input validation', () => {
   it('rejects non-string repoOrId', async () => {
     const { request, url } = makeRequest('POST', '/v1/reviews/enqueue', {
       repoOrId: 123,
-      agent: 'janitor',
+      agent: defaultAgent,
     });
     const resp = (await handleApiRequest(
       request,
@@ -552,7 +689,7 @@ describe('POST /v1/reviews/enqueue — input validation', () => {
   });
 
   it('accepts all four valid agent names', async () => {
-    for (const agent of ['janitor', 'hunter', 'inspector', 'scribe']) {
+    for (const agent of AGENT_IDS) {
       const { request, url } = makeRequest('POST', '/v1/reviews/enqueue', {
         repoOrId: 'my-repo',
         agent,
@@ -566,11 +703,11 @@ describe('POST /v1/reviews/enqueue — input validation', () => {
     }
   });
 
-  it('rejects non-integer pr', async () => {
+  it('rejects unknown scope', async () => {
     const { request, url } = makeRequest('POST', '/v1/reviews/enqueue', {
       repoOrId: 'my-repo',
-      agent: 'hunter',
-      pr: 3.14,
+      agent: prAgent,
+      scope: 'not-a-scope',
     });
     const resp = (await handleApiRequest(
       request,
@@ -579,14 +716,14 @@ describe('POST /v1/reviews/enqueue — input validation', () => {
     )) as Response;
     expect(resp.status).toBe(400);
     const body = (await resp.json()) as { error: { code: string } };
-    expect(body.error.code).toBe('INVALID_PR');
+    expect(body.error.code).toBe('INVALID_SCOPE');
   });
 
-  it('rejects zero pr', async () => {
+  it('rejects non-object input', async () => {
     const { request, url } = makeRequest('POST', '/v1/reviews/enqueue', {
       repoOrId: 'my-repo',
-      agent: 'hunter',
-      pr: 0,
+      agent: prAgent,
+      input: 'bad',
     });
     const resp = (await handleApiRequest(
       request,
@@ -595,14 +732,14 @@ describe('POST /v1/reviews/enqueue — input validation', () => {
     )) as Response;
     expect(resp.status).toBe(400);
     const body = (await resp.json()) as { error: { code: string } };
-    expect(body.error.code).toBe('INVALID_PR');
+    expect(body.error.code).toBe('INVALID_SCOPE_INPUT');
   });
 
-  it('rejects negative pr', async () => {
+  it('rejects note when not a string', async () => {
     const { request, url } = makeRequest('POST', '/v1/reviews/enqueue', {
       repoOrId: 'my-repo',
-      agent: 'hunter',
-      pr: -1,
+      agent: prAgent,
+      note: 123,
     });
     const resp = (await handleApiRequest(
       request,
@@ -611,14 +748,14 @@ describe('POST /v1/reviews/enqueue — input validation', () => {
     )) as Response;
     expect(resp.status).toBe(400);
     const body = (await resp.json()) as { error: { code: string } };
-    expect(body.error.code).toBe('INVALID_PR');
+    expect(body.error.code).toBe('INVALID_BODY');
   });
 
-  it('rejects string pr', async () => {
+  it('rejects focusPath when not a string', async () => {
     const { request, url } = makeRequest('POST', '/v1/reviews/enqueue', {
       repoOrId: 'my-repo',
-      agent: 'hunter',
-      pr: 'abc',
+      agent: prAgent,
+      focusPath: 123,
     });
     const resp = (await handleApiRequest(
       request,
@@ -627,13 +764,13 @@ describe('POST /v1/reviews/enqueue — input validation', () => {
     )) as Response;
     expect(resp.status).toBe(400);
     const body = (await resp.json()) as { error: { code: string } };
-    expect(body.error.code).toBe('INVALID_PR');
+    expect(body.error.code).toBe('INVALID_BODY');
   });
 
-  it('accepts undefined pr (optional field)', async () => {
+  it('accepts undefined scope/input (optional fields)', async () => {
     const { request, url } = makeRequest('POST', '/v1/reviews/enqueue', {
       repoOrId: 'my-repo',
-      agent: 'janitor',
+      agent: defaultAgent,
     });
     const resp = (await handleApiRequest(
       request,
@@ -653,7 +790,7 @@ describe('POST /v1/reviews/enqueue — input validation', () => {
     });
     const { request, url } = makeRequest('POST', '/v1/reviews/enqueue', {
       repoOrId: 'unknown-repo',
-      agent: 'janitor',
+      agent: defaultAgent,
     });
     const resp = (await handleApiRequest(request, url, opts)) as Response;
     expect(resp.status).toBe(400);
@@ -697,6 +834,411 @@ describe('POST /v1/reviews/enqueue — invalid JSON body', () => {
     // Empty body triggers json() parse error => INVALID_BODY
     const body = (await resp.json()) as { error: { code: string } };
     expect(body.error.code).toBe('INVALID_BODY');
+  });
+});
+
+describe('POST /v1/reviews/stop', () => {
+  it('accepts valid reviewRunId and forwards to review API', async () => {
+    const opts = stubOptions();
+    const { request, url } = makeRequest('POST', '/v1/reviews/stop', {
+      reviewRunId: 'rrn_1',
+    });
+    const resp = (await handleApiRequest(request, url, opts)) as Response;
+    expect(resp.status).toBe(200);
+    expect(opts.review.onStopReview).toHaveBeenCalledWith({
+      reviewRunId: 'rrn_1',
+    });
+  });
+
+  it('rejects missing reviewRunId', async () => {
+    const { request, url } = makeRequest('POST', '/v1/reviews/stop', {});
+    const resp = (await handleApiRequest(
+      request,
+      url,
+      stubOptions(),
+    )) as Response;
+    expect(resp.status).toBe(400);
+    const body = (await resp.json()) as { error: { code: string } };
+    expect(body.error.code).toBe('INVALID_REVIEW_RUN_ID');
+  });
+
+  it('surfaces review API stop errors as STOP_FAILED', async () => {
+    const opts = stubOptions({
+      review: {
+        onStopReview: mock(async () => {
+          throw new Error('cannot stop run');
+        }),
+      },
+    });
+    const { request, url } = makeRequest('POST', '/v1/reviews/stop', {
+      reviewRunId: 'rrn_1',
+    });
+    const resp = (await handleApiRequest(request, url, opts)) as Response;
+    expect(resp.status).toBe(400);
+    const body = (await resp.json()) as { error: { code: string } };
+    expect(body.error.code).toBe('STOP_FAILED');
+  });
+});
+
+describe('POST /v1/reviews/resume', () => {
+  it('accepts valid reviewRunId and forwards to review API', async () => {
+    const opts = stubOptions();
+    const { request, url } = makeRequest('POST', '/v1/reviews/resume', {
+      reviewRunId: 'rrn_2',
+    });
+    const resp = (await handleApiRequest(request, url, opts)) as Response;
+    expect(resp.status).toBe(200);
+    expect(opts.review.onResumeReview).toHaveBeenCalledWith({
+      reviewRunId: 'rrn_2',
+    });
+  });
+
+  it('returns 409 when review API reports NOT_RESUMABLE', async () => {
+    const opts = stubOptions({
+      review: {
+        onResumeReview: mock(
+          async ({ reviewRunId }: { reviewRunId: string }) => ({
+            ok: true as const,
+            resumed: false,
+            reviewRunId,
+            errorCode: 'NOT_RESUMABLE' as const,
+          }),
+        ),
+      },
+    });
+    const { request, url } = makeRequest('POST', '/v1/reviews/resume', {
+      reviewRunId: 'rrn_3',
+    });
+    const resp = (await handleApiRequest(request, url, opts)) as Response;
+    expect(resp.status).toBe(409);
+    const body = (await resp.json()) as { error: { code: string } };
+    expect(body.error.code).toBe('NOT_RESUMABLE');
+  });
+
+  it('surfaces review API resume errors as RESUME_FAILED', async () => {
+    const opts = stubOptions({
+      review: {
+        onResumeReview: mock(async () => {
+          throw new Error('cannot resume run');
+        }),
+      },
+    });
+    const { request, url } = makeRequest('POST', '/v1/reviews/resume', {
+      reviewRunId: 'rrn_4',
+    });
+    const resp = (await handleApiRequest(request, url, opts)) as Response;
+    expect(resp.status).toBe(400);
+    const body = (await resp.json()) as { error: { code: string } };
+    expect(body.error.code).toBe('RESUME_FAILED');
+  });
+});
+
+describe('GET /v1/prs/list', () => {
+  it('forwards validated query params to PR API', async () => {
+    const opts = stubOptions();
+    const { request, url } = makeRequest(
+      'GET',
+      '/v1/prs/list?repoOrId=repo-1&bucket=assigned&query=is%3Aopen%20label%3Abug&limit=17',
+    );
+    const resp = (await handleApiRequest(request, url, opts)) as Response;
+    expect(resp.status).toBe(200);
+    expect(opts.pr.listPrs).toHaveBeenCalledWith({
+      repoOrId: 'repo-1',
+      bucket: 'assigned',
+      query: 'is:open label:bug',
+      limit: 17,
+    });
+  });
+
+  it('rejects missing repoOrId', async () => {
+    const opts = stubOptions();
+    const { request, url } = makeRequest('GET', '/v1/prs/list');
+    const resp = (await handleApiRequest(request, url, opts)) as Response;
+    expect(resp.status).toBe(400);
+    const body = (await resp.json()) as { error: { code: string } };
+    expect(body.error.code).toBe('INVALID_REPO');
+  });
+
+  it('rejects invalid bucket', async () => {
+    const opts = stubOptions();
+    const { request, url } = makeRequest(
+      'GET',
+      '/v1/prs/list?repoOrId=repo-1&bucket=mine-now',
+    );
+    const resp = (await handleApiRequest(request, url, opts)) as Response;
+    expect(resp.status).toBe(400);
+    const body = (await resp.json()) as { error: { code: string } };
+    expect(body.error.code).toBe('INVALID_BODY');
+  });
+
+  it('maps list failures to PRS_LIST_FAILED', async () => {
+    const opts = stubOptions({
+      pr: {
+        listPrs: mock(async () => {
+          throw new Error('gh list failed');
+        }),
+      },
+    });
+    const { request, url } = makeRequest('GET', '/v1/prs/list?repoOrId=repo-1');
+    const resp = (await handleApiRequest(request, url, opts)) as Response;
+    expect(resp.status).toBe(400);
+    const body = (await resp.json()) as { error: { code: string } };
+    expect(body.error.code).toBe('PRS_LIST_FAILED');
+  });
+});
+
+describe('GET /v1/prs/detail', () => {
+  it('forwards validated query params to PR API', async () => {
+    const opts = stubOptions();
+    const { request, url } = makeRequest(
+      'GET',
+      '/v1/prs/detail?repoOrId=repo-1&prNumber=42',
+    );
+    const resp = (await handleApiRequest(request, url, opts)) as Response;
+    expect(resp.status).toBe(200);
+    expect(opts.pr.getPrDetail).toHaveBeenCalledWith({
+      repoOrId: 'repo-1',
+      prNumber: 42,
+    });
+  });
+
+  it('rejects invalid prNumber', async () => {
+    const opts = stubOptions();
+    const { request, url } = makeRequest(
+      'GET',
+      '/v1/prs/detail?repoOrId=repo-1&prNumber=0',
+    );
+    const resp = (await handleApiRequest(request, url, opts)) as Response;
+    expect(resp.status).toBe(400);
+    const body = (await resp.json()) as { error: { code: string } };
+    expect(body.error.code).toBe('INVALID_PR');
+  });
+
+  it('maps detail failures to PRS_DETAIL_FAILED', async () => {
+    const opts = stubOptions({
+      pr: {
+        getPrDetail: mock(async () => {
+          throw new Error('gh detail failed');
+        }),
+      },
+    });
+    const { request, url } = makeRequest(
+      'GET',
+      '/v1/prs/detail?repoOrId=repo-1&prNumber=1',
+    );
+    const resp = (await handleApiRequest(request, url, opts)) as Response;
+    expect(resp.status).toBe(400);
+    const body = (await resp.json()) as { error: { code: string } };
+    expect(body.error.code).toBe('PRS_DETAIL_FAILED');
+  });
+});
+
+describe('POST /v1/prs/merge', () => {
+  it('accepts valid body and forwards to PR API', async () => {
+    const opts = stubOptions();
+    const { request, url } = makeRequest('POST', '/v1/prs/merge', {
+      repoOrId: 'repo-1',
+      prNumber: 5,
+      method: 'squash',
+    });
+    const resp = (await handleApiRequest(request, url, opts)) as Response;
+    expect(resp.status).toBe(200);
+    expect(opts.pr.mergePr).toHaveBeenCalledWith({
+      repoOrId: 'repo-1',
+      prNumber: 5,
+      method: 'squash',
+    });
+  });
+
+  it('rejects invalid method', async () => {
+    const opts = stubOptions();
+    const { request, url } = makeRequest('POST', '/v1/prs/merge', {
+      repoOrId: 'repo-1',
+      prNumber: 5,
+      method: 'shipit',
+    });
+    const resp = (await handleApiRequest(request, url, opts)) as Response;
+    expect(resp.status).toBe(400);
+    const body = (await resp.json()) as { error: { code: string } };
+    expect(body.error.code).toBe('INVALID_BODY');
+  });
+
+  it('maps merge failures to PRS_MERGE_FAILED', async () => {
+    const opts = stubOptions({
+      pr: {
+        mergePr: mock(async () => {
+          throw new Error('merge blocked');
+        }),
+      },
+    });
+    const { request, url } = makeRequest('POST', '/v1/prs/merge', {
+      repoOrId: 'repo-1',
+      prNumber: 5,
+    });
+    const resp = (await handleApiRequest(request, url, opts)) as Response;
+    expect(resp.status).toBe(400);
+    const body = (await resp.json()) as { error: { code: string } };
+    expect(body.error.code).toBe('PRS_MERGE_FAILED');
+  });
+});
+
+describe('POST /v1/prs/comment', () => {
+  it('accepts valid body and forwards to PR API', async () => {
+    const opts = stubOptions();
+    const { request, url } = makeRequest('POST', '/v1/prs/comment', {
+      repoOrId: 'repo-1',
+      prNumber: 7,
+      body: 'looks good',
+    });
+    const resp = (await handleApiRequest(request, url, opts)) as Response;
+    expect(resp.status).toBe(200);
+    expect(opts.pr.commentPr).toHaveBeenCalledWith({
+      repoOrId: 'repo-1',
+      prNumber: 7,
+      body: 'looks good',
+    });
+  });
+
+  it('rejects empty comment body', async () => {
+    const opts = stubOptions();
+    const { request, url } = makeRequest('POST', '/v1/prs/comment', {
+      repoOrId: 'repo-1',
+      prNumber: 7,
+      body: ' ',
+    });
+    const resp = (await handleApiRequest(request, url, opts)) as Response;
+    expect(resp.status).toBe(400);
+    const body = (await resp.json()) as { error: { code: string } };
+    expect(body.error.code).toBe('INVALID_BODY');
+  });
+
+  it('maps comment failures to PRS_COMMENT_FAILED', async () => {
+    const opts = stubOptions({
+      pr: {
+        commentPr: mock(async () => {
+          throw new Error('comment denied');
+        }),
+      },
+    });
+    const { request, url } = makeRequest('POST', '/v1/prs/comment', {
+      repoOrId: 'repo-1',
+      prNumber: 7,
+      body: 'looks good',
+    });
+    const resp = (await handleApiRequest(request, url, opts)) as Response;
+    expect(resp.status).toBe(400);
+    const body = (await resp.json()) as { error: { code: string } };
+    expect(body.error.code).toBe('PRS_COMMENT_FAILED');
+  });
+});
+
+describe('POST /v1/prs/request-reviewers', () => {
+  it('accepts valid body and forwards to PR API', async () => {
+    const opts = stubOptions();
+    const { request, url } = makeRequest('POST', '/v1/prs/request-reviewers', {
+      repoOrId: 'repo-1',
+      prNumber: 8,
+      reviewers: ['alice', 'bob'],
+    });
+    const resp = (await handleApiRequest(request, url, opts)) as Response;
+    expect(resp.status).toBe(200);
+    expect(opts.pr.requestReviewers).toHaveBeenCalledWith({
+      repoOrId: 'repo-1',
+      prNumber: 8,
+      reviewers: ['alice', 'bob'],
+    });
+  });
+
+  it('rejects invalid reviewers payload', async () => {
+    const opts = stubOptions();
+    const { request, url } = makeRequest('POST', '/v1/prs/request-reviewers', {
+      repoOrId: 'repo-1',
+      prNumber: 8,
+      reviewers: [],
+    });
+    const resp = (await handleApiRequest(request, url, opts)) as Response;
+    expect(resp.status).toBe(400);
+    const body = (await resp.json()) as { error: { code: string } };
+    expect(body.error.code).toBe('INVALID_BODY');
+  });
+
+  it('maps reviewer request failures to PRS_REQUEST_REVIEWERS_FAILED', async () => {
+    const opts = stubOptions({
+      pr: {
+        requestReviewers: mock(async () => {
+          throw new Error('request failed');
+        }),
+      },
+    });
+    const { request, url } = makeRequest('POST', '/v1/prs/request-reviewers', {
+      repoOrId: 'repo-1',
+      prNumber: 8,
+      reviewers: ['alice'],
+    });
+    const resp = (await handleApiRequest(request, url, opts)) as Response;
+    expect(resp.status).toBe(400);
+    const body = (await resp.json()) as { error: { code: string } };
+    expect(body.error.code).toBe('PRS_REQUEST_REVIEWERS_FAILED');
+  });
+});
+
+describe('POST /v1/prs/reply-comment', () => {
+  it('accepts valid body and forwards to PR API', async () => {
+    const opts = stubOptions();
+    const { request, url } = makeRequest('POST', '/v1/prs/reply-comment', {
+      repoOrId: 'repo-1',
+      prNumber: 9,
+      commentId: 123,
+      body: 'Thanks! fixed',
+    });
+    const resp = (await handleApiRequest(request, url, opts)) as Response;
+    expect(resp.status).toBe(200);
+    expect(opts.pr.replyReviewComment).toHaveBeenCalledWith({
+      repoOrId: 'repo-1',
+      prNumber: 9,
+      commentId: 123,
+      body: 'Thanks! fixed',
+    });
+  });
+
+  it('maps action failures to PRS_REPLY_COMMENT_FAILED', async () => {
+    const opts = stubOptions({
+      pr: {
+        replyReviewComment: mock(async () => {
+          throw new Error('reply failed');
+        }),
+      },
+    });
+    const { request, url } = makeRequest('POST', '/v1/prs/reply-comment', {
+      repoOrId: 'repo-1',
+      prNumber: 9,
+      commentId: 123,
+      body: 'Thanks! fixed',
+    });
+    const resp = (await handleApiRequest(request, url, opts)) as Response;
+    expect(resp.status).toBe(400);
+    const body = (await resp.json()) as { error: { code: string } };
+    expect(body.error.code).toBe('PRS_REPLY_COMMENT_FAILED');
+  });
+});
+
+describe('GET /v1/capabilities', () => {
+  it('returns capabilities payload', async () => {
+    const opts = stubOptions();
+    const { request, url } = makeRequest('GET', '/v1/capabilities');
+    const resp = handleApiRequest(request, url, opts) as Response;
+    expect(resp.status).toBe(200);
+    const body = (await resp.json()) as {
+      ok: boolean;
+      agents: unknown[];
+      scopes: unknown[];
+      triggers: unknown[];
+    };
+    expect(body.ok).toBe(true);
+    expect(Array.isArray(body.agents)).toBe(true);
+    expect(Array.isArray(body.scopes)).toBe(true);
+    expect(Array.isArray(body.triggers)).toBe(true);
+    expect(opts.capabilities.getCapabilities).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -820,6 +1362,23 @@ describe('GET /v1/events — bounded query params', () => {
   });
 });
 
+describe('DELETE /v1/events', () => {
+  it('clears event journal and returns deleted count', async () => {
+    const opts = stubOptions({
+      event: {
+        clearEvents: mock(() => ({ deleted: 42 })),
+      },
+    });
+    const { request, url } = makeRequest('DELETE', '/v1/events');
+    const resp = handleApiRequest(request, url, opts) as Response;
+    expect(resp.status).toBe(200);
+    const body = (await resp.json()) as { ok: boolean; deleted: number };
+    expect(body.ok).toBe(true);
+    expect(body.deleted).toBe(42);
+    expect(opts.event.clearEvents).toHaveBeenCalledTimes(1);
+  });
+});
+
 // ---------------------------------------------------------------------------
 // 14. GET /v1/events — filter routing
 // ---------------------------------------------------------------------------
@@ -837,7 +1396,7 @@ describe('GET /v1/events — filter routing', () => {
     const opts = stubOptions();
     const { request, url } = makeRequest(
       'GET',
-      '/v1/events?repoId=repo-1&jobId=job-1',
+      '/v1/events?repoId=repo-1&triggerEventId=event-1',
     );
     handleApiRequest(request, url, opts);
     expect(opts.event.listEventsAfterSeqFiltered).toHaveBeenCalled();
@@ -897,23 +1456,23 @@ describe('GET /v1/dashboard/snapshot', () => {
 // ---------------------------------------------------------------------------
 
 describe('GET /v1/dashboard/report', () => {
-  it('rejects missing agentRunId', async () => {
+  it('rejects missing reviewRunId', async () => {
     const { request, url } = makeRequest('GET', '/v1/dashboard/report');
     const resp = handleApiRequest(request, url, stubOptions()) as Response;
     expect(resp.status).toBe(400);
     const body = (await resp.json()) as { error: { code: string } };
-    expect(body.error.code).toBe('INVALID_AGENT_RUN_ID');
+    expect(body.error.code).toBe('INVALID_REVIEW_RUN_ID');
   });
 
-  it('rejects empty agentRunId', async () => {
+  it('rejects empty reviewRunId', async () => {
     const { request, url } = makeRequest(
       'GET',
-      '/v1/dashboard/report?agentRunId=',
+      '/v1/dashboard/report?reviewRunId=',
     );
     const resp = handleApiRequest(request, url, stubOptions()) as Response;
     expect(resp.status).toBe(400);
     const body = (await resp.json()) as { error: { code: string } };
-    expect(body.error.code).toBe('INVALID_AGENT_RUN_ID');
+    expect(body.error.code).toBe('INVALID_REVIEW_RUN_ID');
   });
 
   it('returns 404 when report not found', async () => {
@@ -924,7 +1483,7 @@ describe('GET /v1/dashboard/report', () => {
     });
     const { request, url } = makeRequest(
       'GET',
-      '/v1/dashboard/report?agentRunId=nonexistent',
+      '/v1/dashboard/report?reviewRunId=nonexistent',
     );
     const resp = handleApiRequest(request, url, opts) as Response;
     expect(resp.status).toBe(404);
@@ -936,7 +1495,7 @@ describe('GET /v1/dashboard/report', () => {
     const opts = stubOptions();
     const { request, url } = makeRequest(
       'GET',
-      '/v1/dashboard/report?agentRunId=run-1&findingsLimit=9999',
+      '/v1/dashboard/report?reviewRunId=run-1&findingsLimit=9999',
     );
     handleApiRequest(request, url, opts);
     expect(opts.dashboard.getDashboardReportDetail).toHaveBeenCalledWith(
@@ -967,7 +1526,7 @@ describe('DELETE /v1/dashboard/report', () => {
     expect(body.error.code).toBe('INVALID_BODY');
   });
 
-  it('rejects missing agentRunId in body', async () => {
+  it('rejects missing reviewRunId in body', async () => {
     const { request, url } = makeRequest('DELETE', '/v1/dashboard/report', {});
     const resp = (await handleApiRequest(
       request,
@@ -976,12 +1535,12 @@ describe('DELETE /v1/dashboard/report', () => {
     )) as Response;
     expect(resp.status).toBe(400);
     const body = (await resp.json()) as { error: { code: string } };
-    expect(body.error.code).toBe('INVALID_AGENT_RUN_ID');
+    expect(body.error.code).toBe('INVALID_REVIEW_RUN_ID');
   });
 
-  it('rejects empty agentRunId in body', async () => {
+  it('rejects empty reviewRunId in body', async () => {
     const { request, url } = makeRequest('DELETE', '/v1/dashboard/report', {
-      agentRunId: '',
+      reviewRunId: '',
     });
     const resp = (await handleApiRequest(
       request,
@@ -990,24 +1549,24 @@ describe('DELETE /v1/dashboard/report', () => {
     )) as Response;
     expect(resp.status).toBe(400);
     const body = (await resp.json()) as { error: { code: string } };
-    expect(body.error.code).toBe('INVALID_AGENT_RUN_ID');
+    expect(body.error.code).toBe('INVALID_REVIEW_RUN_ID');
   });
 
-  it('succeeds with valid agentRunId', async () => {
+  it('succeeds with valid reviewRunId', async () => {
     const opts = stubOptions();
     const { request, url } = makeRequest('DELETE', '/v1/dashboard/report', {
-      agentRunId: 'run-42',
+      reviewRunId: 'run-42',
     });
     const resp = (await handleApiRequest(request, url, opts)) as Response;
     expect(resp.status).toBe(200);
     const body = (await resp.json()) as {
       ok: boolean;
       deleted: boolean;
-      agentRunId: string;
+      reviewRunId: string;
     };
     expect(body.ok).toBe(true);
     expect(body.deleted).toBe(true);
-    expect(body.agentRunId).toBe('run-42');
+    expect(body.reviewRunId).toBe('run-42');
   });
 
   it('surfaces onDeleteReport errors as 400', async () => {
@@ -1019,7 +1578,7 @@ describe('DELETE /v1/dashboard/report', () => {
       },
     });
     const { request, url } = makeRequest('DELETE', '/v1/dashboard/report', {
-      agentRunId: 'run-1',
+      reviewRunId: 'run-1',
     });
     const resp = (await handleApiRequest(request, url, opts)) as Response;
     expect(resp.status).toBe(400);

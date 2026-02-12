@@ -3,16 +3,12 @@ import { defaultDbPath } from '../config/paths';
 import { acquireProcessLock } from '../daemon/lock';
 import { openDatabase } from '../db/connection';
 import { ensureSchema } from '../db/migrations';
-import { appendEvent } from '../db/queries/event-queries';
-import {
-  recoverRunningAgentRuns,
-  recoverRunningJobs,
-} from '../db/queries/scheduler-queries';
-import { startRepoWatch } from '../detectors/repo-watch';
+import { recoverRunningReviewRuns } from '../db/queries/review-run-queries';
 import { startScheduler } from '../scheduler/worker';
+import { startTriggerEngine } from '../triggers/engine';
 import { createAgentConfigMap } from './agent-factory';
 import type { RuntimeContext, ShutdownContext } from './context';
-import { createDefaultAgentRegistry } from './default-agent-specs';
+import { createDefinitionAgentRegistry } from './definition-agent-registry';
 import { startOpencodeChild } from './opencode-child';
 import { createSessionCompletionBus } from './session-completion-bus';
 import { createSessionEventProjector } from './session-event-projector';
@@ -23,8 +19,7 @@ export interface BootstrapRuntimeOptions {
 
 export interface BootstrapRuntimeResult {
   rc: RuntimeContext;
-  recoveredJobs: number;
-  recoveredAgentRuns: number;
+  recoveredReviewRuns: number;
 }
 
 export interface ShutdownRuntimeOptions {
@@ -60,8 +55,7 @@ export async function bootstrapRuntime(
   const db = openDatabase(dbPath);
 
   ensureSchema(db);
-  const recoveredJobs = recoverRunningJobs(db);
-  const recoveredAgentRuns = recoverRunningAgentRuns(db);
+  const recoveredReviewRuns = recoverRunningReviewRuns(db);
 
   const agentDefinitions = createAgentConfigMap(config);
   const agentConfigEntries = Object.fromEntries(
@@ -79,7 +73,7 @@ export async function bootstrapRuntime(
       logLevel: mapLogLevel(config.daemon.logLevel),
     });
 
-    const registry = createDefaultAgentRegistry();
+    const registry = createDefinitionAgentRegistry();
     const sessionEventProjector = createSessionEventProjector(db);
 
     const completionBus = createSessionCompletionBus({
@@ -98,14 +92,10 @@ export async function bootstrapRuntime(
       completionBus,
     });
 
-    const watch = startRepoWatch({
+    const watch = startTriggerEngine({
       db,
-      minPollSec: config.detector.minPollSec,
-      maxPollSec: config.detector.maxPollSec,
-      probeConcurrency: config.detector.probeConcurrency,
-      prTtlSec: config.detector.prTtlSec,
-      pollJitterPct: config.detector.pollJitterPct,
       maxAttempts: config.scheduler.maxAttempts,
+      config,
       onJobEnqueued: () => {
         scheduler.wake();
       },
@@ -124,8 +114,7 @@ export async function bootstrapRuntime(
         watch,
         scheduler,
       },
-      recoveredJobs,
-      recoveredAgentRuns,
+      recoveredReviewRuns,
     };
   } catch (error) {
     try {

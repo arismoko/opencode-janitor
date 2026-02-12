@@ -1,0 +1,101 @@
+import type { z } from 'zod';
+
+export type AgentContextReason = 'manual-repo' | 'empty-workspace-fallback';
+
+export type AgentPermissionDecision = 'ask' | 'allow' | 'deny';
+
+export type AgentPermissionRule =
+  | AgentPermissionDecision
+  | Record<string, AgentPermissionDecision>;
+
+export type AgentPermissionPolicy = Record<string, AgentPermissionRule>;
+
+export type AgentRuntimePolicy = {
+  permission: AgentPermissionPolicy;
+  maxSteps: number;
+};
+
+export type AgentContextMeta = {
+  label?: string;
+  metadataPrefix?: string[];
+  metadataSuffix?: string[];
+  reason?: AgentContextReason;
+};
+
+export type ResolveManualScopeInput<TScopeId extends string = string> = {
+  requestedScope?: TScopeId;
+  hasWorkspaceDiff: boolean;
+  manualInput?: Record<string, unknown>;
+  trigger: 'manual';
+};
+
+export type EnrichContextInput<
+  TTriggerId extends string = string,
+  TScopeId extends string = string,
+> = {
+  trigger: TTriggerId;
+  scope: TScopeId;
+  repoPath: string;
+  defaultBranch: string;
+  hasWorkspaceDiff: boolean;
+  sha?: string;
+  prNumber?: number;
+};
+
+export type AgentDefinition<
+  TAgentId extends string = string,
+  TTriggerId extends string = string,
+  TScopeId extends string = string,
+  TOutputSchema extends z.ZodTypeAny = z.ZodTypeAny,
+> = {
+  id: TAgentId;
+  label: string;
+  description: string;
+  role: string;
+  domains: readonly string[];
+  rules?: string;
+  outputSchema: TOutputSchema;
+  defaults: {
+    autoTriggers: readonly TTriggerId[];
+    manualScope?: TScopeId;
+    maxFindings?: number;
+  };
+  capabilities: {
+    autoTriggers: readonly TTriggerId[];
+    manualScopes: readonly TScopeId[];
+  };
+  cli: {
+    command: string;
+    alias?: string;
+    description: string;
+  };
+  runtime: AgentRuntimePolicy;
+  resolveManualScope: (input: ResolveManualScopeInput<TScopeId>) => TScopeId;
+  enrichContext: (
+    input: EnrichContextInput<TTriggerId, TScopeId>,
+  ) => AgentContextMeta;
+  reviewPromptHints?: (
+    input: EnrichContextInput<TTriggerId, TScopeId>,
+  ) => string[];
+  normalizeFinding?: (finding: Record<string, unknown>) => void;
+  findingEnrichments?: {
+    definitions: readonly FindingEnrichmentDefinition[];
+    buildSections?: (
+      finding: Record<string, unknown>,
+    ) => FindingEnrichmentSection[];
+  };
+};
+
+export type FindingEnrichmentSection = {
+  kind: string;
+  version: number;
+  payload: Record<string, unknown>;
+  collapsed?: boolean;
+};
+
+export type FindingEnrichmentDefinition = {
+  kind: string;
+  title: string;
+  renderer: string;
+  collapsedByDefault: boolean;
+};

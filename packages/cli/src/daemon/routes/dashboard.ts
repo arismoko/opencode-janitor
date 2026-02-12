@@ -19,19 +19,19 @@ function handleDashboardSnapshot(url: URL, dashboard: DashboardApi): Response {
 }
 
 function handleDashboardReport(url: URL, dashboard: DashboardApi): Response {
-  const agentRunId = url.searchParams.get('agentRunId');
-  if (!agentRunId || agentRunId.trim().length === 0) {
+  const reviewRunId = url.searchParams.get('reviewRunId');
+  if (!reviewRunId || reviewRunId.trim().length === 0) {
     return errorResponse(
       400,
-      'INVALID_AGENT_RUN_ID',
-      '`agentRunId` query param is required',
+      'INVALID_REVIEW_RUN_ID',
+      '`reviewRunId` query param is required',
     );
   }
 
   const findingsLimit = parseQueryInt(url, 'findingsLimit', 120, 1);
   const boundedFindingsLimit = Math.min(findingsLimit, 500);
   const detail = dashboard.getDashboardReportDetail(
-    agentRunId,
+    reviewRunId,
     boundedFindingsLimit,
   );
   if (!detail) {
@@ -49,16 +49,19 @@ async function handleDeleteReport(request: Request, dashboard: DashboardApi) {
     return errorResponse(400, 'INVALID_BODY', message);
   }
 
-  let agentRunId: string;
+  let reviewRunId: string;
   try {
-    agentRunId = requireString(getBodyField(body, 'agentRunId'), 'agentRunId');
+    reviewRunId = requireString(
+      getBodyField(body, 'reviewRunId'),
+      'reviewRunId',
+    );
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    return errorResponse(400, 'INVALID_AGENT_RUN_ID', message);
+    return errorResponse(400, 'INVALID_REVIEW_RUN_ID', message);
   }
 
   try {
-    const response = dashboard.onDeleteReport(agentRunId);
+    const response = dashboard.onDeleteReport(reviewRunId);
     return json(200, response);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);

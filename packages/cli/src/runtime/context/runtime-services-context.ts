@@ -1,7 +1,7 @@
 import type { Database } from 'bun:sqlite';
 import type { ProcessLock } from '../../daemon/lock';
-import type { RepoWatchHandle } from '../../detectors/repo-watch';
 import type { SchedulerHandle } from '../../scheduler/worker';
+import type { TriggerEngineHandle } from '../../triggers/engine';
 import type { AgentRuntimeRegistry } from '../agent-runtime-registry';
 import type { OpencodeChild } from '../opencode-child';
 import type { SessionCompletionBus } from '../session-completion-bus';
@@ -13,6 +13,6 @@ export interface RuntimeServicesContext {
   child: OpencodeChild;
   registry: AgentRuntimeRegistry;
   completionBus: SessionCompletionBus;
-  watch: RepoWatchHandle;
+  watch: TriggerEngineHandle;
   scheduler: SchedulerHandle;
 }

@@ -1,4 +1,4 @@
-import { LEVEL_RANK } from '../constants.js';
+import { LEVEL_RANK } from '../ui-constants.js';
 
 export function selectJobCounts(repos) {
   const runningJobs = repos.reduce(
@@ -28,9 +28,12 @@ function minLevelForFilter(activityFilter) {
 
 export function selectFilteredActivity(events, activityFilter) {
   const minLevel = minLevelForFilter(activityFilter);
-
-  return events
-    .filter((event) => (LEVEL_RANK[event.level] ?? 0) >= minLevel)
-    .slice()
-    .reverse();
+  const result = [];
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    const event = events[index];
+    if ((LEVEL_RANK[event.level] ?? 0) >= minLevel) {
+      result.push(event);
+    }
+  }
+  return result;
 }

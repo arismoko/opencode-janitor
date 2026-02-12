@@ -4,64 +4,32 @@
  * Validates subject keys via the shared parseReviewKey parser and throws
  * explicit errors on malformed/unresolved keys. No fallback-to-HEAD.
  */
-import {
-  type ChangedFile,
-  type CommitContext,
-  parseReviewKey,
-} from '@opencode-janitor/shared';
+import type { ChangedFile, CommitContext } from '@opencode-janitor/shared';
 import type { TriggerContext } from '../runtime/agent-runtime-spec';
-import { ghCliEnv, resolveDefaultBranch } from '../utils/git';
+import {
+  resolveDefaultBranch,
+  resolveHeadSha,
+  runGhCommand,
+  runGitWithAllowedExitCodes,
+} from '../utils/git';
 
 const MAX_PATCH_CHARS = 200_000;
-
-function runGitWithAllowedExitCodes(
-  cwd: string,
-  args: string[],
-  allowedExitCodes: number[],
-): string {
-  const proc = Bun.spawnSync({
-    cmd: ['git', '-C', cwd, ...args],
-    stdout: 'pipe',
-    stderr: 'pipe',
-  });
-
-  const stdout = proc.stdout.toString('utf8').trim();
-  const stderr = proc.stderr.toString('utf8').trim();
-  if (!allowedExitCodes.includes(proc.exitCode)) {
-    const command = ['git', '-C', cwd, ...args].join(' ');
-    const details = stderr || stdout || 'no output';
-    throw new Error(
-      `Git command failed (${proc.exitCode}): ${command}\n${details}`,
-    );
-  }
-
-  return stdout;
-}
 
 function runGit(cwd: string, args: string[]): string {
   return runGitWithAllowedExitCodes(cwd, args, [0]);
 }
 
 function runGh(cwd: string, args: string[]): string {
-  const proc = Bun.spawnSync({
-    cmd: ['gh', ...args],
-    cwd,
-    stdout: 'pipe',
-    stderr: 'pipe',
-    env: ghCliEnv(),
-  });
-
-  const stdout = proc.stdout.toString('utf8').trim();
-  const stderr = proc.stderr.toString('utf8').trim();
-  if (proc.exitCode !== 0) {
+  const result = runGhCommand(cwd, args);
+  if (result.exitCode !== 0) {
     const command = ['gh', ...args].join(' ');
-    const details = stderr || stdout || 'no output';
+    const details = result.stderr || result.stdout || 'no output';
     throw new Error(
-      `GitHub command failed (${proc.exitCode}): ${command}\n${details}`,
+      `GitHub command failed (${result.exitCode}): ${command}\n${details}`,
     );
   }
 
-  return stdout;
+  return result.stdout;
 }
 
 function parseNameStatus(linesRaw: string): ChangedFile[] {
@@ -281,67 +249,63 @@ export function buildCommitContext(
 }
 
 /**
- * Resolve the commit SHA from a trigger's subject_key.
- * Throws on malformed or unrecognised keys — no fallback to HEAD.
+ * Build trigger context from structured trigger payloads without subject-key parsing.
  */
-export function resolveCommitSha(
-  _repoPath: string,
-  subjectKey: string,
-): string {
-  const parsed = parseReviewKey(subjectKey);
-  if (!parsed) {
-    throw new Error(
-      `Malformed subject key: "${subjectKey}" — expected commit:<sha>, pr:<n>:<sha>, branch:<name>:<sha>, workspace:<name>:<sha>, or manual:<id>:<sha>`,
-    );
-  }
-  return parsed.type === 'commit' ? parsed.sha : parsed.headSha;
-}
-
-/**
- * Build a trigger-discriminated context object from a job's subject key
- * and payload. Validates the key and builds commit context as needed.
- *
- * Throws on malformed/unresolved keys (fail-closed).
- */
-export function buildTriggerContext(
+export function buildTriggerContextFromPayload(
   repoPath: string,
-  subjectKey: string,
-  payloadSha: string | null,
+  triggerId: 'commit' | 'pr' | 'manual',
+  payloadJson: string,
 ): TriggerContext {
-  const parsed = parseReviewKey(subjectKey);
-  if (!parsed) {
-    throw new Error(
-      `Malformed subject key: "${subjectKey}" — expected commit:<sha>, pr:<n>:<sha>, branch:<name>:<sha>, workspace:<name>:<sha>, or manual:<id>:<sha>`,
-    );
+  let payload: Record<string, unknown> = {};
+  try {
+    payload = JSON.parse(payloadJson) as Record<string, unknown>;
+  } catch {
+    payload = {};
   }
 
-  const sha =
-    payloadSha ?? (parsed.type === 'commit' ? parsed.sha : parsed.headSha);
-
-  if (parsed.type === 'manual') {
+  if (triggerId === 'commit') {
+    const sha =
+      typeof payload.sha === 'string' ? payload.sha : resolveHeadSha(repoPath);
     return {
-      kind: 'manual',
+      kind: 'commit',
       commitSha: sha,
-      commitContext: buildWorkspaceCommitContext(repoPath, sha),
+      commitContext: buildCommitContext(repoPath, sha),
     };
   }
 
-  switch (parsed.type) {
-    case 'commit':
-    case 'branch':
-    case 'workspace':
-      return {
-        kind: 'commit',
-        commitSha: sha,
-        commitContext: buildCommitContext(repoPath, sha),
-      };
-
-    case 'pr':
-      return {
-        kind: 'pr',
-        commitSha: sha,
-        commitContext: buildPrCommitContext(repoPath, sha, parsed.number),
-        prNumber: parsed.number,
-      };
+  if (triggerId === 'pr') {
+    const sha =
+      typeof payload.sha === 'string' ? payload.sha : resolveHeadSha(repoPath);
+    const prNumber =
+      typeof payload.prNumber === 'number' && Number.isInteger(payload.prNumber)
+        ? payload.prNumber
+        : 0;
+    return {
+      kind: 'pr',
+      commitSha: sha,
+      commitContext: buildPrCommitContext(repoPath, sha, prNumber),
+      prNumber,
+    };
   }
+
+  const manualSha =
+    typeof payload.sha === 'string' && payload.sha.length > 0
+      ? payload.sha
+      : resolveHeadSha(repoPath);
+  const note =
+    typeof payload.note === 'string' && payload.note.trim().length > 0
+      ? payload.note.trim()
+      : undefined;
+  const focusPath =
+    typeof payload.focusPath === 'string' && payload.focusPath.trim().length > 0
+      ? payload.focusPath.trim()
+      : undefined;
+
+  return {
+    kind: 'manual',
+    commitSha: manualSha,
+    commitContext: buildWorkspaceCommitContext(repoPath, manualSha),
+    ...(note ? { note } : {}),
+    ...(focusPath ? { focusPath } : {}),
+  };
 }

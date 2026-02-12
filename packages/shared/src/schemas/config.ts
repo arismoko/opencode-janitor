@@ -5,13 +5,38 @@
  * config formats. Each consumer wraps these in their own top-level schema.
  */
 import { z } from 'zod';
+import { SCOPE_IDS, type ScopeId } from '../scopes';
+import { TRIGGER_IDS, type TriggerId } from '../triggers';
 
 // ---------------------------------------------------------------------------
-// Trigger mode
+// Dynamic enums
 // ---------------------------------------------------------------------------
 
-export const TriggerMode = z.enum(['commit', 'pr', 'both', 'manual', 'never']);
-export type TriggerMode = z.infer<typeof TriggerMode>;
+const triggerIdTuple = TRIGGER_IDS as [TriggerId, ...TriggerId[]];
+const scopeIdTuple = SCOPE_IDS as [ScopeId, ...ScopeId[]];
+
+export const TriggerIdSchema = z.enum(triggerIdTuple);
+export const ScopeIdSchema = z.enum(scopeIdTuple);
+export type TriggerIdSchema = z.infer<typeof TriggerIdSchema>;
+export type ScopeIdSchema = z.infer<typeof ScopeIdSchema>;
+
+export const PermissionDecisionSchema = z.enum(['ask', 'allow', 'deny']);
+export const PermissionPatternMapSchema = z.record(
+  z.string(),
+  PermissionDecisionSchema,
+);
+export const PermissionRuleSchema = z.union([
+  PermissionDecisionSchema,
+  PermissionPatternMapSchema,
+]);
+export const PermissionExtensionsSchema = z.record(
+  z.string(),
+  PermissionRuleSchema,
+);
+export type PermissionDecision = z.infer<typeof PermissionDecisionSchema>;
+export type PermissionPatternMap = z.infer<typeof PermissionPatternMapSchema>;
+export type PermissionRule = z.infer<typeof PermissionRuleSchema>;
+export type PermissionExtensions = z.infer<typeof PermissionExtensionsSchema>;
 
 // ---------------------------------------------------------------------------
 // Per-agent runtime config
@@ -19,9 +44,11 @@ export type TriggerMode = z.infer<typeof TriggerMode>;
 
 export const AgentRuntimeConfig = z.object({
   enabled: z.boolean().default(true),
-  trigger: TriggerMode.default('manual'),
+  autoTriggers: z.array(TriggerIdSchema).default([]),
+  manualDefaultScope: ScopeIdSchema.optional(),
   modelId: z.string().optional(),
   variant: z.string().optional(),
+  permissionExtensions: PermissionExtensionsSchema.optional(),
   maxFindings: z.number().int().min(1).max(50).default(10),
 });
 export type AgentRuntimeConfig = z.infer<typeof AgentRuntimeConfig>;
@@ -46,14 +73,3 @@ export const ScopeConfig = z.object({
     ]),
 });
 export type ScopeConfig = z.infer<typeof ScopeConfig>;
-
-// ---------------------------------------------------------------------------
-// Diff limits config
-// ---------------------------------------------------------------------------
-
-export const DiffConfig = z.object({
-  maxPatchBytes: z.number().int().min(10_000).default(200_000),
-  maxFilesInPatch: z.number().int().min(1).default(50),
-  maxHunksPerFile: z.number().int().min(1).default(8),
-});
-export type DiffConfig = z.infer<typeof DiffConfig>;

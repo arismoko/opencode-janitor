@@ -100,7 +100,41 @@ Config is TOML and includes:
 - scheduler concurrency and retry policy
 - git polling behavior and PR detection toggles
 - per-agent enable/trigger/maxFindings/model overrides
+- global and per-agent OpenCode permission extensions (`ask|allow|deny`)
 - OpenCode server + default model settings
+
+Permission extension examples:
+
+```toml
+[opencode.permissionExtensions]
+"context7_*" = "ask"
+
+[opencode.permissionExtensions.bash]
+"*" = "ask"
+"git status*" = "allow"
+
+[agents.inspector.permissionExtensions]
+"context7_*" = "allow"
+
+[agents.inspector.permissionExtensions.bash]
+"git *" = "allow"
+"git push *" = "deny"
+```
+
+PR comment posting for PR-triggered runs is enabled by default. Disable it with:
+
+```json
+{
+  "triggers": {
+    "pr": {
+      "enabled": true,
+      "intervalSec": 30,
+      "ttlSec": 300,
+      "postComment": false
+    }
+  }
+}
+```
 
 Default web UI URL is `http://127.0.0.1:7700`.
 

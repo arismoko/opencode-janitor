@@ -1,12 +1,31 @@
 import { describe, expect, it } from 'bun:test';
-import { HunterOutput, JanitorOutput } from '../schemas/finding';
+import { AGENT_IDS, AGENTS } from '../agents';
 import { parseAgentOutput } from './output-codec';
+
+const bugAgentId = AGENT_IDS.find((agentId) =>
+  AGENTS[agentId].domains.includes('BUG'),
+);
+const cleanupAgentId = AGENT_IDS.find((agentId) =>
+  AGENTS[agentId].domains.includes('YAGNI'),
+);
+const architectureAgentId = AGENT_IDS.find(
+  (agentId) =>
+    (AGENTS[agentId].findingEnrichments?.definitions.length ?? 0) > 0,
+);
+
+if (!bugAgentId || !cleanupAgentId || !architectureAgentId) {
+  throw new Error('Expected canonical agent profiles for test fixtures.');
+}
+
+const HunterOutput = bugAgentId;
+const JanitorOutput = cleanupAgentId;
+const InspectorOutput = architectureAgentId;
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
-/** Minimal valid hunter finding */
+/** Minimal valid bug-lane finding */
 const validHunterFinding = {
   domain: 'BUG',
   location: 'src/api.ts:33',
@@ -15,13 +34,40 @@ const validHunterFinding = {
   prescription: 'add null check before accessing user.name',
 };
 
-/** Minimal valid janitor finding */
+/** Minimal valid cleanup finding */
 const validJanitorFinding = {
   domain: 'YAGNI',
   location: 'src/utils.ts:10',
   severity: 'P2',
   evidence: 'unused helper introduced in this change',
   prescription: 'remove the helper and inline the logic',
+};
+
+const validInspectorFinding = {
+  domain: 'DESIGN',
+  location: 'src/runtime/flow.ts:77',
+  severity: 'P1',
+  evidence: 'Execution flow mixes orchestration and adapter concerns.',
+  prescription: 'Split orchestration policy from infrastructure adapters.',
+  architecture: {
+    principles: ['DEPENDENCY_INVERSION', 'EXPLICIT_BOUNDARIES'],
+    antiPattern: {
+      label: 'LAYERING_VIOLATION',
+      detail: 'Domain policy reaches into transport/storage details.',
+    },
+    recommendedPattern: {
+      label: 'HEXAGONAL_PORTS_ADAPTERS',
+      detail:
+        'Introduce explicit ports for orchestration dependencies and isolate adapters.',
+    },
+    rewritePlan: [
+      'Define orchestrator port contracts.',
+      'Implement adapters behind ports.',
+      'Inject adapters at composition root.',
+    ],
+    tradeoffs: ['Additional interfaces', 'Requires dependency wiring updates'],
+    impactScope: 'SUBSYSTEM',
+  },
 };
 
 /** Wrap findings in a fenced JSON block */
@@ -35,14 +81,14 @@ describe('parseAgentOutput', () => {
   // -------------------------------------------------------------------------
   describe('empty output', () => {
     it('returns empty_output for empty string', () => {
-      const result = parseAgentOutput('', HunterOutput);
+      const result = parseAgentOutput('', bugAgentId);
       expect(result.output.findings).toEqual([]);
       expect(result.meta.status).toBe('empty_output');
       expect(result.meta.error).toBeDefined();
     });
 
     it('returns empty_output for whitespace-only string', () => {
-      const result = parseAgentOutput('   \n\t  ', HunterOutput);
+      const result = parseAgentOutput('   \n\t  ', bugAgentId);
       expect(result.output.findings).toEqual([]);
       expect(result.meta.status).toBe('empty_output');
     });
@@ -205,7 +251,7 @@ describe('parseAgentOutput', () => {
       expect(result.output.findings[0]?.domain).toBe('BUG'); // .catch() fallback
     });
 
-    it('normalizes janitor domains too ("yagni" → "YAGNI")', () => {
+    it('normalizes cleanup domains too ("yagni" -> "YAGNI")', () => {
       const finding = {
         ...validJanitorFinding,
         domain: 'yagni',
@@ -218,6 +264,62 @@ describe('parseAgentOutput', () => {
       expect(result.meta.status).toBe('ok');
       expect(result.output.findings[0]?.domain).toBe('YAGNI');
       expect(result.output.findings[0]?.severity).toBe('P2');
+    });
+
+    it('normalizes architecture recommended pattern aliases', () => {
+      const payload = {
+        findings: [
+          {
+            ...validInspectorFinding,
+            severity: 'p1',
+            architecture: {
+              ...validInspectorFinding.architecture,
+              recommendedPattern: {
+                label: 'Template Method',
+                detail:
+                  'Lift shared workflow into a template and keep variant hooks isolated.',
+              },
+            },
+          },
+        ],
+      };
+
+      const result = parseAgentOutput(JSON.stringify(payload), InspectorOutput);
+      expect(result.meta.status).toBe('ok');
+      const firstFinding = result.output.findings[0] as {
+        architecture: { recommendedPattern: { label: string } };
+      };
+      expect(firstFinding.architecture.recommendedPattern.label).toBe(
+        'TEMPLATE_METHOD',
+      );
+    });
+
+    it('normalizes ports/adapters alias to HEXAGONAL_PORTS_ADAPTERS', () => {
+      const payload = {
+        findings: [
+          {
+            ...validInspectorFinding,
+            severity: 'p1',
+            architecture: {
+              ...validInspectorFinding.architecture,
+              recommendedPattern: {
+                label: 'Ports and Adapters',
+                detail:
+                  'Separate domain policy from transport and storage concerns via ports.',
+              },
+            },
+          },
+        ],
+      };
+
+      const result = parseAgentOutput(JSON.stringify(payload), InspectorOutput);
+      expect(result.meta.status).toBe('ok');
+      const firstFinding = result.output.findings[0] as {
+        architecture: { recommendedPattern: { label: string } };
+      };
+      expect(firstFinding.architecture.recommendedPattern.label).toBe(
+        'HEXAGONAL_PORTS_ADAPTERS',
+      );
     });
   });
 
@@ -252,6 +354,47 @@ describe('parseAgentOutput', () => {
       expect(result.output.findings).toEqual([]);
     });
 
+    it('fails closed for missing architecture block', () => {
+      const payload = {
+        findings: [
+          {
+            domain: 'DESIGN',
+            location: 'src/runtime.ts:10',
+            severity: 'P1',
+            evidence: 'Missing architecture payload should fail.',
+            prescription: 'Include architecture block.',
+          },
+        ],
+      };
+
+      const result = parseAgentOutput(JSON.stringify(payload), InspectorOutput);
+      expect(result.meta.status).toBe('invalid_output');
+      expect(result.output.findings).toEqual([]);
+    });
+
+    it('fails closed for unsupported architecture pattern label', () => {
+      const payload = {
+        findings: [
+          {
+            ...validInspectorFinding,
+            severity: 'p1',
+            architecture: {
+              ...validInspectorFinding.architecture,
+              recommendedPattern: {
+                label: 'Totally Unknown Pattern',
+                detail:
+                  'Non-canonical pattern with unsupported label should fail.',
+              },
+            },
+          },
+        ],
+      };
+
+      const result = parseAgentOutput(JSON.stringify(payload), InspectorOutput);
+      expect(result.meta.status).toBe('invalid_output');
+      expect(result.output.findings).toEqual([]);
+    });
+
     it('does not throw on any invalid input', () => {
       const badInputs = [
         '{{{{',
@@ -273,7 +416,7 @@ describe('parseAgentOutput', () => {
   // 7. Valid complete output (happy path)
   // -------------------------------------------------------------------------
   describe('valid complete output', () => {
-    it('parses a full hunter output with multiple findings', () => {
+    it('parses a full bug-lane output with multiple findings', () => {
       const payload = {
         findings: [
           {
@@ -310,7 +453,7 @@ describe('parseAgentOutput', () => {
       expect(result.output.findings[2]?.location).toBe('src/calc.ts:99');
     });
 
-    it('parses janitor output with all domain types', () => {
+    it('parses cleanup output with all domain types', () => {
       const payload = {
         findings: [
           { ...validJanitorFinding, domain: 'YAGNI' },

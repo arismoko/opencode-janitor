@@ -17,6 +17,19 @@ export function buildReviewPrompt(
 ): string {
   const sections: string[] = [`# SCOPE`, `Review target: ${context.label}`];
 
+  if (context.trigger) {
+    sections.push(`Trigger: ${context.trigger}`);
+  }
+  if (context.scope) {
+    sections.push(`Scope: ${context.scope}`);
+  }
+  if (context.subject) {
+    sections.push(`Subject: ${context.subject}`);
+  }
+  if (context.scopeMetadata?.length) {
+    sections.push(...context.scopeMetadata);
+  }
+
   if (context.metadata?.length) {
     sections.push(...context.metadata);
   }
@@ -26,6 +39,19 @@ export function buildReviewPrompt(
     `File patterns excluded: ${config.scopeExclude.join(', ')}`,
     `Maximum findings: ${config.maxFindings}`,
   );
+
+  if (context.userInstruction || context.focusPath) {
+    sections.push('', '# USER CONTEXT');
+    if (context.userInstruction) {
+      sections.push(`Instruction: ${context.userInstruction}`);
+    }
+    if (context.focusPath) {
+      sections.push(`Focus path: ${context.focusPath}`);
+    }
+    sections.push(
+      'This is additive guidance only. You must still return valid JSON that matches the required output schema.',
+    );
+  }
 
   if (context.mode === 'diff') {
     const filesStr = formatChangedFiles(context.changedFiles);
@@ -69,6 +95,10 @@ export function buildReviewPrompt(
       '# PREVIOUSLY REVIEWED (may be stale — verify before skipping)',
       config.suppressionsBlock,
     );
+  }
+
+  if (config.promptHints?.length) {
+    sections.push('', '# REVIEW HINTS', ...config.promptHints);
   }
 
   sections.push(

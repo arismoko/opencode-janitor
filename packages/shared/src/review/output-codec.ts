@@ -6,7 +6,12 @@
  * parse metadata so callers can fail closed on invalid output.
  */
 import type { z } from 'zod';
+import { AGENTS, type AgentId } from '../agents';
 import type { ParseMeta } from '../types/finding';
+
+type AgentOutputById = {
+  [K in AgentId]: z.infer<(typeof AGENTS)[K]['outputSchema']>;
+};
 
 /** Parsed agent output with validation metadata */
 export interface ParseResult<T> {
@@ -20,13 +25,20 @@ export interface ParseResult<T> {
  * Flow: extract JSON → validate schema → return typed output + status.
  * Never throws — all failures are expressed via meta.status.
  */
-export function parseAgentOutput<T extends { findings: unknown[] }>(
+export function parseAgentOutput<TAgent extends AgentId>(
   raw: string,
-  schema: z.ZodType<T>,
-): ParseResult<T> {
+  agent: TAgent,
+): ParseResult<AgentOutputById[TAgent]> {
+  const definition = AGENTS[agent];
+  const schema = definition.outputSchema as unknown as z.ZodType<
+    AgentOutputById[TAgent]
+  >;
+  const normalizeFinding =
+    'normalizeFinding' in definition ? definition.normalizeFinding : undefined;
+
   if (!raw.trim()) {
     return {
-      output: { findings: [] } as unknown as T,
+      output: { findings: [] } as AgentOutputById[TAgent],
       meta: { status: 'empty_output', error: 'No text output from agent' },
     };
   }
@@ -34,7 +46,7 @@ export function parseAgentOutput<T extends { findings: unknown[] }>(
   const extracted = extractJSON(raw);
   if (!extracted) {
     return {
-      output: { findings: [] } as unknown as T,
+      output: { findings: [] } as AgentOutputById[TAgent],
       meta: {
         status: 'invalid_output',
         error: 'No valid JSON found in agent output',
@@ -45,11 +57,11 @@ export function parseAgentOutput<T extends { findings: unknown[] }>(
   const parsed = schema.safeParse(extracted);
   if (!parsed.success) {
     // Try lenient: normalize fields and retry
-    const normalized = normalizeFindings(extracted);
+    const normalized = normalizeFindings(extracted, normalizeFinding);
     const retry = schema.safeParse(normalized);
     if (!retry.success) {
       return {
-        output: { findings: [] } as unknown as T,
+        output: { findings: [] } as AgentOutputById[TAgent],
         meta: {
           status: 'invalid_output',
           error: `Schema validation failed: ${retry.error.message}`,
@@ -68,6 +80,7 @@ export function parseAgentOutput<T extends { findings: unknown[] }>(
  */
 function normalizeFindings(
   obj: Record<string, unknown>,
+  normalizeFinding?: (finding: Record<string, unknown>) => void,
 ): Record<string, unknown> {
   if (!obj.findings || !Array.isArray(obj.findings)) return obj;
 
@@ -84,6 +97,8 @@ function normalizeFindings(
           normalized[key] = (normalized[key] as string).toUpperCase();
         }
       }
+
+      normalizeFinding?.(normalized);
 
       return normalized;
     }),

@@ -10,7 +10,7 @@ import {
   getLatestEventSeq,
   listEvents,
 } from '../../db/queries/event-queries';
-import { deleteAgentRun } from '../../db/queries/scheduler-queries';
+import { deleteReviewRun } from '../../db/queries/review-run-queries';
 import { toEventEntry } from '../../ipc/event-entry';
 import type { RuntimeContext } from '../../runtime/context';
 import {
@@ -56,15 +56,15 @@ export function createDashboardOptions(
         events,
       };
     },
-    getDashboardReportDetail: (agentRunId, findingsLimit) => {
-      const row = getDashboardReportDetail(rc.db, agentRunId);
+    getDashboardReportDetail: (reviewRunId, findingsLimit) => {
+      const row = getDashboardReportDetail(rc.db, reviewRunId);
       if (!row) {
         return null;
       }
 
       const findings = listDashboardReportFindings(
         rc.db,
-        agentRunId,
+        reviewRunId,
         findingsLimit,
       ).map(mapDashboardFindingRow);
 
@@ -76,19 +76,19 @@ export function createDashboardOptions(
         rawOutput: row.raw_output,
       };
     },
-    onDeleteReport: (agentRunId) => {
-      const deleted = deleteAgentRun(rc.db, agentRunId);
+    onDeleteReport: (reviewRunId) => {
+      const deleted = deleteReviewRun(rc.db, reviewRunId);
       if (deleted) {
         appendEvent(rc.db, {
           eventType: 'report.deleted',
-          message: `Report ${agentRunId} deleted`,
+          message: `Report ${reviewRunId} deleted`,
           level: 'info',
         });
       }
       return {
         ok: true as const,
         deleted,
-        agentRunId,
+        reviewRunId,
       };
     },
   };

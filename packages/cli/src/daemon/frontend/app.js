@@ -2,20 +2,22 @@ import htm from 'https://esm.sh/htm@3.1.1';
 import { h, render } from 'https://esm.sh/preact@10.26.2';
 import { useEffect, useState } from 'https://esm.sh/preact@10.26.2/hooks';
 import { api } from './api.js';
+import { CapabilityDrivenManualModal } from './components/capability-driven-manual-modal.js';
 import { renderDashboardHeader } from './components/dashboard-header.js';
 import { renderFlashToast } from './components/flash-toast.js';
-import { renderManualReviewModal } from './components/manual-review-modal.js';
-import { AGENTS } from './constants.js';
 import {
   selectFilteredActivity,
   selectJobCounts,
 } from './selectors/dashboard-selectors.js';
+import { useCapabilities } from './state/use-capabilities.js';
 import { useDashboardData } from './state/use-dashboard-data.js';
 import { useFlash } from './state/use-flash.js';
+import { usePrsData } from './state/use-prs-data.js';
 import { useRepoSelection } from './state/use-repo-selection.js';
 import { useReportDetail } from './state/use-report-detail.js';
 import { useReportSelection } from './state/use-report-selection.js';
 import { renderActivityView } from './views/activity-view.js';
+import { renderPrsView } from './views/prs-view.js';
 import { renderReportsView } from './views/reports-view.js';
 
 const html = htm.bind(h);
@@ -34,6 +36,11 @@ function App() {
         showFlash(error.message || String(error), 'error');
       },
     });
+  const { capabilities } = useCapabilities({
+    onError(error) {
+      showFlash(error.message || String(error), 'error');
+    },
+  });
 
   useEffect(() => {
     const tick = setInterval(() => setNow(Date.now()), 1000);
@@ -73,10 +80,18 @@ function App() {
     selectedRepoId,
   });
 
-  const { detail, setDetail, transcript } = useReportDetail({
+  const {
+    detail,
+    setDetail,
+    sessionEvents,
+    timelineBlocks,
+    transcript,
+    sessionHasMore,
+    loadMoreSessionEvents,
+  } = useReportDetail({
+    isReportsView: view === 'reports',
     selectedReport,
     selectedReportId,
-    reportsLength: reports.length,
     detailMode,
     events,
     onError(error) {
@@ -84,17 +99,13 @@ function App() {
     },
   });
 
-  const triggerReview = async (repoId, agent) => {
-    try {
-      await api('/v1/reviews/enqueue', {
-        method: 'POST',
-        body: JSON.stringify({ repoOrId: repoId, agent }),
-      });
-      showFlash(`Review enqueued (${agent})`);
-      refreshSnapshot().catch(() => {});
-    } catch (error) {
-      showFlash(error.message || String(error), 'error');
-    }
+  const triggerReview = async (repoId, request) => {
+    await api('/v1/reviews/enqueue', {
+      method: 'POST',
+      body: JSON.stringify({ repoOrId: repoId, ...request }),
+    });
+    showFlash(`Review enqueued (${request.agent})`);
+    refreshSnapshot().catch(() => {});
   };
 
   const deleteReport = async () => {
@@ -102,7 +113,7 @@ function App() {
     try {
       await api('/v1/dashboard/report', {
         method: 'DELETE',
-        body: JSON.stringify({ agentRunId: selectedReport.id }),
+        body: JSON.stringify({ reviewRunId: selectedReport.id }),
       });
       showFlash('Report deleted');
       setSelectedReportId(null);
@@ -113,13 +124,91 @@ function App() {
     }
   };
 
-  const clearActivityLog = () => {
-    clearEvents();
-    showFlash('Activity log cleared');
+  const stopReview = async (reviewRunId) => {
+    try {
+      const result = await api('/v1/reviews/stop', {
+        method: 'POST',
+        body: JSON.stringify({ reviewRunId }),
+      });
+      if (result.stopped) {
+        showFlash('Stop requested');
+      } else {
+        showFlash('Run is not stoppable in current state', 'error');
+      }
+      refreshSnapshot().catch(() => {});
+    } catch (error) {
+      showFlash(error.message || String(error), 'error');
+    }
+  };
+
+  const resumeReview = async (reviewRunId) => {
+    try {
+      const result = await api('/v1/reviews/resume', {
+        method: 'POST',
+        body: JSON.stringify({ reviewRunId }),
+      });
+      if (result.resumed) {
+        showFlash('Run resumed');
+      } else {
+        showFlash('Run is not resumable in-place', 'error');
+      }
+      refreshSnapshot().catch(() => {});
+    } catch (error) {
+      showFlash(error.message || String(error), 'error');
+    }
+  };
+
+  const clearActivityLog = async () => {
+    try {
+      const deleted = await clearEvents();
+      showFlash(`Cleared ${deleted} events`);
+    } catch (error) {
+      showFlash(error.message || String(error), 'error');
+    }
   };
 
   const { runningJobs, queuedJobs } = selectJobCounts(repos);
   const filteredActivity = selectFilteredActivity(events, activityFilter);
+
+  const prsData = usePrsData({
+    isPrsView: view === 'prs',
+    selectedRepo,
+    onError(error) {
+      showFlash(error.message || String(error), 'error');
+    },
+  });
+
+  class PrActionHandledError extends Error {}
+
+  const runPrAction = async ({
+    successLabel,
+    failureLabel,
+    action,
+    isSuccess,
+  }) => {
+    try {
+      const result = await action();
+      const succeeded =
+        typeof isSuccess === 'function' ? isSuccess(result) : true;
+
+      if (!succeeded) {
+        const message = failureLabel || 'Action completed without changes';
+        showFlash(message, 'error');
+        throw new PrActionHandledError(message);
+      }
+
+      if (successLabel) {
+        showFlash(successLabel);
+      }
+      return result;
+    } catch (error) {
+      if (error instanceof PrActionHandledError) {
+        throw error;
+      }
+      showFlash(error.message || String(error), 'error');
+      throw error;
+    }
+  };
 
   return html`
     <div id="root">
@@ -160,6 +249,12 @@ function App() {
         >
           Activity
         </button>
+        <button
+          class=${`tab ${view === 'prs' ? 'active' : ''}`}
+          onClick=${() => setView('prs')}
+        >
+          PRs
+        </button>
       </nav>
 
       <main class="content">
@@ -167,6 +262,7 @@ function App() {
           view === 'reports' &&
           renderReportsView({
             html,
+            capabilities,
             selectedRepo,
             filteredReports,
             selectedReport,
@@ -174,8 +270,15 @@ function App() {
             detailMode,
             setDetailMode,
             deleteReport,
+            stopReview,
+            resumeReview,
             setSelectedReportId,
             transcript,
+            sessionEvents,
+            timelineBlocks,
+            sessionHasMore,
+            loadMoreSessionEvents,
+            showFlash,
           })
         }
         ${
@@ -187,17 +290,56 @@ function App() {
             setActivityFilter,
           })
         }
+        ${
+          view === 'prs' &&
+          renderPrsView({
+            html,
+            selectedRepo,
+            capabilities,
+            prs: prsData,
+            onSelectPr: prsData.setSelectedPrNumber,
+            onBucketChange: prsData.setBucket,
+            onQueryInput: prsData.setQuery,
+            onMerge: (method) =>
+              runPrAction({
+                successLabel: 'PR merge requested',
+                action: () => prsData.mergePr(method),
+              }),
+            onAddComment: (body) =>
+              runPrAction({
+                successLabel: 'PR comment posted',
+                action: () => prsData.addComment(body),
+              }),
+            onRequestReviewers: (reviewers) =>
+              runPrAction({
+                successLabel: 'Reviewers requested',
+                action: () => prsData.requestReviewers(reviewers),
+              }),
+            onReply: (commentId, body) =>
+              runPrAction({
+                successLabel: 'Reply posted',
+                action: () => prsData.replyToComment(commentId, body),
+              }),
+            onTriggerReview: (payload) =>
+              runPrAction({
+                successLabel: 'PR review enqueued',
+                failureLabel: 'No review run was queued for this PR',
+                action: () => prsData.enqueueAgentReview(payload),
+                isSuccess: (response) => response?.enqueued === true,
+              }),
+          })
+        }
       </main>
 
       ${renderFlashToast({ html, flash })}
 
-      ${renderManualReviewModal({
-        html,
-        pickerRepoId,
-        setPickerRepoId,
-        agents: AGENTS,
-        triggerReview,
-      })}
+      <${CapabilityDrivenManualModal}
+        html=${html}
+        pickerRepoId=${pickerRepoId}
+        setPickerRepoId=${setPickerRepoId}
+        capabilities=${capabilities}
+        triggerReview=${triggerReview}
+      />
     </div>
   `;
 }

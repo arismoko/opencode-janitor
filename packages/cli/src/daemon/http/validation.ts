@@ -1,4 +1,9 @@
-import { AGENT_NAMES, type AgentName } from '@opencode-janitor/shared';
+import {
+  AGENT_NAMES,
+  type AgentName,
+  isScopeId,
+  type ScopeId,
+} from '@opencode-janitor/shared';
 import type { EventFilterParams } from '../../db/queries/event-queries';
 
 const VALID_AGENT_NAMES = new Set<string>(AGENT_NAMES);
@@ -7,8 +12,10 @@ export type ValidationErrorCode =
   | 'INVALID_BODY'
   | 'INVALID_REPO'
   | 'INVALID_AGENT'
+  | 'INVALID_SCOPE'
+  | 'INVALID_SCOPE_INPUT'
   | 'INVALID_PR'
-  | 'INVALID_AGENT_RUN_ID';
+  | 'INVALID_REVIEW_RUN_ID';
 
 export class ValidationError extends Error {
   readonly code: ValidationErrorCode;
@@ -42,13 +49,13 @@ export function parseQueryInt(
 export function parseFilterParams(url: URL): EventFilterParams {
   const filters: EventFilterParams = {};
   const repoId = url.searchParams.get('repoId');
-  const jobId = url.searchParams.get('jobId');
-  const agentRunId = url.searchParams.get('agentRunId');
+  const triggerEventId = url.searchParams.get('triggerEventId');
+  const reviewRunId = url.searchParams.get('reviewRunId');
   const topic = url.searchParams.get('topic');
   const sessionId = url.searchParams.get('sessionId');
   if (repoId) filters.repoId = repoId;
-  if (jobId) filters.jobId = jobId;
-  if (agentRunId) filters.agentRunId = agentRunId;
+  if (triggerEventId) filters.triggerEventId = triggerEventId;
+  if (reviewRunId) filters.reviewRunId = reviewRunId;
   if (topic) filters.topic = topic;
   if (sessionId) filters.sessionId = sessionId;
   return filters;
@@ -67,7 +74,12 @@ export async function parseJsonBody(request: Request): Promise<unknown> {
 
 export function requireString(value: unknown, field: string): string {
   if (typeof value !== 'string' || value.trim().length === 0) {
-    const code = field === 'repoOrId' ? 'INVALID_REPO' : 'INVALID_AGENT_RUN_ID';
+    const code =
+      field === 'repoOrId'
+        ? 'INVALID_REPO'
+        : field === 'reviewRunId'
+          ? 'INVALID_REVIEW_RUN_ID'
+          : 'INVALID_BODY';
     throw new ValidationError(
       code,
       `\`${field}\` must be a non-empty string`,
@@ -88,6 +100,42 @@ export function requirePositiveInt(value: unknown, field: string): number {
   return value;
 }
 
+export function requireScopeId(value: unknown): ScopeId {
+  if (typeof value !== 'string' || value.trim().length === 0) {
+    throw new ValidationError(
+      'INVALID_SCOPE',
+      '`scope` must be a non-empty string',
+      'scope',
+    );
+  }
+
+  const scope = value.trim();
+  if (!isScopeId(scope)) {
+    throw new ValidationError(
+      'INVALID_SCOPE',
+      '`scope` must be one of commit-diff, workspace-diff, repo, pr',
+      'scope',
+    );
+  }
+
+  return scope;
+}
+
+export function requireRecord(
+  value: unknown,
+  field: string,
+): Record<string, unknown> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new ValidationError(
+      'INVALID_SCOPE_INPUT',
+      `\`${field}\` must be an object`,
+      field,
+    );
+  }
+
+  return value as Record<string, unknown>;
+}
+
 export function getBodyField(body: unknown, field: string): unknown {
   if (!body || typeof body !== 'object') return undefined;
   if (!(field in body)) return undefined;
@@ -106,7 +154,7 @@ export function requireAgentName(value: unknown): AgentName {
   if (!VALID_AGENT_NAMES.has(agent)) {
     throw new ValidationError(
       'INVALID_AGENT',
-      '`agent` must be one of janitor, hunter, inspector, scribe',
+      `\`agent\` must be one of ${AGENT_NAMES.join(', ')}`,
       'agent',
     );
   }

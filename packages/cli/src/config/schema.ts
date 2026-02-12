@@ -1,13 +1,19 @@
 /**
  * Zod schema for the CLI JSON config.
  *
- * Uses shared TriggerMode + AgentRuntimeConfig fragments from @opencode-janitor/shared.
+ * Uses canonical AGENTS/TRIGGERS registries from @opencode-janitor/shared.
  */
 
 import {
+  AGENT_IDS,
+  AGENTS,
+  type AgentId,
   AgentRuntimeConfig,
+  PermissionExtensionsSchema,
   ScopeConfig,
-  TriggerMode,
+  TRIGGER_IDS,
+  TRIGGERS,
+  type TriggerId,
 } from '@opencode-janitor/shared';
 import { z } from 'zod';
 import { defaultLockPath, defaultPidPath, defaultSocketPath } from './paths';
@@ -47,29 +53,94 @@ export const OpencodeSection = z.object({
   serverHost: z.string().default('127.0.0.1'),
   serverPort: z.number().int().min(1).max(65535).default(4096),
   serverStartTimeoutMs: z.number().int().min(1000).default(8000),
+  permissionExtensions: PermissionExtensionsSchema.optional(),
 });
 
 export const ScopeSection = ScopeConfig;
 
-const makeAgentRuntime = (trigger: 'commit' | 'pr' | 'manual') =>
-  AgentRuntimeConfig.extend({
-    trigger: TriggerMode.default(trigger),
-  }).prefault({
+function makeAgentRuntime(agentId: AgentId) {
+  const definition = AGENTS[agentId];
+  const defaultMaxFindings = definition.defaults.maxFindings ?? 10;
+  const baseDefaults: Record<string, unknown> = {
     enabled: true,
-    trigger,
-    maxFindings: 10,
-  });
+    autoTriggers: [...definition.defaults.autoTriggers],
+    ...(definition.defaults.manualScope
+      ? { manualDefaultScope: definition.defaults.manualScope }
+      : {}),
+    maxFindings: defaultMaxFindings,
+  };
 
-export const AgentsSection = z.object({
-  janitor: makeAgentRuntime('commit'),
-  hunter: makeAgentRuntime('pr'),
-  inspector: makeAgentRuntime('manual'),
-  scribe: makeAgentRuntime('manual'),
-});
+  return z
+    .preprocess((input) => {
+      if (!input || typeof input !== 'object' || Array.isArray(input)) {
+        return { ...baseDefaults };
+      }
+      return { ...baseDefaults, ...(input as Record<string, unknown>) };
+    }, AgentRuntimeConfig)
+    .superRefine((value, ctx) => {
+      for (const [index, trigger] of value.autoTriggers.entries()) {
+        if (!definition.capabilities.autoTriggers.includes(trigger)) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ['autoTriggers', index],
+            message: `trigger "${trigger}" is not supported by agent "${agentId}"`,
+          });
+        }
+      }
+
+      if (
+        value.manualDefaultScope &&
+        !definition.capabilities.manualScopes.includes(value.manualDefaultScope)
+      ) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['manualDefaultScope'],
+          message: `scope "${value.manualDefaultScope}" is not supported by agent "${agentId}"`,
+        });
+      }
+    })
+    .prefault({});
+}
+
+const agentShape = Object.fromEntries(
+  AGENT_IDS.map((agentId) => [agentId, makeAgentRuntime(agentId)]),
+) as unknown as Record<AgentId, z.ZodTypeAny>;
+
+const triggerShape = Object.fromEntries(
+  TRIGGER_IDS.map((triggerId) => [
+    triggerId,
+    TRIGGERS[triggerId].configSchema.prefault({}),
+  ]),
+) as unknown as Record<TriggerId, z.ZodTypeAny>;
+
+export type AgentRuntimeSection = {
+  [K in AgentId]: z.infer<typeof AgentRuntimeConfig>;
+};
+
+export type TriggerRuntimeSection = {
+  [K in TriggerId]: z.infer<(typeof TRIGGERS)[K]['configSchema']>;
+};
+
+export const AgentsSection = z.strictObject(
+  agentShape,
+) as unknown as z.ZodType<AgentRuntimeSection>;
+export const TriggersSection = z.strictObject(
+  triggerShape,
+) as unknown as z.ZodType<TriggerRuntimeSection>;
 
 // ---------------------------------------------------------------------------
 // Top-level config schema
 // ---------------------------------------------------------------------------
+
+export interface CliConfig {
+  daemon: z.infer<typeof DaemonSection>;
+  scheduler: z.infer<typeof SchedulerSection>;
+  detector: z.infer<typeof DetectorSection>;
+  opencode: z.infer<typeof OpencodeSection>;
+  scope: z.infer<typeof ScopeSection>;
+  agents: AgentRuntimeSection;
+  triggers: TriggerRuntimeSection;
+}
 
 export const CliConfigSchema = z.object({
   daemon: DaemonSection.prefault({}),
@@ -77,10 +148,9 @@ export const CliConfigSchema = z.object({
   detector: DetectorSection.prefault({}),
   opencode: OpencodeSection.prefault({}),
   scope: ScopeSection.prefault({}),
-  agents: AgentsSection.prefault({}),
-});
-
-export type CliConfig = z.infer<typeof CliConfigSchema>;
+  agents: AgentsSection.prefault({} as AgentRuntimeSection),
+  triggers: TriggersSection.prefault({} as TriggerRuntimeSection),
+}) as unknown as z.ZodType<CliConfig>;
 
 /** Schema-validated default config object. */
 export const defaultCliConfig: CliConfig = CliConfigSchema.parse({});

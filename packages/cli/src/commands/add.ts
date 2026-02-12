@@ -1,5 +1,5 @@
 /**
- * `janitor add <repo>` — add a tracked repository.
+ * `add <repo>` — add a tracked repository.
  */
 import { resolve } from 'node:path';
 import chalk from 'chalk';

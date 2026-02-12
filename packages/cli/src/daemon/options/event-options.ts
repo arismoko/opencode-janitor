@@ -1,4 +1,5 @@
 import {
+  clearEvents as clearEventJournal,
   listEventsAfterSeq,
   listEventsAfterSeqFiltered,
 } from '../../db/queries/event-queries';
@@ -11,5 +12,6 @@ export function createEventOptions(rc: RuntimeContext): EventApi {
       listEventsAfterSeq(rc.db, afterSeq, limit),
     listEventsAfterSeqFiltered: (afterSeq, limit, filters) =>
       listEventsAfterSeqFiltered(rc.db, afterSeq, limit, filters),
+    clearEvents: () => clearEventJournal(rc.db),
   };
 }

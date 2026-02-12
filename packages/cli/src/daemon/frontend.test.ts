@@ -47,6 +47,9 @@ describe('frontend asset loading', () => {
   });
 
   it('loads extracted state module assets', () => {
+    const capabilities = getFrontendAsset(
+      '/_dashboard/state/use-capabilities.js',
+    );
     const reportDetail = getFrontendAsset(
       '/_dashboard/state/use-report-detail.js',
     );
@@ -54,6 +57,8 @@ describe('frontend asset loading', () => {
       '/_dashboard/state/use-report-selection.js',
     );
     const flash = getFrontendAsset('/_dashboard/state/use-flash.js');
+    expect(capabilities).toBeDefined();
+    expect(capabilities?.body).toContain('export function useCapabilities');
     expect(reportDetail).toBeDefined();
     expect(reportDetail?.body).toContain('export function useReportDetail');
     expect(reportSelection).toBeDefined();
@@ -65,21 +70,29 @@ describe('frontend asset loading', () => {
   });
 
   it('loads extracted component and selector assets', () => {
+    const capabilityModal = getFrontendAsset(
+      '/_dashboard/components/capability-driven-manual-modal.js',
+    );
     const header = getFrontendAsset(
       '/_dashboard/components/dashboard-header.js',
-    );
-    const modal = getFrontendAsset(
-      '/_dashboard/components/manual-review-modal.js',
     );
     const selectors = getFrontendAsset(
       '/_dashboard/selectors/dashboard-selectors.js',
     );
+    expect(capabilityModal).toBeDefined();
+    expect(capabilityModal?.body).toContain(
+      'export function CapabilityDrivenManualModal',
+    );
     expect(header).toBeDefined();
     expect(header?.body).toContain('export function renderDashboardHeader');
-    expect(modal).toBeDefined();
-    expect(modal?.body).toContain('export function renderManualReviewModal');
     expect(selectors).toBeDefined();
     expect(selectors?.body).toContain('export function selectFilteredActivity');
+  });
+
+  it('loads ui constants asset', () => {
+    const constants = getFrontendAsset('/_dashboard/ui-constants.js');
+    expect(constants).toBeDefined();
+    expect(constants?.body).toContain('export const BADGE');
   });
 
   it('loads nested reports subview module assets', () => {
@@ -96,9 +109,60 @@ describe('frontend asset loading', () => {
     expect(detail?.body).toContain('export function renderReportDetail');
   });
 
+  it('loads PR dashboard frontend module assets', () => {
+    const prsView = getFrontendAsset('/_dashboard/views/prs-view.js');
+    const prsState = getFrontendAsset('/_dashboard/state/use-prs-data.js');
+    const prsList = getFrontendAsset('/_dashboard/views/prs/pr-list.js');
+    const prsDetail = getFrontendAsset('/_dashboard/views/prs/pr-detail.js');
+    const prsActions = getFrontendAsset(
+      '/_dashboard/views/prs/pr-actions-dock.js',
+    );
+    const prsThread = getFrontendAsset('/_dashboard/views/prs/pr-thread.js');
+    const markdownUtil = getFrontendAsset('/_dashboard/utils/markdown.js');
+
+    expect(prsView).toBeDefined();
+    expect(prsView?.body).toContain('export function renderPrsView');
+    expect(prsState).toBeDefined();
+    expect(prsState?.body).toContain('export function usePrsData');
+    expect(prsList).toBeDefined();
+    expect(prsList?.body).toContain('export function renderPrList');
+    expect(prsDetail).toBeDefined();
+    expect(prsDetail?.body).toContain('export function renderPrDetail');
+    expect(prsActions).toBeDefined();
+    expect(prsActions?.body).toContain('export function renderPrActionsDock');
+    expect(prsThread).toBeDefined();
+    expect(prsThread?.body).toContain('export function renderPrThread');
+    expect(markdownUtil).toBeDefined();
+    expect(markdownUtil?.body).toContain(
+      'export function renderMarkdownContent',
+    );
+  });
+
+  it('auto-serves dynamically added enrichment renderer modules', () => {
+    const registry = getFrontendAsset(
+      '/_dashboard/views/reports/finding-enrichments/core/registry.js',
+    );
+    const renderer = getFrontendAsset(
+      '/_dashboard/views/reports/finding-enrichments/renderers/generic/smoke-v1.js',
+    );
+    expect(registry).toBeDefined();
+    expect(registry?.body).toContain('ensureFindingEnrichmentRenderer');
+    expect(renderer).toBeDefined();
+    expect(renderer?.body).toContain('renderFindingEnrichment');
+  });
+
   it('returns null for unknown frontend asset path', () => {
     expect(getFrontendAsset('/_dashboard/unknown.css')).toBeNull();
+    expect(
+      getFrontendAsset('/_dashboard/components/manual-review-modal.js'),
+    ).toBeNull();
+    expect(
+      getFrontendAsset(
+        '/_dashboard/views/reports/finding-enrichments/core/registry.test.js',
+      ),
+    ).toBeNull();
     expect(getFrontendAsset('/_dashboard/../app.js')).toBeNull();
+    expect(getFrontendAsset('/_dashboard/index.html')).toBeNull();
     expect(getFrontendAsset('/v1/events')).toBeNull();
   });
 });

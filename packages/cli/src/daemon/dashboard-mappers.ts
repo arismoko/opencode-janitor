@@ -5,6 +5,54 @@ import type {
   DashboardRepoStateRow,
 } from '../db/queries/dashboard-queries';
 
+type ParsedEnrichment = {
+  kind: string;
+  version: number;
+  payload: Record<string, unknown>;
+  collapsed?: boolean;
+};
+
+function parseEnrichmentsFromDetailsJson(
+  detailsJson: string | null | undefined,
+): ParsedEnrichment[] | undefined {
+  if (!detailsJson) return undefined;
+  try {
+    const parsed = JSON.parse(detailsJson) as {
+      enrichments?: unknown;
+    };
+
+    if (!Array.isArray(parsed?.enrichments)) {
+      return undefined;
+    }
+
+    const enrichments: ParsedEnrichment[] = [];
+    for (const section of parsed.enrichments) {
+      if (!section || typeof section !== 'object') continue;
+      const value = section as Record<string, unknown>;
+      if (typeof value.kind !== 'string' || value.kind.length === 0) continue;
+      if (
+        typeof value.version !== 'number' ||
+        !Number.isFinite(value.version)
+      ) {
+        continue;
+      }
+      if (!value.payload || typeof value.payload !== 'object') continue;
+      const collapsed =
+        typeof value.collapsed === 'boolean' ? value.collapsed : undefined;
+      enrichments.push({
+        kind: value.kind,
+        version: value.version,
+        payload: value.payload as Record<string, unknown>,
+        collapsed,
+      });
+    }
+
+    return enrichments.length > 0 ? enrichments : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 export function mapDashboardRepoRow(row: DashboardRepoStateRow) {
   return {
     id: row.id,
@@ -12,9 +60,6 @@ export function mapDashboardRepoRow(row: DashboardRepoStateRow) {
     enabled: row.enabled === 1,
     paused: row.paused === 1,
     defaultBranch: row.default_branch,
-    idleStreak: row.idle_streak,
-    nextCommitCheckAt: row.next_commit_check_at,
-    nextPrCheckAt: row.next_pr_check_at,
     queuedJobs: row.queued_jobs,
     runningJobs: row.running_jobs,
     latestEventTs: row.latest_event_ts,
@@ -37,8 +82,8 @@ export function mapDashboardReportSummaryRow(row: DashboardReportSummaryRow) {
     id: row.id,
     repoId: row.repo_id,
     repoPath: row.repo_path,
-    jobId: row.job_id,
-    subjectKey: row.subject_key,
+    triggerEventId: row.trigger_event_id,
+    subject: row.subject,
     agent: row.agent,
     sessionId: row.session_id,
     status: row.status,
@@ -55,18 +100,20 @@ export function mapDashboardReportSummaryRow(row: DashboardReportSummaryRow) {
 }
 
 export function mapDashboardFindingRow(finding: DashboardReportFindingRow) {
+  const enrichments = parseEnrichmentsFromDetailsJson(finding.details_json);
   return {
     id: finding.id,
     repoId: finding.repo_id,
     repoPath: finding.repo_path,
-    jobId: finding.job_id,
-    agentRunId: finding.agent_run_id,
+    triggerEventId: finding.trigger_event_id,
+    reviewRunId: finding.review_run_id,
     agent: finding.agent,
     severity: finding.severity,
     domain: finding.domain,
     location: finding.location,
     evidence: finding.evidence,
     prescription: finding.prescription,
+    enrichments,
     createdAt: finding.created_at,
   };
 }

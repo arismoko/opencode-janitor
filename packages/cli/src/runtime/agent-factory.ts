@@ -1,70 +1,52 @@
 /**
  * Agent factory — builds agent definitions from shared profiles and CLI config.
  *
- * Plugin-style: data-driven agent configuration with centralized permission map.
+ * Plugin-style: data-driven agent configuration from shared agent definitions.
  */
 import type { AgentConfig } from '@opencode-ai/sdk';
-import type { AgentName, AgentProfile } from '@opencode-janitor/shared';
-import { AGENT_NAMES, agentProfiles } from '@opencode-janitor/shared';
+import {
+  AGENT_IDS,
+  AGENTS,
+  type AgentId,
+  PermissionDecisionSchema,
+  PermissionPatternMapSchema,
+} from '@opencode-janitor/shared';
 import { toJSONSchema, z } from 'zod';
 import type { CliConfig } from '../config/schema';
+import { mergePermissionExtensions } from './permission-merge';
 
 // ---------------------------------------------------------------------------
-// Permission map (plugin-style allowlist for review agents)
+// Runtime config validation
 // ---------------------------------------------------------------------------
 
-/** Centralized permission allowlist for all review agents. */
-export type ReviewAgentPermission = NonNullable<AgentConfig['permission']>;
-export type ReviewAgentTools = NonNullable<AgentConfig['tools']>;
 export type ReviewAgentConfig = Pick<
   AgentConfig,
-  'mode' | 'prompt' | 'permission' | 'tools' | 'maxSteps' | 'model'
->;
+  'mode' | 'prompt' | 'permission' | 'maxSteps' | 'model'
+> & {
+  variant?: string;
+};
 
-const PermissionDecisionSchema = z.enum(['ask', 'allow', 'deny']);
+const ReviewAgentPermissionRuleSchema = z.union([
+  PermissionDecisionSchema,
+  PermissionPatternMapSchema,
+]);
 
-const ReviewAgentPermissionSchema = z.object({
-  edit: PermissionDecisionSchema.optional(),
-  bash: z
-    .union([
-      PermissionDecisionSchema,
-      z.record(z.string(), PermissionDecisionSchema),
-    ])
-    .optional(),
-  webfetch: PermissionDecisionSchema.optional(),
-  doom_loop: PermissionDecisionSchema.optional(),
-  external_directory: PermissionDecisionSchema.optional(),
-});
+const ReviewAgentPermissionSchema = z.record(
+  z.string(),
+  ReviewAgentPermissionRuleSchema,
+);
 
 const ReviewAgentConfigSchema = z.object({
   mode: z.enum(['subagent', 'primary', 'all']),
   prompt: z.string().min(1),
   permission: ReviewAgentPermissionSchema.optional(),
-  tools: z.record(z.string(), z.boolean()).optional(),
   maxSteps: z.number().int().min(1),
   model: z.string().min(1).optional(),
+  variant: z.string().min(1).optional(),
 });
 
-/** Centralized permission policy for all review agents. */
-export const REVIEW_AGENT_PERMISSIONS: ReviewAgentPermission = {
-  edit: 'deny',
-  bash: 'deny',
-  webfetch: 'deny',
-  doom_loop: 'deny',
-  external_directory: 'deny',
-};
-
-/** Explicit allowlist of tools exposed to review agents. */
-export const REVIEW_AGENT_TOOLS: ReviewAgentTools = {
-  glob: true,
-  grep: true,
-  list: true,
-  read: true,
-  lsp: true,
-};
-
 function validateAgentConfig(
-  agent: AgentName,
+  agent: AgentId,
   config: ReviewAgentConfig,
 ): ReviewAgentConfig {
   const result = ReviewAgentConfigSchema.safeParse(config);
@@ -83,7 +65,7 @@ function validateAgentConfig(
 // ---------------------------------------------------------------------------
 
 export interface AgentDefinition {
-  name: AgentName;
+  name: AgentId;
   description: string;
   config: ReviewAgentConfig;
 }
@@ -92,19 +74,23 @@ export interface AgentDefinition {
 // System prompt builder
 // ---------------------------------------------------------------------------
 
-/** Build a system prompt from a profile, including role, domains, rules, and JSON schema. */
-export function buildSystemPrompt(profile: AgentProfile): string {
-  const schema = JSON.stringify(toJSONSchema(profile.outputSchema), null, 2);
+/** Build a system prompt from canonical definition fields. */
+type CanonicalAgentDefinition = (typeof AGENTS)[AgentId];
+
+export function buildSystemPrompt(
+  definition: CanonicalAgentDefinition,
+): string {
+  const schema = JSON.stringify(toJSONSchema(definition.outputSchema), null, 2);
 
   const sections: string[] = [
-    profile.role,
+    definition.role,
     '',
     `# DOMAINS`,
-    profile.domains.join(', '),
+    definition.domains.join(', '),
   ];
 
-  if (profile.rules) {
-    sections.push('', `# RULES`, profile.rules);
+  if (definition.rules) {
+    sections.push('', `# RULES`, definition.rules);
   }
 
   sections.push(
@@ -125,24 +111,30 @@ export function buildSystemPrompt(profile: AgentProfile): string {
 
 /** Create an AgentDefinition from a profile and CLI config. */
 export function createAgentDefinition(
-  profile: AgentProfile,
+  definition: CanonicalAgentDefinition,
   config: CliConfig,
 ): AgentDefinition {
-  const agentConfig = config.agents[profile.name];
+  const agentConfig = config.agents[definition.id];
   const modelID = agentConfig.modelId ?? config.opencode.defaultModelId;
+  const variant = agentConfig.variant?.trim();
+  const runtimePermission = mergePermissionExtensions(
+    definition.runtime.permission,
+    config.opencode.permissionExtensions,
+    agentConfig.permissionExtensions,
+  ) as NonNullable<AgentConfig['permission']>;
 
-  const runtimeConfig = validateAgentConfig(profile.name, {
+  const runtimeConfig = validateAgentConfig(definition.id, {
     mode: 'subagent',
-    prompt: buildSystemPrompt(profile),
-    permission: REVIEW_AGENT_PERMISSIONS,
-    tools: REVIEW_AGENT_TOOLS,
-    maxSteps: 2,
+    prompt: buildSystemPrompt(definition),
+    permission: runtimePermission,
+    maxSteps: definition.runtime.maxSteps,
     ...(modelID ? { model: modelID } : {}),
+    ...(variant ? { variant } : {}),
   });
 
   return {
-    name: profile.name,
-    description: profile.description,
+    name: definition.id,
+    description: definition.description,
     config: runtimeConfig,
   };
 }
@@ -150,13 +142,10 @@ export function createAgentDefinition(
 /** Create a map of all agent definitions keyed by agent name. */
 export function createAgentConfigMap(
   config: CliConfig,
-): Record<AgentName, AgentDefinition> {
-  const map = {} as Record<AgentName, AgentDefinition>;
-  for (const name of AGENT_NAMES) {
-    map[name] = createAgentDefinition(
-      agentProfiles.AGENT_PROFILES[name],
-      config,
-    );
+): Record<AgentId, AgentDefinition> {
+  const map = {} as Record<AgentId, AgentDefinition>;
+  for (const id of AGENT_IDS) {
+    map[id] = createAgentDefinition(AGENTS[id], config);
   }
   return map;
 }

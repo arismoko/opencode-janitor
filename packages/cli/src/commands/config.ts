@@ -1,5 +1,5 @@
 /**
- * `janitor config` — manage CLI config file.
+ * `config` — manage CLI config file.
  */
 import { readFileSync } from 'node:fs';
 import chalk from 'chalk';

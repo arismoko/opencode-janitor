@@ -7,9 +7,6 @@ export interface DashboardRepoStateRow {
   enabled: 0 | 1;
   paused: 0 | 1;
   default_branch: string;
-  idle_streak: number;
-  next_commit_check_at: number;
-  next_pr_check_at: number;
   queued_jobs: number;
   running_jobs: number;
   latest_event_ts: number | null;
@@ -28,11 +25,17 @@ export interface DashboardReportSummaryRow {
   id: string;
   repo_id: string;
   repo_path: string;
-  job_id: string;
-  subject_key: string | null;
+  trigger_event_id: string;
+  subject: string | null;
   agent: AgentName;
   session_id: string | null;
-  status: 'queued' | 'running' | 'succeeded' | 'failed' | 'skipped';
+  status:
+    | 'queued'
+    | 'running'
+    | 'succeeded'
+    | 'failed'
+    | 'cancelled'
+    | 'skipped';
   outcome:
     | 'succeeded'
     | 'failed_transient'
@@ -57,14 +60,15 @@ export interface DashboardReportFindingRow {
   id: string;
   repo_id: string;
   repo_path: string;
-  job_id: string;
-  agent_run_id: string;
+  trigger_event_id: string;
+  review_run_id: string;
   agent: AgentName;
   severity: 'P0' | 'P1' | 'P2' | 'P3';
   domain: string;
   location: string;
   evidence: string;
   prescription: string;
+  details_json: string;
   created_at: number;
 }
 
@@ -78,9 +82,6 @@ export function listDashboardRepoState(db: Database): DashboardRepoStateRow[] {
         r.enabled,
         r.paused,
         r.default_branch,
-        r.idle_streak,
-        r.next_commit_check_at,
-        r.next_pr_check_at,
         COALESCE(jc.queued_jobs, 0)  AS queued_jobs,
         COALESCE(jc.running_jobs, 0) AS running_jobs,
         ev.latest_event_ts
@@ -90,7 +91,7 @@ export function listDashboardRepoState(db: Database): DashboardRepoStateRow[] {
           repo_id,
           SUM(CASE WHEN status = 'queued'  THEN 1 ELSE 0 END) AS queued_jobs,
           SUM(CASE WHEN status = 'running' THEN 1 ELSE 0 END) AS running_jobs
-        FROM review_jobs
+        FROM review_runs
         GROUP BY repo_id
       ) jc ON jc.repo_id = r.id
       LEFT JOIN (
@@ -118,7 +119,7 @@ export function listDashboardAgentState(
         SUM(CASE WHEN status = 'succeeded' THEN 1 ELSE 0 END) AS succeeded_runs,
         SUM(CASE WHEN status = 'failed'    THEN 1 ELSE 0 END) AS failed_runs,
         MAX(CASE WHEN finished_at IS NOT NULL THEN finished_at ELSE NULL END) AS last_finished_at
-      FROM agent_runs
+      FROM review_runs
       GROUP BY agent
       ORDER BY agent ASC
       `,
@@ -128,37 +129,37 @@ export function listDashboardAgentState(
 
 const REPORT_SUMMARY_BASE_SELECT = `
   SELECT
-    ar.id,
-    j.repo_id,
+    rr.id,
+    rr.repo_id,
     r.path AS repo_path,
-    ar.job_id,
-    t.subject_key,
-    ar.agent,
-    ar.session_id,
-    ar.status,
-    ar.outcome,
-    ar.findings_count,
+    rr.trigger_event_id,
+    te.subject,
+    rr.agent,
+    rr.session_id,
+    rr.status,
+    rr.outcome,
+    rr.findings_count,
     COALESCE(fs.p0_count, 0) AS p0_count,
     COALESCE(fs.p1_count, 0) AS p1_count,
     COALESCE(fs.p2_count, 0) AS p2_count,
     COALESCE(fs.p3_count, 0) AS p3_count,
-    ar.started_at,
-    ar.finished_at,
-    ar.error_message
-  FROM agent_runs ar
-  JOIN review_jobs j ON j.id = ar.job_id
-  JOIN repos r ON r.id = j.repo_id
-  LEFT JOIN review_triggers t ON t.id = j.trigger_id
+    rr.started_at,
+    rr.finished_at,
+    rr.error_message
+  FROM review_runs rr
+  JOIN repos r ON r.id = rr.repo_id
+  LEFT JOIN trigger_events te ON te.id = rr.trigger_event_id
   LEFT JOIN (
     SELECT
-      agent_run_id,
+      review_run_id,
       SUM(CASE WHEN severity = 'P0' THEN 1 ELSE 0 END) AS p0_count,
       SUM(CASE WHEN severity = 'P1' THEN 1 ELSE 0 END) AS p1_count,
       SUM(CASE WHEN severity = 'P2' THEN 1 ELSE 0 END) AS p2_count,
       SUM(CASE WHEN severity = 'P3' THEN 1 ELSE 0 END) AS p3_count
     FROM findings
-    GROUP BY agent_run_id
-  ) fs ON fs.agent_run_id = ar.id
+    WHERE review_run_id IS NOT NULL
+    GROUP BY review_run_id
+  ) fs ON fs.review_run_id = rr.id
 `;
 
 export function listDashboardReportSummaries(
@@ -169,7 +170,7 @@ export function listDashboardReportSummaries(
     .query(
       `
       ${REPORT_SUMMARY_BASE_SELECT}
-      ORDER BY COALESCE(ar.finished_at, ar.started_at, j.queued_at) DESC, ar.id DESC
+      ORDER BY COALESCE(rr.finished_at, rr.started_at, rr.queued_at) DESC, rr.id DESC
       LIMIT ?
       `,
     )
@@ -178,24 +179,24 @@ export function listDashboardReportSummaries(
 
 export function getDashboardReportDetail(
   db: Database,
-  agentRunId: string,
+  reviewRunId: string,
 ): DashboardReportDetailRow | null {
   return (
     (db
       .query(
         `
-      ${REPORT_SUMMARY_BASE_SELECT.replace('ar.error_message', 'ar.error_message,\n    ar.raw_output')}
-      WHERE ar.id = ?
+      ${REPORT_SUMMARY_BASE_SELECT.replace('rr.error_message', 'rr.error_message,\n    rr.raw_output')}
+      WHERE rr.id = ?
       LIMIT 1
       `,
       )
-      .get(agentRunId) as DashboardReportDetailRow | null) ?? null
+      .get(reviewRunId) as DashboardReportDetailRow | null) ?? null
   );
 }
 
 export function listDashboardReportFindings(
   db: Database,
-  agentRunId: string,
+  reviewRunId: string,
   limit: number,
 ): DashboardReportFindingRow[] {
   return db
@@ -205,18 +206,20 @@ export function listDashboardReportFindings(
         f.id,
         f.repo_id,
         r.path AS repo_path,
-        f.job_id,
-        f.agent_run_id,
+        rr.trigger_event_id,
+        f.review_run_id,
         f.agent,
         f.severity,
         f.domain,
         f.location,
         f.evidence,
         f.prescription,
+        f.details_json,
         f.created_at
       FROM findings f
+      JOIN review_runs rr ON rr.id = f.review_run_id
       JOIN repos r ON r.id = f.repo_id
-      WHERE f.agent_run_id = ?
+      WHERE f.review_run_id = ?
       ORDER BY
         CASE f.severity
           WHEN 'P0' THEN 0
@@ -228,5 +231,5 @@ export function listDashboardReportFindings(
       LIMIT ?
       `,
     )
-    .all(agentRunId, limit) as DashboardReportFindingRow[];
+    .all(reviewRunId, limit) as DashboardReportFindingRow[];
 }
