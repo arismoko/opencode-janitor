@@ -1,5 +1,6 @@
 import { Database } from 'bun:sqlite';
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
+import { AGENT_IDS, AGENTS } from '@opencode-janitor/shared';
 import { CliConfigSchema } from '../config/schema';
 import { ensureSchema } from '../db/migrations';
 import { addRepo } from '../db/queries/repo-queries';
@@ -7,6 +8,20 @@ import { insertTriggerEvent } from '../db/queries/trigger-event-queries';
 import { planReviewRunsForEvent } from './planner';
 
 let db: Database;
+
+const commitDefaultAgent = AGENT_IDS.find(
+  (agentId) => AGENTS[agentId].defaults.autoTriggers[0] === 'commit',
+);
+const prDefaultAgent = AGENT_IDS.find(
+  (agentId) => AGENTS[agentId].defaults.autoTriggers[0] === 'pr',
+);
+const prCapableAgent = AGENT_IDS.find((agentId) =>
+  AGENTS[agentId].capabilities.manualScopes.includes('pr'),
+);
+
+if (!commitDefaultAgent || !prDefaultAgent || !prCapableAgent) {
+  throw new Error('Expected canonical trigger-capable agents.');
+}
 
 beforeEach(() => {
   db = new Database(':memory:');
@@ -19,7 +34,7 @@ afterEach(() => {
 });
 
 describe('planReviewRunsForEvent', () => {
-  it('plans default janitor run for commit trigger', () => {
+  it('plans default commit agent run for commit trigger', () => {
     const repo = addRepo(db, {
       path: '/tmp/repo',
       gitDir: '/tmp/repo/.git',
@@ -46,10 +61,10 @@ describe('planReviewRunsForEvent', () => {
     const rows = db
       .query('SELECT agent, scope FROM review_runs ORDER BY agent ASC')
       .all() as Array<{ agent: string; scope: string }>;
-    expect(rows).toEqual([{ agent: 'janitor', scope: 'commit-diff' }]);
+    expect(rows).toEqual([{ agent: commitDefaultAgent, scope: 'commit-diff' }]);
   });
 
-  it('plans default hunter run for pr trigger', () => {
+  it('plans default pr agent run for pr trigger', () => {
     const repo = addRepo(db, {
       path: '/tmp/repo',
       gitDir: '/tmp/repo/.git',
@@ -80,10 +95,10 @@ describe('planReviewRunsForEvent', () => {
     const rows = db
       .query('SELECT agent, scope FROM review_runs ORDER BY agent ASC')
       .all() as Array<{ agent: string; scope: string }>;
-    expect(rows).toEqual([{ agent: 'hunter', scope: 'pr' }]);
+    expect(rows).toEqual([{ agent: prDefaultAgent, scope: 'pr' }]);
   });
 
-  it('manual hunter --pr keeps trigger manual and resolves scope=pr', () => {
+  it('manual pr-capable agent with --pr keeps trigger manual and scope=pr', () => {
     const repo = addRepo(db, {
       path: '/tmp/repo',
       gitDir: '/tmp/repo/.git',
@@ -96,7 +111,7 @@ describe('planReviewRunsForEvent', () => {
       eventKey: 'manual-pr-123',
       subject: 'manual:pr:123',
       payloadJson: JSON.stringify({
-        agent: 'hunter',
+        agent: prCapableAgent,
         requestedScope: 'pr',
         input: { prNumber: 123 },
       }),
@@ -114,7 +129,7 @@ describe('planReviewRunsForEvent', () => {
     const row = db
       .query('SELECT agent, scope, scope_input_json FROM review_runs LIMIT 1')
       .get() as { agent: string; scope: string; scope_input_json: string };
-    expect(row.agent).toBe('hunter');
+    expect(row.agent).toBe(prCapableAgent);
     expect(row.scope).toBe('pr');
     expect(JSON.parse(row.scope_input_json)).toEqual({ prNumber: 123 });
   });
@@ -129,10 +144,10 @@ describe('planReviewRunsForEvent', () => {
     const event = insertTriggerEvent(db, {
       repoId: repo.id,
       triggerId: 'manual',
-      eventKey: 'manual-target-hunter',
-      subject: 'manual:hunter',
+      eventKey: 'manual-target-agent',
+      subject: `manual:${prCapableAgent}`,
       payloadJson: JSON.stringify({
-        agent: 'hunter',
+        agent: prCapableAgent,
       }),
       source: 'cli',
       detectedAt: Date.now(),
@@ -149,7 +164,7 @@ describe('planReviewRunsForEvent', () => {
       .all() as Array<{ agent: string }>;
 
     expect(result.planned).toBe(1);
-    expect(rows).toEqual([{ agent: 'hunter' }]);
+    expect(rows).toEqual([{ agent: prCapableAgent }]);
   });
 
   it('honors hard auto capability gate from config', () => {
@@ -171,7 +186,7 @@ describe('planReviewRunsForEvent', () => {
 
     const config = CliConfigSchema.parse({
       agents: {
-        janitor: { autoTriggers: ['pr'] },
+        [commitDefaultAgent]: { autoTriggers: ['pr'] },
       },
     });
 

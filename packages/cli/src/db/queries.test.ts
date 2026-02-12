@@ -1,5 +1,6 @@
 import { Database } from 'bun:sqlite';
 import { describe, expect, it } from 'bun:test';
+import { AGENT_IDS } from '@opencode-janitor/shared';
 import { ensureSchema } from './migrations';
 import {
   getDashboardReportDetail,
@@ -21,12 +22,15 @@ import {
   deleteReviewRun,
   enqueueReviewRun,
   findReviewRunContextBySessionId,
+  getReviewRunById,
+  markReviewRunCancelled,
   markReviewRunFailed,
   markReviewRunRunning,
   markReviewRunSucceeded,
   recoverRunningReviewRuns,
   replaceReviewRunFindings,
   requeueReviewRun,
+  resumeReviewRunInPlace,
 } from './queries/review-run-queries';
 import {
   getTriggerEventById,
@@ -38,6 +42,11 @@ import {
   listTriggerStatesDue,
   upsertTriggerState,
 } from './queries/trigger-state-queries';
+
+const firstAgent = AGENT_IDS[0];
+const secondAgent = AGENT_IDS[1] ?? AGENT_IDS[0];
+const thirdAgent = AGENT_IDS[2] ?? AGENT_IDS[0];
+const fourthAgent = AGENT_IDS[3] ?? AGENT_IDS[0];
 
 function createDb(): Database {
   const db = new Database(':memory:');
@@ -138,7 +147,7 @@ describe('review run queries', () => {
     const enqueue = enqueueReviewRun(db, {
       repoId: repo.id,
       triggerEventId: event.eventId,
-      agent: 'janitor',
+      agent: firstAgent,
       scope: 'commit-diff',
     });
     expect(enqueue.inserted).toBe(true);
@@ -150,7 +159,7 @@ describe('review run queries', () => {
     replaceReviewRunFindings(db, enqueue.runId, [
       {
         repo_id: repo.id,
-        agent: 'janitor',
+        agent: firstAgent,
         severity: 'P1',
         domain: 'DRY',
         location: 'src/a.ts:1',
@@ -188,7 +197,7 @@ describe('review run queries', () => {
     const enqueue = enqueueReviewRun(db, {
       repoId: repo.id,
       triggerEventId: event.eventId,
-      agent: 'inspector',
+      agent: thirdAgent,
       scope: 'repo',
     });
 
@@ -197,7 +206,7 @@ describe('review run queries', () => {
     replaceReviewRunFindings(db, enqueue.runId, [
       {
         repo_id: repo.id,
-        agent: 'inspector',
+        agent: thirdAgent,
         severity: 'P1',
         domain: 'DESIGN',
         location: 'src/core.ts:10',
@@ -249,7 +258,7 @@ describe('review run queries', () => {
     const { runId } = enqueueReviewRun(db, {
       repoId: repo.id,
       triggerEventId: event.eventId,
-      agent: 'hunter',
+      agent: secondAgent,
       scope: 'pr',
       scopeInputJson: JSON.stringify({ prNumber: 42 }),
     });
@@ -272,7 +281,7 @@ describe('review run queries', () => {
     const { runId } = enqueueReviewRun(db, {
       repoId: repo.id,
       triggerEventId: event.eventId,
-      agent: 'scribe',
+      agent: fourthAgent,
       scope: 'repo',
     });
 
@@ -294,6 +303,86 @@ describe('review run queries', () => {
     );
     expect(deleteReviewRun(db, runId)).toBe(true);
   });
+
+  it('marks queued run as cancelled and persists cancellation outcome', () => {
+    const db = createDb();
+    const repo = seedRepo(db);
+    const event = seedTriggerEvent(db, repo.id);
+    const { runId } = enqueueReviewRun(db, {
+      repoId: repo.id,
+      triggerEventId: event.eventId,
+      agent: fourthAgent,
+      scope: 'repo',
+    });
+
+    markReviewRunCancelled(db, runId, 'REVIEW_STOPPED', 'stopped by user');
+
+    const row = getDashboardReportDetail(db, runId);
+    expect(row?.status).toBe('cancelled');
+    expect(row?.outcome).toBe('cancelled');
+    expect(row?.error_message).toBe('stopped by user');
+  });
+
+  it('resumes cancelled run in-place while preserving session_id', () => {
+    const db = createDb();
+    const repo = seedRepo(db);
+    const event = seedTriggerEvent(db, repo.id);
+    const { runId } = enqueueReviewRun(db, {
+      repoId: repo.id,
+      triggerEventId: event.eventId,
+      agent: secondAgent,
+      scope: 'pr',
+    });
+
+    claimNextQueuedReviewRun(db, 1);
+    markReviewRunRunning(db, runId, 'sess-resume-1');
+    markReviewRunCancelled(db, runId, 'AGENT_CANCELLED', 'cancelled');
+    replaceReviewRunFindings(db, runId, [
+      {
+        repo_id: repo.id,
+        agent: secondAgent,
+        severity: 'P1',
+        domain: 'BUG',
+        location: 'src/x.ts:1',
+        evidence: 'x',
+        prescription: 'y',
+        details_json: '{}',
+        fingerprint: 'fp-resume',
+      },
+    ]);
+
+    const resumed = resumeReviewRunInPlace(db, runId);
+    expect(resumed).toBe(true);
+
+    const run = getReviewRunById(db, runId);
+    expect(run?.status).toBe('queued');
+    expect(run?.session_id).toBe('sess-resume-1');
+    expect(run?.outcome).toBeNull();
+    expect(run?.error_code).toBeNull();
+    expect(run?.error_message).toBeNull();
+    expect(run?.raw_output).toBeNull();
+    expect(run?.findings_count).toBe(0);
+
+    const findingCount = db
+      .query('SELECT COUNT(*) AS count FROM findings WHERE review_run_id = ?')
+      .get(runId) as { count: number };
+    expect(findingCount.count).toBe(0);
+  });
+
+  it('resume in-place is a no-op for non-cancelled run', () => {
+    const db = createDb();
+    const repo = seedRepo(db);
+    const event = seedTriggerEvent(db, repo.id);
+    const { runId } = enqueueReviewRun(db, {
+      repoId: repo.id,
+      triggerEventId: event.eventId,
+      agent: firstAgent,
+      scope: 'commit-diff',
+    });
+
+    const resumed = resumeReviewRunInPlace(db, runId);
+    expect(resumed).toBe(false);
+  });
 });
 
 describe('event queries', () => {
@@ -304,7 +393,7 @@ describe('event queries', () => {
     const { runId } = enqueueReviewRun(db, {
       repoId: repo.id,
       triggerEventId: event.eventId,
-      agent: 'janitor',
+      agent: firstAgent,
       scope: 'commit-diff',
     });
 
@@ -339,7 +428,7 @@ describe('dashboard queries', () => {
     const a = enqueueReviewRun(db, {
       repoId: repo.id,
       triggerEventId: event.eventId,
-      agent: 'janitor',
+      agent: firstAgent,
       scope: 'commit-diff',
     });
     claimNextQueuedReviewRun(db, 1);

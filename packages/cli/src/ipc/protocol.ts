@@ -37,7 +37,7 @@ export interface StopResponse {
 
 export interface EnqueueReviewRequest {
   repoOrId: string;
-  /** Agent name to run (janitor/hunter/inspector/scribe). */
+  /** Agent name to run. */
   agent: AgentName;
   /** Optional manual scope request (commit-diff/workspace-diff/repo/pr). */
   scope?: ScopeId;
@@ -45,6 +45,8 @@ export interface EnqueueReviewRequest {
   input?: Record<string, unknown>;
   /** Optional freeform note carried in manual trigger payload metadata. */
   note?: string;
+  /** Optional path/folder hint to focus during manual review. */
+  focusPath?: string;
 }
 
 export interface DeleteReportRequest {
@@ -64,6 +66,29 @@ export interface EnqueueReviewResponse {
   repoPath: string;
   sha: string;
   subject: string;
+}
+
+export interface StopReviewRequest {
+  reviewRunId: string;
+}
+
+export interface StopReviewResponse {
+  ok: true;
+  stopped: boolean;
+  reviewRunId: string;
+  status?: 'cancelled';
+}
+
+export interface ResumeReviewRequest {
+  reviewRunId: string;
+}
+
+export interface ResumeReviewResponse {
+  ok: true;
+  resumed: boolean;
+  reviewRunId: string;
+  status?: 'queued';
+  errorCode?: 'NOT_RESUMABLE';
 }
 
 export interface EventJournalEntry {
@@ -125,7 +150,13 @@ export interface DashboardReportSummary {
   subject: string | null;
   agent: AgentName;
   sessionId: string | null;
-  status: 'queued' | 'running' | 'succeeded' | 'failed' | 'skipped';
+  status:
+    | 'queued'
+    | 'running'
+    | 'succeeded'
+    | 'failed'
+    | 'cancelled'
+    | 'skipped';
   outcome:
     | 'succeeded'
     | 'failed_transient'
@@ -185,4 +216,134 @@ export interface DashboardReportDetailResponse {
 export interface CapabilitiesResponse extends CapabilitiesView {
   ok: true;
   generatedAt: number;
+}
+
+export type PrListBucket =
+  | 'all-open'
+  | 'review-requested'
+  | 'assigned'
+  | 'created-by-me'
+  | 'mentioned';
+
+export interface PrSummary {
+  number: number;
+  title: string;
+  state: string;
+  url: string;
+  authorLogin: string | null;
+  isDraft: boolean;
+  reviewDecision: string | null;
+  mergeable: string | null;
+  updatedAt: string;
+  requestedReviewers: string[];
+}
+
+export interface PrIssueComment {
+  id: number;
+  authorLogin: string | null;
+  body: string;
+  createdAt: string;
+  updatedAt: string;
+  url: string;
+}
+
+export interface PrReviewComment {
+  id: number;
+  inReplyToId: number | null;
+  authorLogin: string | null;
+  body: string;
+  path: string | null;
+  line: number | null;
+  url: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface PrDetail extends PrSummary {
+  body: string;
+  baseRefName: string;
+  headRefName: string;
+  additions: number;
+  deletions: number;
+  changedFiles: number;
+  commits: number;
+  merged: boolean;
+  mergeStateStatus: string | null;
+  issueComments: PrIssueComment[];
+  reviewComments: PrReviewComment[];
+}
+
+export interface ListPrsRequest {
+  repoOrId: string;
+  bucket?: PrListBucket;
+  query?: string;
+  limit?: number;
+}
+
+export interface ListPrsResponse {
+  ok: true;
+  generatedAt: number;
+  items: PrSummary[];
+}
+
+export interface GetPrDetailRequest {
+  repoOrId: string;
+  prNumber: number;
+}
+
+export interface GetPrDetailResponse {
+  ok: true;
+  generatedAt: number;
+  detail: PrDetail;
+}
+
+export interface MergePrRequest {
+  repoOrId: string;
+  prNumber: number;
+  method?: 'merge' | 'squash' | 'rebase';
+}
+
+export interface MergePrResponse {
+  ok: true;
+  merged: boolean;
+  prNumber: number;
+}
+
+export interface CommentPrRequest {
+  repoOrId: string;
+  prNumber: number;
+  body: string;
+}
+
+export interface CommentPrResponse {
+  ok: true;
+  commented: boolean;
+  prNumber: number;
+}
+
+export interface RequestReviewersRequest {
+  repoOrId: string;
+  prNumber: number;
+  reviewers: string[];
+}
+
+export interface RequestReviewersResponse {
+  ok: true;
+  requested: boolean;
+  prNumber: number;
+  reviewers: string[];
+}
+
+export interface ReplyReviewCommentRequest {
+  repoOrId: string;
+  prNumber: number;
+  commentId: number;
+  body: string;
+}
+
+export interface ReplyReviewCommentResponse {
+  ok: true;
+  replied: boolean;
+  prNumber: number;
+  commentId: number;
 }

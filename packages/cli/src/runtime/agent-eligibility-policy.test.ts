@@ -1,11 +1,29 @@
 import { describe, expect, it } from 'bun:test';
-import { AGENT_IDS, type AgentId, TRIGGER_IDS } from '@opencode-janitor/shared';
+import {
+  AGENT_IDS,
+  AGENTS,
+  type AgentId,
+  TRIGGER_IDS,
+} from '@opencode-janitor/shared';
 import { CliConfigSchema } from '../config/schema';
 import {
   canAgentPlanForEvent,
   canAgentRunForTrigger,
 } from './agent-eligibility-policy';
 import { createAgentSpecFromDefinition } from './agent-spec-from-definition';
+
+const firstAgent = AGENT_IDS[0];
+const secondAgent = AGENT_IDS[1] ?? AGENT_IDS[0];
+const thirdAgent = AGENT_IDS[2] ?? AGENT_IDS[0];
+const fourthAgent = AGENT_IDS[3] ?? AGENT_IDS[0];
+
+const commitDefaultAgent = AGENT_IDS.find(
+  (agent) => AGENTS[agent].defaults.autoTriggers[0] === 'commit',
+);
+
+if (!commitDefaultAgent) {
+  throw new Error('Expected an agent with commit as default auto trigger.');
+}
 
 function makeSpec(agent: AgentId) {
   return createAgentSpecFromDefinition({
@@ -20,39 +38,45 @@ describe('agent eligibility policy', () => {
   it('rejects disabled agents for auto and manual triggers', () => {
     const config = CliConfigSchema.parse({
       agents: {
-        janitor: { enabled: false },
+        [commitDefaultAgent]: { enabled: false },
       },
     });
 
-    expect(canAgentRunForTrigger(config, 'janitor', 'commit')).toEqual({
-      eligible: false,
-      reason: 'agent_disabled',
-    });
-    expect(canAgentRunForTrigger(config, 'janitor', 'manual')).toEqual({
-      eligible: false,
-      reason: 'agent_disabled',
-    });
+    expect(canAgentRunForTrigger(config, commitDefaultAgent, 'commit')).toEqual(
+      {
+        eligible: false,
+        reason: 'agent_disabled',
+      },
+    );
+    expect(canAgentRunForTrigger(config, commitDefaultAgent, 'manual')).toEqual(
+      {
+        eligible: false,
+        reason: 'agent_disabled',
+      },
+    );
   });
 
   it('enforces config and capability gates for auto triggers', () => {
     const config = CliConfigSchema.parse({
       agents: {
-        janitor: { autoTriggers: ['pr'] },
+        [commitDefaultAgent]: { autoTriggers: ['pr'] },
       },
     });
 
-    expect(canAgentRunForTrigger(config, 'janitor', 'commit')).toEqual({
-      eligible: false,
-      reason: 'trigger_not_enabled_in_config',
-    });
-    expect(canAgentRunForTrigger(config, 'janitor', 'pr')).toEqual({
+    expect(canAgentRunForTrigger(config, commitDefaultAgent, 'commit')).toEqual(
+      {
+        eligible: false,
+        reason: 'trigger_not_enabled_in_config',
+      },
+    );
+    expect(canAgentRunForTrigger(config, commitDefaultAgent, 'pr')).toEqual({
       eligible: true,
     });
   });
 
   it('allows manual by default for enabled agents', () => {
     const config = CliConfigSchema.parse({});
-    expect(canAgentRunForTrigger(config, 'hunter', 'manual')).toEqual({
+    expect(canAgentRunForTrigger(config, secondAgent, 'manual')).toEqual({
       eligible: true,
     });
   });
@@ -61,22 +85,26 @@ describe('agent eligibility policy', () => {
     const config = CliConfigSchema.parse({});
 
     expect(
-      canAgentPlanForEvent(config, 'hunter', 'manual', { agent: 'hunter' }),
+      canAgentPlanForEvent(config, secondAgent, 'manual', {
+        agent: secondAgent,
+      }),
     ).toEqual({ eligible: true });
     expect(
-      canAgentPlanForEvent(config, 'janitor', 'manual', { agent: 'hunter' }),
+      canAgentPlanForEvent(config, firstAgent, 'manual', {
+        agent: secondAgent,
+      }),
     ).toEqual({ eligible: false, reason: 'manual_target_mismatch' });
   });
 
   it('keeps planning behavior aligned with run eligibility for auto triggers', () => {
     const config = CliConfigSchema.parse({
       agents: {
-        hunter: { autoTriggers: ['commit'] },
+        [secondAgent]: { autoTriggers: ['commit'] },
       },
     });
 
-    const run = canAgentRunForTrigger(config, 'hunter', 'commit');
-    const plan = canAgentPlanForEvent(config, 'hunter', 'commit', {});
+    const run = canAgentRunForTrigger(config, secondAgent, 'commit');
+    const plan = canAgentPlanForEvent(config, secondAgent, 'commit', {});
     expect(plan).toEqual(run);
   });
 
@@ -85,18 +113,18 @@ describe('agent eligibility policy', () => {
       CliConfigSchema.parse({}),
       CliConfigSchema.parse({
         agents: {
-          janitor: { enabled: false },
-          hunter: { autoTriggers: ['commit'] },
-          inspector: { autoTriggers: [] },
-          scribe: { autoTriggers: ['pr'] },
+          [firstAgent]: { enabled: false },
+          [secondAgent]: { autoTriggers: ['commit'] },
+          [thirdAgent]: { autoTriggers: [] },
+          [fourthAgent]: { autoTriggers: ['pr'] },
         },
       }),
       CliConfigSchema.parse({
         agents: {
-          janitor: { autoTriggers: ['commit', 'pr'] },
-          hunter: { enabled: false },
-          inspector: { autoTriggers: ['commit', 'pr'] },
-          scribe: { autoTriggers: [] },
+          [firstAgent]: { autoTriggers: ['commit', 'pr'] },
+          [secondAgent]: { enabled: false },
+          [thirdAgent]: { autoTriggers: ['commit', 'pr'] },
+          [fourthAgent]: { autoTriggers: [] },
         },
       }),
     ];

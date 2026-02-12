@@ -20,6 +20,24 @@ export const ScopeIdSchema = z.enum(scopeIdTuple);
 export type TriggerIdSchema = z.infer<typeof TriggerIdSchema>;
 export type ScopeIdSchema = z.infer<typeof ScopeIdSchema>;
 
+export const PermissionDecisionSchema = z.enum(['ask', 'allow', 'deny']);
+export const PermissionPatternMapSchema = z.record(
+  z.string(),
+  PermissionDecisionSchema,
+);
+export const PermissionRuleSchema = z.union([
+  PermissionDecisionSchema,
+  PermissionPatternMapSchema,
+]);
+export const PermissionExtensionsSchema = z.record(
+  z.string(),
+  PermissionRuleSchema,
+);
+export type PermissionDecision = z.infer<typeof PermissionDecisionSchema>;
+export type PermissionPatternMap = z.infer<typeof PermissionPatternMapSchema>;
+export type PermissionRule = z.infer<typeof PermissionRuleSchema>;
+export type PermissionExtensions = z.infer<typeof PermissionExtensionsSchema>;
+
 // ---------------------------------------------------------------------------
 // Per-agent runtime config
 // ---------------------------------------------------------------------------
@@ -30,6 +48,7 @@ export const AgentRuntimeConfig = z.object({
   manualDefaultScope: ScopeIdSchema.optional(),
   modelId: z.string().optional(),
   variant: z.string().optional(),
+  permissionExtensions: PermissionExtensionsSchema.optional(),
   maxFindings: z.number().int().min(1).max(50).default(10),
 });
 export type AgentRuntimeConfig = z.infer<typeof AgentRuntimeConfig>;

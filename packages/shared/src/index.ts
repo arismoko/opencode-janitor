@@ -1,7 +1,7 @@
 /**
  * @opencode-janitor/shared
  *
- * Shared domain logic for the janitor ecosystem.
+ * Shared domain logic for the review-agent ecosystem.
  */
 
 export * from './agents';
@@ -11,9 +11,19 @@ export * as findingSchemas from './review/finding-schemas';
 export { Severity } from './review/finding-schemas';
 export * from './review/output-codec';
 export * from './review/prompt-builder';
+export type {
+  PermissionDecision,
+  PermissionExtensions,
+  PermissionPatternMap,
+  PermissionRule,
+} from './schemas/config';
 export * as configSchemas from './schemas/config';
 export {
   AgentRuntimeConfig,
+  PermissionDecisionSchema,
+  PermissionExtensionsSchema,
+  PermissionPatternMapSchema,
+  PermissionRuleSchema,
   ScopeConfig,
   ScopeIdSchema,
   TriggerIdSchema,

@@ -1,6 +1,7 @@
 import type { Database } from 'bun:sqlite';
 import { appendEvent } from '../db/queries/event-queries';
 import {
+  markReviewRunCancelled,
   markReviewRunFailed,
   markReviewRunSucceeded,
   type QueuedReviewRunRow,
@@ -92,6 +93,20 @@ export function createReviewRunPersistenceService(options: {
           triggerEventId: run.trigger_event_id,
           reviewRunId: run.id,
           message: `Review run ${run.id} requeued: ${message}`,
+          payload: {
+            agent: run.agent,
+            reviewRunId: run.id,
+          },
+        });
+      } else if (classification.outcome === 'cancelled') {
+        markReviewRunCancelled(db, run.id, classification.errorCode, message);
+        appendEvent(db, {
+          eventType: 'review_run.cancelled',
+          level: 'warn',
+          repoId: run.repo_id,
+          triggerEventId: run.trigger_event_id,
+          reviewRunId: run.id,
+          message: `Review run ${run.id} cancelled: ${message}`,
           payload: {
             agent: run.agent,
             reviewRunId: run.id,

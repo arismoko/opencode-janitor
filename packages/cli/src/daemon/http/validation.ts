@@ -154,7 +154,7 @@ export function requireAgentName(value: unknown): AgentName {
   if (!VALID_AGENT_NAMES.has(agent)) {
     throw new ValidationError(
       'INVALID_AGENT',
-      '`agent` must be one of janitor, hunter, inspector, scribe',
+      `\`agent\` must be one of ${AGENT_NAMES.join(', ')}`,
       'agent',
     );
   }

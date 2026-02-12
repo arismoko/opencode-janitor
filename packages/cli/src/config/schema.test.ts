@@ -13,6 +13,20 @@ import {
   TriggersSection,
 } from './schema';
 
+const commitDefaultAgent = AGENT_IDS.find(
+  (agentId) => AGENTS[agentId].defaults.autoTriggers[0] === 'commit',
+);
+const prDefaultAgent = AGENT_IDS.find(
+  (agentId) => AGENTS[agentId].defaults.autoTriggers[0] === 'pr',
+);
+const repoOnlyAgent = AGENT_IDS.find((agentId) =>
+  AGENTS[agentId].capabilities.manualScopes.every((scope) => scope === 'repo'),
+);
+
+if (!commitDefaultAgent || !prDefaultAgent || !repoOnlyAgent) {
+  throw new Error('Expected canonical capability profiles.');
+}
+
 describe('default values from empty input', () => {
   it('CliConfigSchema.parse({}) produces a fully populated config', () => {
     const cfg = CliConfigSchema.parse({});
@@ -96,49 +110,127 @@ describe('registry-derived agent and trigger config', () => {
     expect(Object.keys(parsed).sort()).toEqual([...TRIGGER_IDS].sort());
     expect(parsed.commit.enabled).toBe(true);
     expect(parsed.pr.enabled).toBe(true);
+    expect(parsed.pr.postComment).toBe(true);
     expect(parsed.manual.enabled).toBe(true);
+  });
+
+  it('parses explicit PR postComment=false', () => {
+    const parsed = TriggersSection.parse({
+      pr: {
+        postComment: false,
+      },
+    });
+    expect(parsed.pr.postComment).toBe(false);
   });
 
   it('preserves registry auto-trigger defaults under partial overrides', () => {
     const parsed = AgentsSection.parse({
-      janitor: { modelId: 'openai/gpt-5.3-codex' },
-      hunter: { modelId: 'openai/gpt-5.3-codex' },
+      [commitDefaultAgent]: {
+        modelId: 'openai/gpt-5.3-codex',
+        variant: 'xhigh',
+      },
+      [prDefaultAgent]: { modelId: 'openai/gpt-5.3-codex' },
     });
 
-    expect(parsed.janitor.autoTriggers).toEqual([
-      ...AGENTS.janitor.defaults.autoTriggers,
+    expect(parsed[commitDefaultAgent].autoTriggers).toEqual([
+      ...AGENTS[commitDefaultAgent].defaults.autoTriggers,
     ]);
-    expect(parsed.hunter.autoTriggers).toEqual([
-      ...AGENTS.hunter.defaults.autoTriggers,
+    expect(parsed[prDefaultAgent].autoTriggers).toEqual([
+      ...AGENTS[prDefaultAgent].defaults.autoTriggers,
     ]);
+    expect(parsed[commitDefaultAgent].variant).toBe('xhigh');
   });
 });
 
 describe('hard capability gate validation', () => {
   it('rejects autoTriggers outside agent capability', () => {
     const result = AgentsSection.safeParse({
-      janitor: { autoTriggers: ['manual'] },
+      [commitDefaultAgent]: { autoTriggers: ['manual'] },
     });
     expect(result.success).toBe(false);
   });
 
   it('rejects manualDefaultScope outside agent capability', () => {
     const result = AgentsSection.safeParse({
-      inspector: { manualDefaultScope: 'workspace-diff' },
+      [repoOnlyAgent]: { manualDefaultScope: 'workspace-diff' },
     });
     expect(result.success).toBe(false);
   });
 
   it('accepts valid capability-constrained overrides', () => {
     const parsed = AgentsSection.parse({
-      hunter: {
+      [prDefaultAgent]: {
         autoTriggers: ['commit', 'pr'],
         manualDefaultScope: 'pr',
       },
     });
 
-    expect(parsed.hunter.autoTriggers).toEqual(['commit', 'pr']);
-    expect(parsed.hunter.manualDefaultScope).toBe('pr');
+    expect(parsed[prDefaultAgent].autoTriggers).toEqual(['commit', 'pr']);
+    expect(parsed[prDefaultAgent].manualDefaultScope).toBe('pr');
+  });
+
+  it('parses global and per-agent permission extensions', () => {
+    const parsed = CliConfigSchema.parse({
+      opencode: {
+        permissionExtensions: {
+          'context7_*': 'ask',
+          bash: {
+            '*': 'ask',
+            'git status*': 'allow',
+          },
+        },
+      },
+      agents: {
+        [prDefaultAgent]: {
+          permissionExtensions: {
+            'context7_*': 'allow',
+            'gh_grep_*': {
+              '*': 'ask',
+              'search*': 'allow',
+            },
+          },
+        },
+      },
+    });
+
+    expect(parsed.opencode.permissionExtensions).toEqual({
+      'context7_*': 'ask',
+      bash: {
+        '*': 'ask',
+        'git status*': 'allow',
+      },
+    });
+    expect(parsed.agents[prDefaultAgent].permissionExtensions).toEqual({
+      'context7_*': 'allow',
+      'gh_grep_*': {
+        '*': 'ask',
+        'search*': 'allow',
+      },
+    });
+  });
+
+  it('rejects invalid permission extension actions', () => {
+    const globalResult = CliConfigSchema.safeParse({
+      opencode: {
+        permissionExtensions: {
+          'context7_*': 'maybe',
+        },
+      },
+    });
+    expect(globalResult.success).toBe(false);
+
+    const agentResult = CliConfigSchema.safeParse({
+      agents: {
+        [prDefaultAgent]: {
+          permissionExtensions: {
+            bash: {
+              '*': 'yes',
+            },
+          },
+        },
+      },
+    });
+    expect(agentResult.success).toBe(false);
   });
 });
 
@@ -166,10 +258,12 @@ describe('existing numeric guards still apply', () => {
 
   it('maxFindings rejects out-of-range values', () => {
     expect(
-      AgentsSection.safeParse({ janitor: { maxFindings: 0 } }).success,
+      AgentsSection.safeParse({ [commitDefaultAgent]: { maxFindings: 0 } })
+        .success,
     ).toBe(false);
     expect(
-      AgentsSection.safeParse({ janitor: { maxFindings: 51 } }).success,
+      AgentsSection.safeParse({ [commitDefaultAgent]: { maxFindings: 51 } })
+        .success,
     ).toBe(false);
   });
 

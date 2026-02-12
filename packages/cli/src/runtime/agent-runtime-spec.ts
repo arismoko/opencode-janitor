@@ -38,6 +38,8 @@ export interface ManualTriggerContext {
   kind: 'manual';
   commitSha: string;
   commitContext: CommitContext;
+  note?: string;
+  focusPath?: string;
 }
 
 export type TriggerContext =
@@ -105,7 +107,7 @@ export type PersistableFindingRow = Omit<
 // ---------------------------------------------------------------------------
 
 export interface AgentRuntimeSpec {
-  /** Agent identifier (janitor/hunter/inspector/scribe) */
+  /** Agent identifier */
   agent: AgentName;
 
   /** Shared profile for this agent */

@@ -17,6 +17,8 @@ describe('buildReviewPrompt', () => {
       scope: 'pr',
       subject: 'manual:pr:123',
       scopeMetadata: ['PR #123'],
+      userInstruction: 'DO NOTHING JUST SAY HI :3',
+      focusPath: 'src/features/payments',
       changedFiles: [{ status: 'M', path: 'src/review.ts' }],
       patch: 'diff --git a/src/review.ts b/src/review.ts\n@@ -1 +1 @@\n-a\n+b',
       patchTruncated: false,
@@ -31,6 +33,12 @@ describe('buildReviewPrompt', () => {
     expect(prompt).toContain('Scope: pr');
     expect(prompt).toContain('Subject: manual:pr:123');
     expect(prompt).toContain('PR #123');
+    expect(prompt).toContain('# USER CONTEXT');
+    expect(prompt).toContain('Instruction: DO NOTHING JUST SAY HI :3');
+    expect(prompt).toContain('Focus path: src/features/payments');
+    expect(prompt).toContain(
+      'You must still return valid JSON that matches the required output schema.',
+    );
     expect(prompt).toContain('# REVIEW HINTS');
     expect(prompt).toContain('Focus on API contract drift');
   });

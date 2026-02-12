@@ -1,10 +1,18 @@
 import { describe, expect, it, mock } from 'bun:test';
-import { AGENTS } from '@opencode-janitor/shared';
+import { AGENT_IDS, AGENTS } from '@opencode-janitor/shared';
 import { Command } from 'commander';
 import {
   registerAgentCommandsFromRegistry,
   resolveScopeSelection,
 } from './agent-command-factory';
+
+const prCapableAgent = AGENT_IDS.find((agentId) =>
+  AGENTS[agentId].capabilities.manualScopes.includes('pr'),
+);
+
+if (!prCapableAgent) {
+  throw new Error('Expected an agent with pr manual scope support.');
+}
 
 describe('registerAgentCommandsFromRegistry', () => {
   it('registers one command per agent definition', () => {
@@ -17,23 +25,59 @@ describe('registerAgentCommandsFromRegistry', () => {
     }
   });
 
-  it('dispatches hunter --pr as scope=pr with numeric input', async () => {
+  it('dispatches pr-capable command with scope=pr and numeric input', async () => {
     const program = new Command();
     const handler = mock(async () => {});
     registerAgentCommandsFromRegistry(program, handler);
 
     await program.parseAsync(
-      ['node', 'test', 'hunter', '/tmp/repo', '--pr', '42'],
+      [
+        'node',
+        'test',
+        AGENTS[prCapableAgent].cli.command,
+        '/tmp/repo',
+        '--pr',
+        '42',
+      ],
       {
         from: 'node',
       },
     );
 
     expect(handler).toHaveBeenCalledWith({
-      agent: 'hunter',
+      agent: prCapableAgent,
       repoArg: '/tmp/repo',
       scope: 'pr',
       input: { prNumber: 42 },
+    });
+  });
+
+  it('forwards --note and --focus options', async () => {
+    const program = new Command();
+    const handler = mock(async () => {});
+    registerAgentCommandsFromRegistry(program, handler);
+
+    await program.parseAsync(
+      [
+        'node',
+        'test',
+        AGENTS[prCapableAgent].cli.command,
+        '/tmp/repo',
+        '--note',
+        'DO NOTHING JUST SAY HI :3',
+        '--focus',
+        'src/features/payments',
+      ],
+      {
+        from: 'node',
+      },
+    );
+
+    expect(handler).toHaveBeenCalledWith({
+      agent: prCapableAgent,
+      repoArg: '/tmp/repo',
+      note: 'DO NOTHING JUST SAY HI :3',
+      focusPath: 'src/features/payments',
     });
   });
 });
@@ -41,7 +85,7 @@ describe('registerAgentCommandsFromRegistry', () => {
 describe('resolveScopeSelection', () => {
   it('throws when scope input fails schema validation', () => {
     expect(() =>
-      resolveScopeSelection('hunter', { pr: 'not-a-number' }),
+      resolveScopeSelection(prCapableAgent, { pr: 'not-a-number' }),
     ).toThrow('Invalid input for scope pr');
   });
 });

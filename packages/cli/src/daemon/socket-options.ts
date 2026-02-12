@@ -2,6 +2,7 @@ import type { RuntimeContext } from '../runtime/context';
 import { createCapabilitiesOptions } from './options/capabilities-options';
 import { createDashboardOptions } from './options/dashboard-options';
 import { createEventOptions } from './options/event-options';
+import { createPrOptions } from './options/pr-options';
 import { createReviewOptions } from './options/review-options';
 import type {
   DaemonStatusSnapshot,
@@ -31,5 +32,6 @@ export function createSocketOptions(
     event: createEventOptions(rc),
     dashboard: createDashboardOptions(rc, statusSnapshot),
     capabilities: createCapabilitiesOptions(),
+    pr: createPrOptions(rc),
   };
 }

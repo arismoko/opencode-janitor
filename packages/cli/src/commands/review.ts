@@ -1,10 +1,8 @@
 /**
  * Agent subcommands — one per agent, each with a one-letter alias.
  *
- *   opencode-janitor janitor [repo]           # alias: j
- *   opencode-janitor hunter [repo] --pr <n>   # alias: h
- *   opencode-janitor inspector [repo]         # alias: i
- *   opencode-janitor scribe [repo]            # alias: s
+ *   opencode-janitor <agent-command> [repo]
+ *   opencode-janitor <agent-command> [repo] --pr <n>
  */
 
 import type { AgentName } from '@opencode-janitor/shared';
@@ -41,6 +39,8 @@ async function runAgent(
   repoArg: string | undefined,
   scope?: string,
   input?: Record<string, unknown>,
+  note?: string,
+  focusPath?: string,
 ): Promise<void> {
   const rootOptions = program.opts<{ json?: boolean; config?: string }>();
   const json = rootOptions.json;
@@ -55,6 +55,12 @@ async function runAgent(
     }
     if (input) {
       body.input = input;
+    }
+    if (note) {
+      body.note = note;
+    }
+    if (focusPath) {
+      body.focusPath = focusPath;
     }
 
     const response = await requestJson<EnqueueReviewResponse | ErrorResponse>({
@@ -89,6 +95,8 @@ async function runAgent(
           agent,
           ...(scope ? { scope } : {}),
           ...(input ? { input } : {}),
+          ...(note ? { note } : {}),
+          ...(focusPath ? { focusPath } : {}),
         }),
       );
       return;
@@ -125,6 +133,8 @@ export function registerAgentCommands(program: Command): void {
       invocation.repoArg,
       invocation.scope,
       invocation.input,
+      invocation.note,
+      invocation.focusPath,
     );
   });
 }

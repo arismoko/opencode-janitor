@@ -1,9 +1,12 @@
 import { Database } from 'bun:sqlite';
 import { describe, expect, it } from 'bun:test';
+import { AGENT_IDS } from '@opencode-janitor/shared';
 import { z } from 'zod';
 import { createTriggerStateStore } from '../state-store';
 import { COMMIT_TRIGGER_MODULE } from './commit';
 import { MANUAL_TRIGGER_MODULE } from './manual';
+
+const defaultAgent = AGENT_IDS[0];
 
 describe('trigger modules', () => {
   it('commit probe emits on first seen head and not on unchanged head', async () => {
@@ -28,18 +31,20 @@ describe('trigger modules', () => {
 
   it('manual module builds payload from request input', async () => {
     const payload = await MANUAL_TRIGGER_MODULE.fromManualRequest!({
-      agent: 'janitor',
+      agent: defaultAgent,
       scope: 'pr',
       input: { prNumber: 123 },
       note: 'please review',
+      focusPath: 'src/features/payments',
       sha: 'abc',
       prNumber: 123,
     });
 
-    expect(payload.agent).toBe('janitor');
+    expect(payload.agent).toBe(defaultAgent);
     expect(payload.requestedScope).toBe('pr');
     expect(payload.input).toEqual({ prNumber: 123 });
     expect(payload.note).toBe('please review');
+    expect(payload.focusPath).toBe('src/features/payments');
     expect(payload.sha).toBe('abc');
     expect(payload.prNumber).toBe(123);
   });

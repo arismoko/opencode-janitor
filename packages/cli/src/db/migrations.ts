@@ -1,5 +1,5 @@
 /**
- * Schema initialisation for the janitor SQLite database.
+ * Schema initialisation for the review SQLite database.
  *
  * All tables use CREATE IF NOT EXISTS — safe to call on every startup.
  * No versioned migration chain: this is a greenfield schema with zero

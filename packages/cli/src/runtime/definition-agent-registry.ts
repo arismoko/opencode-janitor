@@ -26,6 +26,20 @@ function buildTriggerMetadata(input: PrepareContextInput): string[] {
   return metadata;
 }
 
+function buildManualContextFields(input: PrepareContextInput): {
+  userInstruction?: string;
+  focusPath?: string;
+} {
+  if (input.trigger.kind !== 'manual') {
+    return {};
+  }
+
+  return {
+    ...(input.trigger.note ? { userInstruction: input.trigger.note } : {}),
+    ...(input.trigger.focusPath ? { focusPath: input.trigger.focusPath } : {}),
+  };
+}
+
 function toSharedTriggerContext(input: PrepareContextInput): TriggerContext {
   return {
     trigger: input.trigger.kind,
@@ -51,6 +65,7 @@ function buildPreparedContext(
     scopeExclude: input.config.scope.exclude,
     maxFindings: input.config.agents[agent].maxFindings,
   };
+  const manualContextFields = buildManualContextFields(input);
 
   if (scope === 'repo') {
     const reviewContext = buildReviewRunContext({
@@ -65,6 +80,7 @@ function buildPreparedContext(
         mode: 'repo',
         label: 'Manual repo-wide analysis',
         metadata: ['Trigger: manual', 'Mode: full codebase inspection'],
+        ...manualContextFields,
       },
     });
 
@@ -92,6 +108,7 @@ function buildPreparedContext(
       patch: input.trigger.commitContext.patch,
       patchTruncated: input.trigger.commitContext.patchTruncated,
       metadata: buildTriggerMetadata(input),
+      ...manualContextFields,
     },
   });
 

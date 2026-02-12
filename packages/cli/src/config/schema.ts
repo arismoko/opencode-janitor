@@ -9,6 +9,7 @@ import {
   AGENTS,
   type AgentId,
   AgentRuntimeConfig,
+  PermissionExtensionsSchema,
   ScopeConfig,
   TRIGGER_IDS,
   TRIGGERS,
@@ -52,6 +53,7 @@ export const OpencodeSection = z.object({
   serverHost: z.string().default('127.0.0.1'),
   serverPort: z.number().int().min(1).max(65535).default(4096),
   serverStartTimeoutMs: z.number().int().min(1000).default(8000),
+  permissionExtensions: PermissionExtensionsSchema.optional(),
 });
 
 export const ScopeSection = ScopeConfig;

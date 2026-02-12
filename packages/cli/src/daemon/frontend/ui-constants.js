@@ -4,6 +4,7 @@ export const BADGE = {
   running: ['#5BAF6C', 'rgba(91,175,108,.14)'],
   succeeded: ['#5BAF6C', 'rgba(91,175,108,.14)'],
   failed: ['#E86A6A', 'rgba(232,106,106,.14)'],
+  cancelled: ['#9C9690', 'rgba(156,150,144,.14)'],
   queued: ['#D49B54', 'rgba(212,155,84,.14)'],
   skipped: ['#9C9690', 'rgba(156,150,144,.14)'],
 };

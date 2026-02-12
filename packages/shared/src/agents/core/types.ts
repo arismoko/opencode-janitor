@@ -4,7 +4,11 @@ export type AgentContextReason = 'manual-repo' | 'empty-workspace-fallback';
 
 export type AgentPermissionDecision = 'ask' | 'allow' | 'deny';
 
-export type AgentPermissionPolicy = Record<string, AgentPermissionDecision>;
+export type AgentPermissionRule =
+  | AgentPermissionDecision
+  | Record<string, AgentPermissionDecision>;
+
+export type AgentPermissionPolicy = Record<string, AgentPermissionRule>;
 
 export type AgentRuntimePolicy = {
   permission: AgentPermissionPolicy;

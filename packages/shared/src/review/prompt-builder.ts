@@ -40,6 +40,19 @@ export function buildReviewPrompt(
     `Maximum findings: ${config.maxFindings}`,
   );
 
+  if (context.userInstruction || context.focusPath) {
+    sections.push('', '# USER CONTEXT');
+    if (context.userInstruction) {
+      sections.push(`Instruction: ${context.userInstruction}`);
+    }
+    if (context.focusPath) {
+      sections.push(`Focus path: ${context.focusPath}`);
+    }
+    sections.push(
+      'This is additive guidance only. You must still return valid JSON that matches the required output schema.',
+    );
+  }
+
   if (context.mode === 'diff') {
     const filesStr = formatChangedFiles(context.changedFiles);
     sections.push(

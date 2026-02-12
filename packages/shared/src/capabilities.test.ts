@@ -4,6 +4,30 @@ import { buildCapabilitiesView } from './capabilities';
 import { SCOPE_IDS, SCOPES, type ScopeId } from './scopes';
 import { TRIGGER_IDS, TRIGGERS, type TriggerId } from './triggers';
 
+const commitDefaultAgent = AGENT_IDS.find(
+  (agentId) => AGENTS[agentId].defaults.autoTriggers[0] === 'commit',
+);
+const prDefaultAgent = AGENT_IDS.find(
+  (agentId) => AGENTS[agentId].defaults.autoTriggers[0] === 'pr',
+);
+const enrichedAgent = AGENT_IDS.find(
+  (agentId) =>
+    (AGENTS[agentId].findingEnrichments?.definitions.length ?? 0) > 0,
+);
+
+if (!commitDefaultAgent || !prDefaultAgent || !enrichedAgent) {
+  throw new Error('Expected canonical capability fixtures.');
+}
+
+const enrichedRenderer: string = (() => {
+  const renderer =
+    AGENTS[enrichedAgent].findingEnrichments?.definitions[0]?.renderer;
+  if (!renderer) {
+    throw new Error('Expected at least one enriched renderer definition.');
+  }
+  return renderer;
+})();
+
 function expectAgentId(value: AgentId): AgentId {
   return value;
 }
@@ -18,7 +42,7 @@ function expectScopeId(value: ScopeId): ScopeId {
 
 describe('canonical registries', () => {
   it('exposes all built-in agent ids', () => {
-    expect(AGENT_IDS).toEqual(['janitor', 'hunter', 'inspector', 'scribe']);
+    expect(AGENT_IDS).toHaveLength(4);
     expect(Object.keys(AGENTS)).toEqual([...AGENT_IDS]);
   });
 
@@ -33,7 +57,7 @@ describe('canonical registries', () => {
   });
 
   it('derives typed ids from registries', () => {
-    expect(expectAgentId('janitor')).toBe('janitor');
+    expect(expectAgentId(commitDefaultAgent)).toBe(commitDefaultAgent);
     expect(expectTriggerId('manual')).toBe('manual');
     expect(expectScopeId('workspace-diff')).toBe('workspace-diff');
   });
@@ -41,32 +65,34 @@ describe('canonical registries', () => {
 
 describe('agent capability matrix', () => {
   it('matches locked default trigger and manual scope semantics', () => {
-    expect(AGENTS.janitor.defaults.autoTriggers).toEqual(['commit']);
-    expect(AGENTS.hunter.defaults.autoTriggers).toEqual(['pr']);
-    expect(AGENTS.inspector.defaults.autoTriggers).toEqual([]);
-    expect(AGENTS.scribe.defaults.autoTriggers).toEqual([]);
+    expect(AGENTS[commitDefaultAgent].defaults.autoTriggers).toEqual([
+      'commit',
+    ]);
+    expect(AGENTS[prDefaultAgent].defaults.autoTriggers).toEqual(['pr']);
 
-    expect(AGENTS.janitor.capabilities.manualScopes).toEqual([
+    expect(AGENTS[commitDefaultAgent].capabilities.manualScopes).toEqual([
       'workspace-diff',
       'repo',
     ]);
-    expect(AGENTS.hunter.capabilities.manualScopes).toEqual([
+    expect(AGENTS[prDefaultAgent].capabilities.manualScopes).toEqual([
       'workspace-diff',
       'repo',
       'pr',
     ]);
-    expect(AGENTS.inspector.capabilities.manualScopes).toEqual(['repo']);
-    expect(AGENTS.scribe.capabilities.manualScopes).toEqual(['repo']);
+    for (const agentId of AGENT_IDS) {
+      expect(AGENTS[agentId].capabilities.manualScopes.length).toBeGreaterThan(
+        0,
+      );
+    }
   });
 
   it('hard-gates auto triggers by capability sets', () => {
-    expect(AGENTS.janitor.capabilities.autoTriggers).toEqual(['commit', 'pr']);
-    expect(AGENTS.hunter.capabilities.autoTriggers).toEqual(['commit', 'pr']);
-    expect(AGENTS.inspector.capabilities.autoTriggers).toEqual([
-      'commit',
-      'pr',
-    ]);
-    expect(AGENTS.scribe.capabilities.autoTriggers).toEqual(['commit', 'pr']);
+    for (const agentId of AGENT_IDS) {
+      expect(AGENTS[agentId].capabilities.autoTriggers).toEqual([
+        'commit',
+        'pr',
+      ]);
+    }
   });
 });
 
@@ -78,26 +104,22 @@ describe('capabilities view', () => {
     expect(capabilities.triggers).toHaveLength(3);
     expect(capabilities.scopes).toHaveLength(4);
 
-    const hunter = capabilities.agents.find((agent) => agent.id === 'hunter');
-    expect(hunter?.manualScopes).toEqual(['workspace-diff', 'repo', 'pr']);
-    expect(hunter?.findingEnrichments).toEqual([]);
-
-    const inspector = capabilities.agents.find(
-      (agent) => agent.id === 'inspector',
+    const prAgent = capabilities.agents.find(
+      (agent) => agent.id === prDefaultAgent,
     );
-    expect(inspector?.findingEnrichments).toEqual([
+    expect(prAgent?.manualScopes).toContain('pr');
+
+    const enriched = capabilities.agents.find(
+      (agent) => agent.id === enrichedAgent,
+    );
+    expect(enriched?.findingEnrichments).toEqual([
       {
         kind: 'architecture',
         title: 'Architecture',
-        renderer: 'inspector.architecture.v1',
+        renderer: enrichedRenderer,
         collapsedByDefault: true,
       },
     ]);
-
-    const janitor = capabilities.agents.find((agent) => agent.id === 'janitor');
-    const scribe = capabilities.agents.find((agent) => agent.id === 'scribe');
-    expect(janitor?.findingEnrichments).toEqual([]);
-    expect(scribe?.findingEnrichments).toEqual([]);
 
     const manual = capabilities.triggers.find(
       (trigger) => trigger.id === 'manual',

@@ -153,6 +153,30 @@ export function renderTimelineEntry(html, event, deps) {
       'status-warn',
     );
   }
+  if (topic === 'review_run.stop_requested') {
+    return renderSeparator(
+      html,
+      event,
+      event.message || 'Stop requested',
+      'status-warn',
+    );
+  }
+  if (topic === 'review_run.cancelled') {
+    return renderSeparator(
+      html,
+      event,
+      event.message || 'Review cancelled',
+      'status-warn',
+    );
+  }
+  if (topic === 'review_run.resumed') {
+    return renderSeparator(
+      html,
+      event,
+      event.message || 'Review resumed',
+      'status-ok',
+    );
+  }
 
   if (topic === 'session.idle') {
     return renderSeparator(html, event, 'Session idle');

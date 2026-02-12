@@ -36,6 +36,8 @@ export function CapabilityDrivenManualModal({
   const [agentId, setAgentId] = useState('');
   const [scopeId, setScopeId] = useState('');
   const [inputs, setInputs] = useState({});
+  const [note, setNote] = useState('');
+  const [focusPath, setFocusPath] = useState('');
   const [error, setError] = useState('');
 
   useEffect(() => {
@@ -48,6 +50,8 @@ export function CapabilityDrivenManualModal({
       setAgentId('');
       setScopeId('');
       setInputs({});
+      setNote('');
+      setFocusPath('');
       return;
     }
 
@@ -56,6 +60,8 @@ export function CapabilityDrivenManualModal({
     setAgentId(nextAgent);
     setScopeId(nextScope);
     setInputs({});
+    setNote('');
+    setFocusPath('');
     setError('');
   }, [pickerRepoId, capabilities]);
 
@@ -96,6 +102,8 @@ export function CapabilityDrivenManualModal({
         agent: selectedAgent.id,
         ...(selectedScope ? { scope: selectedScope } : {}),
         ...(Object.keys(builtInput).length > 0 ? { input: builtInput } : {}),
+        ...(note.trim().length > 0 ? { note: note.trim() } : {}),
+        ...(focusPath.trim().length > 0 ? { focusPath: focusPath.trim() } : {}),
       });
       setPickerRepoId(null);
     } catch (submitError) {
@@ -172,6 +180,32 @@ export function CapabilityDrivenManualModal({
               </label>
             `,
           )}
+
+          <label class="muted" style="font-size:12px; display:grid; gap:4px;">
+            Instruction (optional)
+            <textarea
+              rows="3"
+              value=${note}
+              placeholder="Optional instruction for this run"
+              onInput=${(event) => {
+                setNote(event.currentTarget.value);
+                setError('');
+              }}
+            ></textarea>
+          </label>
+
+          <label class="muted" style="font-size:12px; display:grid; gap:4px;">
+            Focus path (optional)
+            <input
+              type="text"
+              value=${focusPath}
+              placeholder="src/features/payments"
+              onInput=${(event) => {
+                setFocusPath(event.currentTarget.value);
+                setError('');
+              }}
+            />
+          </label>
 
           ${
             error

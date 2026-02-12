@@ -7,19 +7,13 @@ import {
 
 describe('finding enrichment renderer registry', () => {
   it('loads renderer module using namespaced key convention', async () => {
-    const initial = resolveFindingEnrichmentRenderer(
-      'inspector.architecture.v1',
-    );
+    const initial = resolveFindingEnrichmentRenderer('generic.smoke.v1');
     expect(initial).toBe(fallbackRenderer);
 
-    const loaded = await ensureFindingEnrichmentRenderer(
-      'Inspector.Architecture.V1',
-    );
+    const loaded = await ensureFindingEnrichmentRenderer('Generic.Smoke.V1');
     expect(typeof loaded).toBe('function');
 
-    const resolved = resolveFindingEnrichmentRenderer(
-      'inspector.architecture.v1',
-    );
+    const resolved = resolveFindingEnrichmentRenderer('generic.smoke.v1');
     expect(resolved).toBe(loaded);
     expect(resolved).not.toBe(fallbackRenderer);
   });
@@ -36,16 +30,14 @@ describe('finding enrichment renderer registry', () => {
   });
 
   it('returns fallback for missing renderer modules and caches result', async () => {
-    const first = await ensureFindingEnrichmentRenderer(
-      'inspector.missing.v999',
-    );
+    const first = await ensureFindingEnrichmentRenderer('generic.missing.v999');
     const second = await ensureFindingEnrichmentRenderer(
-      'inspector.missing.v999',
+      'generic.missing.v999',
     );
 
     expect(first).toBe(fallbackRenderer);
     expect(second).toBe(fallbackRenderer);
-    expect(resolveFindingEnrichmentRenderer('inspector.missing.v999')).toBe(
+    expect(resolveFindingEnrichmentRenderer('generic.missing.v999')).toBe(
       fallbackRenderer,
     );
   });

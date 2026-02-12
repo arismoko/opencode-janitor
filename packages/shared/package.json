@@ -8,9 +8,11 @@
   "license": "MIT",
   "private": true,
   "scripts": {
-    "build": "tsc --noEmit",
-    "typecheck": "tsc --noEmit",
-    "test": "bun test"
+    "generate:agents": "bun run scripts/generate-agent-manifest.ts",
+    "check:agents-manifest": "bun run scripts/generate-agent-manifest.ts --check",
+    "build": "bun run check:agents-manifest && tsc --noEmit",
+    "typecheck": "bun run check:agents-manifest && tsc --noEmit",
+    "test": "bun run check:agents-manifest && bun test"
   },
   "dependencies": {
     "zod": "^4.1.8"

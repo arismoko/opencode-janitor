@@ -5,6 +5,7 @@ import { createCapabilitiesRoutes } from './routes/capabilities';
 import { createDashboardRoutes } from './routes/dashboard';
 import { createEventRoutes } from './routes/events';
 import { createHealthRoutes } from './routes/health';
+import { createPrRoutes } from './routes/prs';
 import { createReviewRoutes } from './routes/reviews';
 import type {
   DaemonStatusSnapshot,
@@ -24,6 +25,7 @@ export function buildRouteMap(options: SocketServerOptions): RouteMap {
     ...createEventRoutes(options.event),
     ...createDashboardRoutes(options.dashboard),
     ...createCapabilitiesRoutes(options.capabilities),
+    ...createPrRoutes(options.pr),
   ];
   const map: RouteMap = new Map();
   for (const route of routes) {

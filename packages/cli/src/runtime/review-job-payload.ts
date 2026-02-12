@@ -19,6 +19,7 @@ export interface ManualJobPayload {
   requestedScope?: ScopeId;
   input?: Record<string, unknown>;
   note?: string;
+  focusPath?: string;
   sha?: string;
   prNumber?: number;
 }
@@ -53,6 +54,7 @@ export function buildManualPayload(payload: {
   requestedScope?: ScopeId;
   input?: Record<string, unknown>;
   note?: string;
+  focusPath?: string;
   sha?: string;
   prNumber?: number;
 }): ManualJobPayload {
@@ -63,6 +65,7 @@ export function buildManualPayload(payload: {
       : {}),
     ...(payload.input ? { input: payload.input } : {}),
     ...(payload.note ? { note: payload.note } : {}),
+    ...(payload.focusPath ? { focusPath: payload.focusPath } : {}),
     ...(payload.sha ? { sha: payload.sha } : {}),
     ...(payload.prNumber !== undefined ? { prNumber: payload.prNumber } : {}),
   };
@@ -187,6 +190,7 @@ export function parseReviewJobPayload(
     requestedScope: parseOptionalScopeId(payload, 'requestedScope'),
     input: parseOptionalRecord(payload, 'input'),
     note: parseOptionalString(payload, 'note'),
+    focusPath: parseOptionalString(payload, 'focusPath'),
     sha: parseOptionalString(payload, 'sha'),
     prNumber: parseOptionalPositiveInt(payload, 'prNumber'),
   });

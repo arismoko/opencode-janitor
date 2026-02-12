@@ -12,10 +12,12 @@ import {
 import { useCapabilities } from './state/use-capabilities.js';
 import { useDashboardData } from './state/use-dashboard-data.js';
 import { useFlash } from './state/use-flash.js';
+import { usePrsData } from './state/use-prs-data.js';
 import { useRepoSelection } from './state/use-repo-selection.js';
 import { useReportDetail } from './state/use-report-detail.js';
 import { useReportSelection } from './state/use-report-selection.js';
 import { renderActivityView } from './views/activity-view.js';
+import { renderPrsView } from './views/prs-view.js';
 import { renderReportsView } from './views/reports-view.js';
 
 const html = htm.bind(h);
@@ -122,6 +124,40 @@ function App() {
     }
   };
 
+  const stopReview = async (reviewRunId) => {
+    try {
+      const result = await api('/v1/reviews/stop', {
+        method: 'POST',
+        body: JSON.stringify({ reviewRunId }),
+      });
+      if (result.stopped) {
+        showFlash('Stop requested');
+      } else {
+        showFlash('Run is not stoppable in current state', 'error');
+      }
+      refreshSnapshot().catch(() => {});
+    } catch (error) {
+      showFlash(error.message || String(error), 'error');
+    }
+  };
+
+  const resumeReview = async (reviewRunId) => {
+    try {
+      const result = await api('/v1/reviews/resume', {
+        method: 'POST',
+        body: JSON.stringify({ reviewRunId }),
+      });
+      if (result.resumed) {
+        showFlash('Run resumed');
+      } else {
+        showFlash('Run is not resumable in-place', 'error');
+      }
+      refreshSnapshot().catch(() => {});
+    } catch (error) {
+      showFlash(error.message || String(error), 'error');
+    }
+  };
+
   const clearActivityLog = async () => {
     try {
       const deleted = await clearEvents();
@@ -133,6 +169,23 @@ function App() {
 
   const { runningJobs, queuedJobs } = selectJobCounts(repos);
   const filteredActivity = selectFilteredActivity(events, activityFilter);
+
+  const prsData = usePrsData({
+    isPrsView: view === 'prs',
+    selectedRepo,
+    onError(error) {
+      showFlash(error.message || String(error), 'error');
+    },
+  });
+
+  const runPrAction = async (label, action) => {
+    try {
+      await action();
+      showFlash(label);
+    } catch (error) {
+      showFlash(error.message || String(error), 'error');
+    }
+  };
 
   return html`
     <div id="root">
@@ -173,6 +226,12 @@ function App() {
         >
           Activity
         </button>
+        <button
+          class=${`tab ${view === 'prs' ? 'active' : ''}`}
+          onClick=${() => setView('prs')}
+        >
+          PRs
+        </button>
       </nav>
 
       <main class="content">
@@ -188,12 +247,15 @@ function App() {
             detailMode,
             setDetailMode,
             deleteReport,
+            stopReview,
+            resumeReview,
             setSelectedReportId,
             transcript,
             sessionEvents,
             timelineBlocks,
             sessionHasMore,
             loadMoreSessionEvents,
+            showFlash,
           })
         }
         ${
@@ -203,6 +265,29 @@ function App() {
             filteredActivity,
             clearActivityLog,
             setActivityFilter,
+          })
+        }
+        ${
+          view === 'prs' &&
+          renderPrsView({
+            html,
+            selectedRepo,
+            prs: prsData,
+            onSelectPr: prsData.setSelectedPrNumber,
+            onBucketChange: prsData.setBucket,
+            onQueryInput: prsData.setQuery,
+            onMerge: (method) =>
+              runPrAction('PR merge requested', () => prsData.mergePr(method)),
+            onAddComment: (body) =>
+              runPrAction('PR comment posted', () => prsData.addComment(body)),
+            onRequestReviewers: (reviewers) =>
+              runPrAction('Reviewers requested', () =>
+                prsData.requestReviewers(reviewers),
+              ),
+            onReply: (commentId, body) =>
+              runPrAction('Reply posted', () =>
+                prsData.replyToComment(commentId, body),
+              ),
           })
         }
       </main>

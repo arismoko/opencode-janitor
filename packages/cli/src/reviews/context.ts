@@ -292,10 +292,20 @@ export function buildTriggerContextFromPayload(
     typeof payload.sha === 'string' && payload.sha.length > 0
       ? payload.sha
       : resolveHeadSha(repoPath);
+  const note =
+    typeof payload.note === 'string' && payload.note.trim().length > 0
+      ? payload.note.trim()
+      : undefined;
+  const focusPath =
+    typeof payload.focusPath === 'string' && payload.focusPath.trim().length > 0
+      ? payload.focusPath.trim()
+      : undefined;
 
   return {
     kind: 'manual',
     commitSha: manualSha,
     commitContext: buildWorkspaceCommitContext(repoPath, manualSha),
+    ...(note ? { note } : {}),
+    ...(focusPath ? { focusPath } : {}),
   };
 }

@@ -1,6 +1,7 @@
 import { Database } from 'bun:sqlite';
 import { describe, expect, it } from 'bun:test';
 import type { Event } from '@opencode-ai/sdk';
+import { AGENT_IDS } from '@opencode-janitor/shared';
 import { ensureSchema } from '../db/migrations';
 import { listEvents } from '../db/queries/event-queries';
 import { addRepo } from '../db/queries/repo-queries';
@@ -10,6 +11,8 @@ import {
 } from '../db/queries/review-run-queries';
 import { insertTriggerEvent } from '../db/queries/trigger-event-queries';
 import { createSessionEventProjector } from './session-event-projector';
+
+const defaultAgent = AGENT_IDS[0];
 
 describe('session-event-projector', () => {
   it('maps structured message.part.updated events into journal topics', () => {
@@ -28,7 +31,7 @@ describe('session-event-projector', () => {
       triggerId: 'manual',
       eventKey: 'manual-1',
       subject: 'manual:auto',
-      payloadJson: JSON.stringify({ agent: 'janitor' }),
+      payloadJson: JSON.stringify({ agent: defaultAgent }),
       source: 'cli',
       detectedAt: Date.now(),
     });
@@ -36,7 +39,7 @@ describe('session-event-projector', () => {
     const run = enqueueReviewRun(db, {
       repoId: repo.id,
       triggerEventId: inserted.eventId,
-      agent: 'janitor',
+      agent: defaultAgent,
       scope: 'repo',
       scopeInputJson: '{}',
       maxAttempts: 3,
@@ -156,7 +159,7 @@ describe('session-event-projector', () => {
       triggerId: 'manual',
       eventKey: 'manual-2',
       subject: 'manual:auto',
-      payloadJson: JSON.stringify({ agent: 'janitor' }),
+      payloadJson: JSON.stringify({ agent: defaultAgent }),
       source: 'cli',
       detectedAt: Date.now(),
     });
@@ -165,7 +168,7 @@ describe('session-event-projector', () => {
     enqueueReviewRun(db, {
       repoId: repo.id,
       triggerEventId: inserted.eventId,
-      agent: 'janitor',
+      agent: defaultAgent,
       scope: 'repo',
       scopeInputJson: '{}',
       maxAttempts: 3,

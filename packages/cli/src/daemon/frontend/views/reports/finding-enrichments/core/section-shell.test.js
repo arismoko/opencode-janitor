@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'bun:test';
+import { AGENT_IDS } from '@opencode-janitor/shared';
 import {
   enrichmentKey,
   findEnrichmentDefinition,
@@ -44,15 +45,16 @@ describe('finding enrichment section shell helpers', () => {
   });
 
   it('finds enrichment definition by agent and kind', () => {
+    const agentId = AGENT_IDS[0];
     const capabilities = {
       agents: [
         {
-          id: 'inspector',
+          id: agentId,
           findingEnrichments: [
             {
               kind: 'architecture',
               title: 'Architecture',
-              renderer: 'inspector.architecture.v1',
+              renderer: 'generic.smoke.v1',
               collapsedByDefault: true,
             },
           ],
@@ -61,14 +63,14 @@ describe('finding enrichment section shell helpers', () => {
     };
 
     expect(
-      findEnrichmentDefinition(capabilities, 'inspector', 'architecture'),
+      findEnrichmentDefinition(capabilities, agentId, 'architecture'),
     ).toEqual({
       kind: 'architecture',
       title: 'Architecture',
-      renderer: 'inspector.architecture.v1',
+      renderer: 'generic.smoke.v1',
       collapsedByDefault: true,
     });
-    expect(findEnrichmentDefinition(capabilities, 'inspector', 'unknown')).toBe(
+    expect(findEnrichmentDefinition(capabilities, agentId, 'unknown')).toBe(
       null,
     );
   });

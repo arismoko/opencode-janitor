@@ -11,6 +11,20 @@ import {
   createAgentDefinition,
 } from './agent-factory';
 
+const cleanupAgentId = AGENT_IDS.find((agentId) =>
+  AGENTS[agentId].domains.includes('YAGNI'),
+);
+const bugAgentId = AGENT_IDS.find((agentId) =>
+  AGENTS[agentId].domains.includes('BUG'),
+);
+const docsAgentId = AGENT_IDS.find((agentId) =>
+  AGENTS[agentId].domains.includes('DRIFT'),
+);
+
+if (!cleanupAgentId || !bugAgentId || !docsAgentId) {
+  throw new Error('Expected canonical domain-mapped agents.');
+}
+
 // ---------------------------------------------------------------------------
 // Agent runtime policy
 // ---------------------------------------------------------------------------
@@ -63,7 +77,7 @@ describe('createAgentDefinition', () => {
   });
 
   it('includes the system prompt from the canonical definition', () => {
-    const definition = AGENTS.janitor;
+    const definition = AGENTS[cleanupAgentId];
     const def = createAgentDefinition(definition, defaultCliConfig);
 
     // System prompt must contain role text and domains
@@ -77,11 +91,11 @@ describe('createAgentDefinition', () => {
   it('applies per-agent model override from config', () => {
     const config = CliConfigSchema.parse({
       agents: {
-        janitor: { modelId: 'anthropic/claude-sonnet-4-20250514' },
+        [cleanupAgentId]: { modelId: 'anthropic/claude-sonnet-4-20250514' },
       },
     });
 
-    const def = createAgentDefinition(AGENTS.janitor, config);
+    const def = createAgentDefinition(AGENTS[cleanupAgentId], config);
 
     expect(def.config.model).toBe('anthropic/claude-sonnet-4-20250514');
   });
@@ -91,13 +105,13 @@ describe('createAgentDefinition', () => {
       opencode: { defaultModelId: 'openai/gpt-4o' },
     });
 
-    const def = createAgentDefinition(AGENTS.hunter, config);
+    const def = createAgentDefinition(AGENTS[bugAgentId], config);
 
     expect(def.config.model).toBe('openai/gpt-4o');
   });
 
   it('omits model field when neither per-agent nor default model is set', () => {
-    const def = createAgentDefinition(AGENTS.hunter, defaultCliConfig);
+    const def = createAgentDefinition(AGENTS[bugAgentId], defaultCliConfig);
 
     // defaultCliConfig has defaultModelId = '' which is falsy
     expect(def.config.model).toBeUndefined();
@@ -107,13 +121,85 @@ describe('createAgentDefinition', () => {
     const config = CliConfigSchema.parse({
       opencode: { defaultModelId: 'openai/gpt-4o' },
       agents: {
-        scribe: { modelId: 'anthropic/claude-sonnet-4-20250514' },
+        [docsAgentId]: { modelId: 'anthropic/claude-sonnet-4-20250514' },
       },
     });
 
-    const def = createAgentDefinition(AGENTS.scribe, config);
+    const def = createAgentDefinition(AGENTS[docsAgentId], config);
 
     expect(def.config.model).toBe('anthropic/claude-sonnet-4-20250514');
+  });
+
+  it('includes per-agent variant in emitted runtime config', () => {
+    const config = CliConfigSchema.parse({
+      agents: {
+        [cleanupAgentId]: { variant: 'xhigh' },
+      },
+    });
+
+    const def = createAgentDefinition(AGENTS[cleanupAgentId], config);
+
+    expect(def.config.variant).toBe('xhigh');
+  });
+
+  it('omits variant when configured as blank/whitespace', () => {
+    const config = CliConfigSchema.parse({
+      agents: {
+        [cleanupAgentId]: { variant: '   ' },
+      },
+    });
+
+    const def = createAgentDefinition(AGENTS[cleanupAgentId], config);
+
+    expect(def.config.variant).toBeUndefined();
+  });
+
+  it('merges base permission with global and per-agent extensions', () => {
+    const config = CliConfigSchema.parse({
+      opencode: {
+        permissionExtensions: {
+          'context7_*': 'ask',
+          bash: {
+            '*': 'ask',
+            'git status*': 'allow',
+          },
+        },
+      },
+      agents: {
+        [docsAgentId]: {
+          permissionExtensions: {
+            'context7_*': 'allow',
+            bash: {
+              'git *': 'allow',
+              'git push *': 'deny',
+            },
+          },
+        },
+      },
+    });
+
+    const def = createAgentDefinition(AGENTS[docsAgentId], config);
+
+    const permission = def.config.permission as Record<string, unknown>;
+    expect(permission['context7_*']).toBe('allow');
+    expect(permission.bash).toEqual({
+      '*': 'ask',
+      'git status*': 'allow',
+      'git *': 'allow',
+      'git push *': 'deny',
+    });
+    expect(permission.read).toBe(AGENTS[docsAgentId].runtime.permission.read);
+    expect(permission.list).toBe(AGENTS[docsAgentId].runtime.permission.list);
+    expect(permission.glob).toBe(AGENTS[docsAgentId].runtime.permission.glob);
+    expect(permission.grep).toBe(AGENTS[docsAgentId].runtime.permission.grep);
+    expect(permission.lsp).toBe(AGENTS[docsAgentId].runtime.permission.lsp);
+  });
+
+  it('keeps default emitted permissions when extensions are absent', () => {
+    const def = createAgentDefinition(AGENTS[docsAgentId], defaultCliConfig);
+    expect(def.config.permission).toEqual(
+      AGENTS[docsAgentId].runtime.permission,
+    );
   });
 });
 
@@ -123,7 +209,7 @@ describe('createAgentDefinition', () => {
 
 describe('buildSystemPrompt', () => {
   it('includes role, domains, and output schema sections', () => {
-    const definition = AGENTS.hunter;
+    const definition = AGENTS[bugAgentId];
     const prompt = buildSystemPrompt(definition);
 
     expect(prompt).toContain('You are The Hunter');
@@ -135,7 +221,7 @@ describe('buildSystemPrompt', () => {
   });
 
   it('includes rules section when definition has rules', () => {
-    const definition = AGENTS.janitor;
+    const definition = AGENTS[cleanupAgentId];
     const prompt = buildSystemPrompt(definition);
 
     expect(prompt).toContain('# RULES');
@@ -145,7 +231,7 @@ describe('buildSystemPrompt', () => {
 
   it('omits rules section when definition has no rules', () => {
     const definition = {
-      ...AGENTS.janitor,
+      ...AGENTS[cleanupAgentId],
       rules: undefined,
     };
     const prompt = buildSystemPrompt(definition);

@@ -4,9 +4,16 @@
  * Plugin-style: data-driven agent configuration from shared agent definitions.
  */
 import type { AgentConfig } from '@opencode-ai/sdk';
-import { AGENT_IDS, AGENTS, type AgentId } from '@opencode-janitor/shared';
+import {
+  AGENT_IDS,
+  AGENTS,
+  type AgentId,
+  PermissionDecisionSchema,
+  PermissionPatternMapSchema,
+} from '@opencode-janitor/shared';
 import { toJSONSchema, z } from 'zod';
 import type { CliConfig } from '../config/schema';
+import { mergePermissionExtensions } from './permission-merge';
 
 // ---------------------------------------------------------------------------
 // Runtime config validation
@@ -15,13 +22,18 @@ import type { CliConfig } from '../config/schema';
 export type ReviewAgentConfig = Pick<
   AgentConfig,
   'mode' | 'prompt' | 'permission' | 'maxSteps' | 'model'
->;
+> & {
+  variant?: string;
+};
 
-const PermissionDecisionSchema = z.enum(['ask', 'allow', 'deny']);
+const ReviewAgentPermissionRuleSchema = z.union([
+  PermissionDecisionSchema,
+  PermissionPatternMapSchema,
+]);
 
 const ReviewAgentPermissionSchema = z.record(
   z.string(),
-  PermissionDecisionSchema,
+  ReviewAgentPermissionRuleSchema,
 );
 
 const ReviewAgentConfigSchema = z.object({
@@ -30,6 +42,7 @@ const ReviewAgentConfigSchema = z.object({
   permission: ReviewAgentPermissionSchema.optional(),
   maxSteps: z.number().int().min(1),
   model: z.string().min(1).optional(),
+  variant: z.string().min(1).optional(),
 });
 
 function validateAgentConfig(
@@ -103,9 +116,12 @@ export function createAgentDefinition(
 ): AgentDefinition {
   const agentConfig = config.agents[definition.id];
   const modelID = agentConfig.modelId ?? config.opencode.defaultModelId;
-  const runtimePermission = definition.runtime.permission as NonNullable<
-    AgentConfig['permission']
-  >;
+  const variant = agentConfig.variant?.trim();
+  const runtimePermission = mergePermissionExtensions(
+    definition.runtime.permission,
+    config.opencode.permissionExtensions,
+    agentConfig.permissionExtensions,
+  ) as NonNullable<AgentConfig['permission']>;
 
   const runtimeConfig = validateAgentConfig(definition.id, {
     mode: 'subagent',
@@ -113,6 +129,7 @@ export function createAgentDefinition(
     permission: runtimePermission,
     maxSteps: definition.runtime.maxSteps,
     ...(modelID ? { model: modelID } : {}),
+    ...(variant ? { variant } : {}),
   });
 
   return {

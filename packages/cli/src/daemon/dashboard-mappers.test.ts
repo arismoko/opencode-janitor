@@ -1,8 +1,16 @@
 import { describe, expect, it } from 'bun:test';
+import { AGENT_IDS, AGENTS } from '@opencode-janitor/shared';
 import {
   mapDashboardFindingRow,
   mapDashboardReportSummaryRow,
 } from './dashboard-mappers';
+
+const architectureAgent =
+  AGENT_IDS.find(
+    (agentId) =>
+      (AGENTS[agentId].findingEnrichments?.definitions.length ?? 0) > 0,
+  ) ?? AGENT_IDS[0];
+const defaultAgent = AGENT_IDS[0];
 
 describe('dashboard mappers', () => {
   it('maps enrichments details_json into finding payload', () => {
@@ -12,7 +20,7 @@ describe('dashboard mappers', () => {
       repo_path: '/tmp/repo',
       trigger_event_id: 'tev_1',
       review_run_id: 'rrn_1',
-      agent: 'inspector',
+      agent: architectureAgent,
       severity: 'P1',
       domain: 'DESIGN',
       location: 'src/core.ts:10',
@@ -60,7 +68,7 @@ describe('dashboard mappers', () => {
       repo_path: '/tmp/repo',
       trigger_event_id: 'tev_1',
       review_run_id: 'rrn_1',
-      agent: 'inspector',
+      agent: architectureAgent,
       severity: 'P2',
       domain: 'SMELL',
       location: 'src/core.ts:22',
@@ -80,7 +88,7 @@ describe('dashboard mappers', () => {
       repo_path: '/tmp/repo',
       trigger_event_id: 'tev_1',
       subject: 'commit:abc',
-      agent: 'janitor',
+      agent: defaultAgent,
       session_id: null,
       status: 'succeeded',
       outcome: 'succeeded',
@@ -95,6 +103,6 @@ describe('dashboard mappers', () => {
     });
 
     expect(mapped.findingsCount).toBe(2);
-    expect(mapped.agent).toBe('janitor');
+    expect(mapped.agent).toBe(defaultAgent);
   });
 });

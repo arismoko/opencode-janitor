@@ -29,7 +29,13 @@ export interface DashboardReportSummaryRow {
   subject: string | null;
   agent: AgentName;
   session_id: string | null;
-  status: 'queued' | 'running' | 'succeeded' | 'failed' | 'skipped';
+  status:
+    | 'queued'
+    | 'running'
+    | 'succeeded'
+    | 'failed'
+    | 'cancelled'
+    | 'skipped';
   outcome:
     | 'succeeded'
     | 'failed_transient'

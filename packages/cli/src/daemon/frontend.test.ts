@@ -109,12 +109,36 @@ describe('frontend asset loading', () => {
     expect(detail?.body).toContain('export function renderReportDetail');
   });
 
+  it('loads PR dashboard frontend module assets', () => {
+    const prsView = getFrontendAsset('/_dashboard/views/prs-view.js');
+    const prsState = getFrontendAsset('/_dashboard/state/use-prs-data.js');
+    const prsList = getFrontendAsset('/_dashboard/views/prs/pr-list.js');
+    const prsDetail = getFrontendAsset('/_dashboard/views/prs/pr-detail.js');
+    const prsActions = getFrontendAsset(
+      '/_dashboard/views/prs/pr-actions-dock.js',
+    );
+    const prsThread = getFrontendAsset('/_dashboard/views/prs/pr-thread.js');
+
+    expect(prsView).toBeDefined();
+    expect(prsView?.body).toContain('export function renderPrsView');
+    expect(prsState).toBeDefined();
+    expect(prsState?.body).toContain('export function usePrsData');
+    expect(prsList).toBeDefined();
+    expect(prsList?.body).toContain('export function renderPrList');
+    expect(prsDetail).toBeDefined();
+    expect(prsDetail?.body).toContain('export function renderPrDetail');
+    expect(prsActions).toBeDefined();
+    expect(prsActions?.body).toContain('export function renderPrActionsDock');
+    expect(prsThread).toBeDefined();
+    expect(prsThread?.body).toContain('export function renderPrThread');
+  });
+
   it('auto-serves dynamically added enrichment renderer modules', () => {
     const registry = getFrontendAsset(
       '/_dashboard/views/reports/finding-enrichments/core/registry.js',
     );
     const renderer = getFrontendAsset(
-      '/_dashboard/views/reports/finding-enrichments/renderers/agents/inspector/architecture-v1.js',
+      '/_dashboard/views/reports/finding-enrichments/renderers/generic/smoke-v1.js',
     );
     expect(registry).toBeDefined();
     expect(registry?.body).toContain('ensureFindingEnrichmentRenderer');

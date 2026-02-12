@@ -29,6 +29,7 @@ export interface QueuedReviewRunRow {
   trigger_id: 'commit' | 'pr' | 'manual';
   subject: string;
   payload_json: string;
+  session_id: string | null;
 }
 
 export interface ReviewRunContext {
@@ -107,7 +108,8 @@ export function claimNextQueuedReviewRun(
             r.default_branch,
             te.trigger_id,
             te.subject,
-            te.payload_json
+            te.payload_json,
+            rr.session_id
           FROM review_runs rr
           JOIN repos r ON r.id = rr.repo_id
           JOIN trigger_events te ON te.id = rr.trigger_event_id
@@ -226,6 +228,73 @@ export function markReviewRunFailed(
       WHERE id = ?
     `,
   ).run(errorCode, errorMessage, outcome, summaryJson, nowMs(), runId);
+}
+
+export function markReviewRunCancelled(
+  db: Database,
+  runId: string,
+  errorCode: string,
+  errorMessage: string,
+): void {
+  db.query(
+    `
+      UPDATE review_runs
+      SET
+        status = 'cancelled',
+        error_code = ?,
+        error_message = ?,
+        outcome = 'cancelled',
+        finished_at = ?
+      WHERE id = ?
+    `,
+  ).run(errorCode, errorMessage, nowMs(), runId);
+}
+
+export function resumeReviewRunInPlace(db: Database, runId: string): boolean {
+  return db.transaction(() => {
+    const row = db
+      .query(
+        `
+          SELECT id
+          FROM review_runs
+          WHERE id = ?
+            AND (
+              status = 'cancelled'
+              OR (status = 'failed' AND outcome = 'cancelled')
+            )
+            AND session_id IS NOT NULL
+          LIMIT 1
+        `,
+      )
+      .get(runId) as { id: string } | null;
+
+    if (!row) {
+      return false;
+    }
+
+    db.query('DELETE FROM findings WHERE review_run_id = ?').run(runId);
+    const result = db
+      .query(
+        `
+          UPDATE review_runs
+          SET
+            status = 'queued',
+            started_at = NULL,
+            finished_at = NULL,
+            error_code = NULL,
+            error_message = NULL,
+            outcome = NULL,
+            summary_json = NULL,
+            raw_output = NULL,
+            findings_count = 0,
+            next_attempt_at = ?
+          WHERE id = ?
+        `,
+      )
+      .run(nowMs(), runId) as { changes?: number };
+
+    return (result.changes ?? 0) > 0;
+  })();
 }
 
 export function requeueReviewRun(

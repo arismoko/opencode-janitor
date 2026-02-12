@@ -11,6 +11,8 @@ export interface AgentCommandInvocation {
   repoArg?: string;
   scope?: ScopeId;
   input?: Record<string, unknown>;
+  note?: string;
+  focusPath?: string;
 }
 
 type ScopeOptionBinding = {
@@ -138,6 +140,11 @@ export function registerAgentCommandsFromRegistry(
     }
 
     const bindings = listScopeOptionBindings(agent);
+    command.option(
+      '--note <text>',
+      'Optional freeform instruction for this run',
+    );
+    command.option('--focus <path>', 'Optional path/folder to focus analysis');
     const seenFlags = new Set<string>();
     for (const binding of bindings) {
       if (seenFlags.has(binding.flag)) {
@@ -148,13 +155,23 @@ export function registerAgentCommandsFromRegistry(
     }
 
     command.action(async (repoArg: string | undefined, options: object) => {
-      const manual = resolveScopeSelection(
-        agent,
-        options as Record<string, unknown>,
-      );
+      const optionValues = options as Record<string, unknown>;
+      const manual = resolveScopeSelection(agent, optionValues);
+      const note =
+        typeof optionValues.note === 'string' &&
+        optionValues.note.trim().length > 0
+          ? optionValues.note.trim()
+          : undefined;
+      const focusPath =
+        typeof optionValues.focus === 'string' &&
+        optionValues.focus.trim().length > 0
+          ? optionValues.focus.trim()
+          : undefined;
       await handler({
         agent,
         repoArg,
+        ...(note ? { note } : {}),
+        ...(focusPath ? { focusPath } : {}),
         ...manual,
       });
     });

@@ -12,7 +12,9 @@ const SESSION_PAGE_SIZE = 500;
 const TEXT_SETTLE_MS = 1000;
 
 function isTerminal(status) {
-  return status === 'succeeded' || status === 'failed';
+  return (
+    status === 'succeeded' || status === 'failed' || status === 'cancelled'
+  );
 }
 
 function isActive(status) {

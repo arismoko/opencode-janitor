@@ -12,10 +12,13 @@
 
 - Upon failure to parse send a message to the agent's session saying their output was invalid allowing them to try again.
 
-- Allow pr triggered agents to respond directly to the PR using a comment.
+- pr triggered agents post their responses directly to the PR using a comment with a config feature to disable this feature.
 - Implement a PR tab in the frontend so users can browse/merge pull requests, make comments, request reviews and responses to comments.
+- The ability to stop, and resume sessions.
 - Allow users to implement specific context into the agents session like review this folder, or "DO NOTHING JUST SAY HI :3"
-- Allow users to use /<agent-name> to invoke the agent into responding directly.
+- Allow users to use /<agent-name> <note> to invoke the agent into responding directly to PRs (manual pr trigger).
+  - only if the comment is made by the same user who is authenticated in teh local gh cli and the repo is watched
+  - example: /hunter review this
 
-- a chat button on each finding/all findings that allows you to ask the agent for clarification/chat about their findings in the same session.
+- a chat button on each finding/all findings that allows you to ask the agent for followup about a specific finding. (Ask for clarification/review implementation)
 - a button on each finding that has the agent re-review to see if the change was effectively implemented??

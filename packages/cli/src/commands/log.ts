@@ -1,5 +1,5 @@
 /**
- * `janitor log` — print recent events from the event journal.
+ * `log` — print recent events from the event journal.
  */
 import chalk from 'chalk';
 import type { Command } from 'commander';

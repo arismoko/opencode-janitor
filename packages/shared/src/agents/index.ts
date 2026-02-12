@@ -16,13 +16,10 @@ export type {
   AgentDefinition,
   AgentPermissionDecision,
   AgentPermissionPolicy,
+  AgentPermissionRule,
   AgentRuntimePolicy,
   EnrichContextInput,
   FindingEnrichmentDefinition,
   FindingEnrichmentSection,
   ResolveManualScopeInput,
 } from './core/types';
-export * from './hunter';
-export * from './inspector';
-export * from './janitor';
-export * from './scribe';

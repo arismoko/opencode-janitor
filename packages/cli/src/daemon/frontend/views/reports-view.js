@@ -12,12 +12,15 @@ export function renderReportsView({
   detailMode,
   setDetailMode,
   deleteReport,
+  stopReview,
+  resumeReview,
   setSelectedReportId,
   transcript,
   sessionEvents,
   timelineBlocks,
   sessionHasMore,
   loadMoreSessionEvents,
+  showFlash,
 }) {
   return html`
     ${renderReportsMeta({ html, selectedRepo })}
@@ -36,11 +39,14 @@ export function renderReportsView({
         detailMode,
         setDetailMode,
         deleteReport,
+        stopReview,
+        resumeReview,
         transcript,
         sessionEvents,
         timelineBlocks,
         sessionHasMore,
         loadMoreSessionEvents,
+        showFlash,
       })}
     </section>
   `;

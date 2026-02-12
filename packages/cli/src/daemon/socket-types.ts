@@ -5,11 +5,27 @@ import type {
 } from '../db/queries/event-queries';
 import type {
   CapabilitiesResponse,
+  CommentPrRequest,
+  CommentPrResponse,
   DashboardReportDetailResponse,
   DashboardSnapshotResponse,
   DeleteReportResponse,
   EnqueueReviewRequest,
   EnqueueReviewResponse,
+  GetPrDetailRequest,
+  GetPrDetailResponse,
+  ListPrsRequest,
+  ListPrsResponse,
+  MergePrRequest,
+  MergePrResponse,
+  ReplyReviewCommentRequest,
+  ReplyReviewCommentResponse,
+  RequestReviewersRequest,
+  RequestReviewersResponse,
+  ResumeReviewRequest,
+  ResumeReviewResponse,
+  StopReviewRequest,
+  StopReviewResponse,
 } from '../ipc/protocol';
 
 export interface DaemonStatusSnapshot {
@@ -32,6 +48,10 @@ export interface ReviewApi {
   onEnqueueReview: (
     request: EnqueueReviewRequest,
   ) => Promise<EnqueueReviewResponse>;
+  onStopReview: (request: StopReviewRequest) => Promise<StopReviewResponse>;
+  onResumeReview: (
+    request: ResumeReviewRequest,
+  ) => Promise<ResumeReviewResponse>;
 }
 
 export interface EventApi {
@@ -60,6 +80,19 @@ export interface CapabilitiesApi {
   getCapabilities: () => CapabilitiesResponse;
 }
 
+export interface PrApi {
+  listPrs: (request: ListPrsRequest) => Promise<ListPrsResponse>;
+  getPrDetail: (request: GetPrDetailRequest) => Promise<GetPrDetailResponse>;
+  mergePr: (request: MergePrRequest) => Promise<MergePrResponse>;
+  commentPr: (request: CommentPrRequest) => Promise<CommentPrResponse>;
+  requestReviewers: (
+    request: RequestReviewersRequest,
+  ) => Promise<RequestReviewersResponse>;
+  replyReviewComment: (
+    request: ReplyReviewCommentRequest,
+  ) => Promise<ReplyReviewCommentResponse>;
+}
+
 export interface SocketServerOptions {
   socketPath: string;
   lifecycle: LifecycleApi;
@@ -67,6 +100,7 @@ export interface SocketServerOptions {
   event: EventApi;
   dashboard: DashboardApi;
   capabilities: CapabilitiesApi;
+  pr: PrApi;
 }
 
 export interface Route {

@@ -1,7 +1,21 @@
 import { describe, expect, it } from 'bun:test';
+import { AGENT_IDS, AGENTS } from '@opencode-janitor/shared';
 import { createAgentSpecFromDefinition } from './agent-spec-from-definition';
 
-function makeSpec(agent: 'janitor' | 'inspector') {
+const architectureAgentId = AGENT_IDS.find(
+  (agentId) =>
+    (AGENTS[agentId].findingEnrichments?.definitions.length ?? 0) > 0,
+);
+const baselineAgentId = AGENT_IDS.find(
+  (agentId) =>
+    (AGENTS[agentId].findingEnrichments?.definitions.length ?? 0) === 0,
+);
+
+if (!architectureAgentId || !baselineAgentId) {
+  throw new Error('Expected both enriched and baseline agent profiles.');
+}
+
+function makeSpec(agent: (typeof AGENT_IDS)[number]) {
   return createAgentSpecFromDefinition({
     agent,
     buildPreparedContext: () => {
@@ -21,8 +35,8 @@ const baseRun = {
 };
 
 describe('createAgentSpecFromDefinition.onSuccess', () => {
-  it('serializes inspector architecture as generic enrichments array', () => {
-    const spec = makeSpec('inspector');
+  it('serializes architecture metadata as generic enrichments array', () => {
+    const spec = makeSpec(architectureAgentId);
     const rows = spec.onSuccess({
       run: baseRun,
       reviewRunId: baseRun.id,
@@ -66,8 +80,8 @@ describe('createAgentSpecFromDefinition.onSuccess', () => {
     expect(details.enrichments?.[0]?.version).toBe(1);
   });
 
-  it('keeps non-enriched agents details_json as empty object', () => {
-    const spec = makeSpec('janitor');
+  it('keeps baseline agents details_json as empty object', () => {
+    const spec = makeSpec(baselineAgentId);
     const rows = spec.onSuccess({
       run: baseRun,
       reviewRunId: baseRun.id,

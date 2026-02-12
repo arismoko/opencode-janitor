@@ -2,6 +2,7 @@ import type { Database } from 'bun:sqlite';
 import type { OpencodeClient } from '@opencode-ai/sdk';
 import type { AgentName } from '@opencode-janitor/shared';
 import type { CliConfig } from '../config/schema';
+import { appendEvent } from '../db/queries/event-queries';
 import type { QueuedReviewRunRow } from '../db/queries/review-run-queries';
 import { markReviewRunRunning } from '../db/queries/review-run-queries';
 import { buildTriggerContextFromPayload } from '../reviews/context';
@@ -13,8 +14,15 @@ import {
   promptReviewAsync,
 } from '../reviews/runner';
 import type { AgentRuntimeRegistry } from '../runtime/agent-runtime-registry';
-import type { AgentRuntimeSpec } from '../runtime/agent-runtime-spec';
+import type {
+  AgentRuntimeSpec,
+  PersistableFindingRow,
+} from '../runtime/agent-runtime-spec';
 import type { SessionCompletionBus } from '../runtime/session-completion-bus';
+import {
+  type PrReviewCommentResult,
+  postPrReviewComment,
+} from './pr-review-comment';
 import { classifyCompletionFailure } from './retry-policy';
 import {
   buildFindingsFromParsedOutput,
@@ -48,6 +56,11 @@ interface ProcessorRunnerDeps {
   fetchAssistantOutput: typeof fetchAssistantOutput;
   promptReviewAsync: typeof promptReviewAsync;
 }
+
+type PrReviewCommentPublisher = (
+  run: Pick<QueuedReviewRunRow, 'id' | 'agent' | 'path' | 'payload_json'>,
+  findings: PersistableFindingRow[],
+) => Promise<PrReviewCommentResult>;
 
 export interface ReviewRunProcessor {
   process(
@@ -100,12 +113,20 @@ export async function executeSession(
   runner: ProcessorRunnerDeps,
   onSessionCreated?: (sessionId: string) => void,
 ): Promise<SessionResult> {
-  const sessionId = await runner.createReviewSession(deps.client, {
-    title: `[${prepared.spec.agent}] ${run.subject || run.id}`,
-    directory: run.path,
-  });
+  const existingSessionId =
+    typeof run.session_id === 'string' && run.session_id.length > 0
+      ? run.session_id
+      : undefined;
+  const sessionId =
+    existingSessionId ??
+    (await runner.createReviewSession(deps.client, {
+      title: `[${prepared.spec.agent}] ${run.subject || run.id}`,
+      directory: run.path,
+    }));
 
-  onSessionCreated?.(sessionId);
+  if (!existingSessionId) {
+    onSessionCreated?.(sessionId);
+  }
 
   const completion = deps.completionBus.waitFor(sessionId, {
     directory: run.path,
@@ -143,6 +164,7 @@ export interface CreateReviewRunProcessorOptions {
   completionBus: SessionCompletionBus;
   persistence: ReviewRunPersistenceService;
   runner?: Partial<ProcessorRunnerDeps>;
+  prCommentPublisher?: PrReviewCommentPublisher;
 }
 
 export function createReviewRunProcessor(
@@ -155,6 +177,7 @@ export function createReviewRunProcessor(
     promptReviewAsync,
     ...options.runner,
   };
+  const publishPrComment = options.prCommentPublisher ?? postPrReviewComment;
 
   return {
     async process(run, activeSessions) {
@@ -166,6 +189,11 @@ export function createReviewRunProcessor(
 
       let sessionId: string | undefined;
       try {
+        if (run.session_id) {
+          sessionId = run.session_id;
+          activeSessions.set(run.id, { sessionId, directory: run.path });
+        }
+
         const session = await executeSession(
           options,
           run,
@@ -190,6 +218,41 @@ export function createReviewRunProcessor(
           session.rawOutput,
         );
         options.persistence.persistSucceeded(run, session, findings);
+
+        if (run.trigger_id === 'pr' && options.config.triggers.pr.postComment) {
+          const result = await publishPrComment(run, findings);
+          if (result.ok) {
+            appendEvent(options.db, {
+              eventType: 'review_run.pr_comment_posted',
+              repoId: run.repo_id,
+              triggerEventId: run.trigger_event_id,
+              reviewRunId: run.id,
+              message: `Posted PR comment for review run ${run.id}`,
+              payload: {
+                agent: run.agent,
+                prNumber: result.prNumber,
+                reviewRunId: run.id,
+              },
+            });
+          } else {
+            appendEvent(options.db, {
+              eventType: 'review_run.pr_comment_failed',
+              level: 'warn',
+              repoId: run.repo_id,
+              triggerEventId: run.trigger_event_id,
+              reviewRunId: run.id,
+              message: `Failed to post PR comment for review run ${run.id}: ${result.error}`,
+              payload: {
+                agent: run.agent,
+                ...(result.prNumber !== undefined
+                  ? { prNumber: result.prNumber }
+                  : {}),
+                error: result.error,
+                reviewRunId: run.id,
+              },
+            });
+          }
+        }
       } catch (error) {
         if (sessionId) {
           options.completionBus.cancel(sessionId, 'review run failed');

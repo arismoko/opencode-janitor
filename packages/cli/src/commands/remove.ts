@@ -1,5 +1,5 @@
 /**
- * `janitor remove <repoOrId>` — remove a tracked repository.
+ * `remove <repoOrId>` — remove a tracked repository.
  */
 import { existsSync } from 'node:fs';
 import { resolve } from 'node:path';

@@ -23,7 +23,7 @@ export const AGENT_NAMES: readonly AgentName[] = AGENT_IDS;
  * from their own config schemas.
  */
 export interface AgentProfile {
-  /** Agent name used for registration (e.g. 'janitor', 'hunter') */
+  /** Agent name used for registration. */
   name: AgentName;
   /** Human-readable description */
   description: string;

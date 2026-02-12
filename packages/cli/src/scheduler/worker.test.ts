@@ -1,5 +1,6 @@
 import { Database } from 'bun:sqlite';
 import { describe, expect, it } from 'bun:test';
+import { AGENT_IDS } from '@opencode-janitor/shared';
 import { ensureSchema } from '../db/migrations';
 import { listEvents } from '../db/queries/event-queries';
 import { addRepo } from '../db/queries/repo-queries';
@@ -10,6 +11,8 @@ import {
 } from '../db/queries/review-run-queries';
 import { insertTriggerEvent } from '../db/queries/trigger-event-queries';
 import { createReviewRunPersistenceService } from './review-run-persistence';
+
+const defaultAgent = AGENT_IDS[0];
 
 function setupClaimedRun() {
   const db = new Database(':memory:');
@@ -35,7 +38,7 @@ function setupClaimedRun() {
   enqueueReviewRun(db, {
     repoId: repo.id,
     triggerEventId: triggerEvent.eventId,
-    agent: 'janitor',
+    agent: defaultAgent,
     scope: 'commit-diff',
     scopeInputJson: '{}',
     maxAttempts: 3,
@@ -164,6 +167,30 @@ describe('review run persistence service', () => {
     };
     expect(payload.reviewRunId).toBe(run.id);
     expect(payload.errorCode).toBe('AGENT_TERMINAL');
+
+    db.close();
+  });
+
+  it('persistFailureOrRetry marks cancelled outcomes as cancelled', () => {
+    const { db, run } = setupClaimedRun();
+
+    const persistence = createReviewRunPersistenceService({
+      db,
+      retryBackoffMs: 1_000,
+    });
+
+    persistence.persistFailureOrRetry(
+      run,
+      new Error('request cancelled by user'),
+    );
+
+    const row = getReviewRunById(db, run.id);
+    expect(row?.status).toBe('cancelled');
+    expect(row?.outcome).toBe('cancelled');
+    expect(row?.error_code).toBe('AGENT_CANCELLED');
+
+    const event = listEvents(db, 1)[0];
+    expect(event?.event_type).toBe('review_run.cancelled');
 
     db.close();
   });

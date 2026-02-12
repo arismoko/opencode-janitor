@@ -7,6 +7,11 @@ import {
 import { fmtClock } from '../../helpers.js';
 import { SEV } from '../../ui-constants.js';
 import {
+  copyTextToClipboard,
+  formatFindingAsXmlMarkdown,
+  formatFindingsAsXmlMarkdown,
+} from './finding-copy-format.js';
+import {
   enrichmentKey,
   findEnrichmentDefinition,
   normalizeEnrichmentSection,
@@ -36,13 +41,17 @@ function ReportDetailPanel({
   detailMode,
   setDetailMode,
   deleteReport,
+  stopReview,
+  resumeReview,
   transcript,
   sessionEvents,
   timelineBlocks,
   sessionHasMore,
   loadMoreSessionEvents,
+  showFlash,
 }) {
   const [toolCardsDefaultOpen, setToolCardsDefaultOpen] = useState(false);
+  const notify = typeof showFlash === 'function' ? showFlash : () => {};
   const [toolCardsToggleVersion, setToolCardsToggleVersion] = useState(0);
   const [enrichmentExpandedOverrides, setEnrichmentExpandedOverrides] =
     useState(() => new Map());
@@ -181,6 +190,29 @@ function ReportDetailPanel({
     setEnrichmentExpandedOverrides(new Map());
   }, [selectedReport?.id]);
 
+  const copyAllFindings = async () => {
+    try {
+      const findings = Array.isArray(detail?.findings) ? detail.findings : [];
+      const payload = formatFindingsAsXmlMarkdown(findings);
+      await copyTextToClipboard(payload);
+      notify(`Copied ${findings.length} findings`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      notify(`Copy failed: ${message}`, 'error');
+    }
+  };
+
+  const copySingleFinding = async (finding) => {
+    try {
+      const payload = formatFindingAsXmlMarkdown(finding);
+      await copyTextToClipboard(payload);
+      notify('Copied finding');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      notify(`Copy failed: ${message}`, 'error');
+    }
+  };
+
   return html`
     <div class="panel">
       ${
@@ -248,6 +280,39 @@ function ReportDetailPanel({
                   </button>
                 `
               }
+              ${
+                detailMode === 'findings' &&
+                Array.isArray(detail?.findings) &&
+                detail.findings.length > 0 &&
+                html`
+                  <button class="btn" onClick=${copyAllFindings}>
+                    Copy all findings
+                  </button>
+                `
+              }
+              ${
+                (selectedReport.status === 'queued' ||
+                  selectedReport.status === 'running') &&
+                html`
+                  <button
+                    class="btn"
+                    onClick=${() => stopReview(selectedReport.id)}
+                  >
+                    Stop
+                  </button>
+                `
+              }
+              ${
+                selectedReport.status === 'cancelled' &&
+                html`
+                  <button
+                    class="btn"
+                    onClick=${() => resumeReview(selectedReport.id)}
+                  >
+                    Resume
+                  </button>
+                `
+              }
               <button class="btn" onClick=${deleteReport}>Delete</button>
             </div>
           </div>
@@ -275,7 +340,15 @@ function ReportDetailPanel({
                         <strong style=${`color:${SEV[finding.severity] || '#9c9690'};`}>
                           ${finding.severity} · ${finding.domain}
                         </strong>
-                        <span class="mono subtle">${fmtClock(finding.createdAt)}</span>
+                        <div class="finding-row-actions">
+                          <span class="mono subtle">${fmtClock(finding.createdAt)}</span>
+                          <button
+                            class="btn btn-compact"
+                            onClick=${() => copySingleFinding(finding)}
+                          >
+                            Copy finding
+                          </button>
+                        </div>
                       </div>
                       <p style="margin:8px 0 6px;">${finding.evidence}</p>
                       <div class="mono" style="font-size:10px; color:var(--accent);">
@@ -393,11 +466,14 @@ export function renderReportDetail(props) {
       detailMode=${props.detailMode}
       setDetailMode=${props.setDetailMode}
       deleteReport=${props.deleteReport}
+      stopReview=${props.stopReview}
+      resumeReview=${props.resumeReview}
       transcript=${props.transcript}
       sessionEvents=${props.sessionEvents}
       timelineBlocks=${props.timelineBlocks}
       sessionHasMore=${props.sessionHasMore}
       loadMoreSessionEvents=${props.loadMoreSessionEvents}
+      showFlash=${props.showFlash}
     />
   `;
 }

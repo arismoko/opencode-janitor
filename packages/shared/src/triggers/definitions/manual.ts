@@ -13,6 +13,7 @@ const ManualTriggerPayloadSchema = z.object({
   requestedScope: z.string().optional(),
   input: z.record(z.string(), z.unknown()).optional(),
   note: z.string().optional(),
+  focusPath: z.string().optional(),
   sha: z.string().optional(),
   prNumber: z.number().int().positive().optional(),
 });
@@ -48,6 +49,10 @@ export const MANUAL_TRIGGER_DEFINITION: TriggerDefinition<
 
     if (payload.note) {
       metadata.push(`Note: ${payload.note}`);
+    }
+
+    if (payload.focusPath) {
+      metadata.push(`Focus path: ${payload.focusPath}`);
     }
 
     return {
