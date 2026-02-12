@@ -118,6 +118,7 @@ describe('frontend asset loading', () => {
       '/_dashboard/views/prs/pr-actions-dock.js',
     );
     const prsThread = getFrontendAsset('/_dashboard/views/prs/pr-thread.js');
+    const markdownUtil = getFrontendAsset('/_dashboard/utils/markdown.js');
 
     expect(prsView).toBeDefined();
     expect(prsView?.body).toContain('export function renderPrsView');
@@ -131,6 +132,10 @@ describe('frontend asset loading', () => {
     expect(prsActions?.body).toContain('export function renderPrActionsDock');
     expect(prsThread).toBeDefined();
     expect(prsThread?.body).toContain('export function renderPrThread');
+    expect(markdownUtil).toBeDefined();
+    expect(markdownUtil?.body).toContain(
+      'export function renderMarkdownContent',
+    );
   });
 
   it('auto-serves dynamically added enrichment renderer modules', () => {
