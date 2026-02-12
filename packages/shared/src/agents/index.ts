@@ -35,7 +35,3 @@ export const AGENTS = {
 export type AgentId = keyof typeof AGENTS;
 
 export const AGENT_IDS: readonly AgentId[] = Object.keys(AGENTS) as AgentId[];
-
-export function isAgentId(value: string): value is AgentId {
-  return value in AGENTS;
-}

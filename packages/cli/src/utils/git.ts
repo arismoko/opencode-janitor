@@ -10,6 +10,47 @@ export interface GitCommandResult {
   exitCode: number;
 }
 
+export function runGitWithAllowedExitCodes(
+  cwd: string,
+  args: string[],
+  allowedExitCodes: number[],
+  options?: { trimOutput?: boolean },
+): string {
+  const result = runGitCommand(cwd, args, options);
+  if (!allowedExitCodes.includes(result.exitCode)) {
+    const command = ['git', '-C', cwd, ...args].join(' ');
+    const details = result.stderr || result.stdout || 'no output';
+    throw new Error(
+      `Git command failed (${result.exitCode}): ${command}\n${details}`,
+    );
+  }
+  return result.stdout;
+}
+
+export function runGhCommand(
+  cwd: string,
+  args: string[],
+  options?: { trimOutput?: boolean },
+): GitCommandResult {
+  const proc = Bun.spawnSync({
+    cmd: ['gh', ...args],
+    cwd,
+    stdout: 'pipe',
+    stderr: 'pipe',
+    env: ghCliEnv(),
+  });
+
+  const trimOutput = options?.trimOutput !== false;
+  const stdoutRaw = proc.stdout.toString('utf8');
+  const stderrRaw = proc.stderr.toString('utf8');
+
+  return {
+    stdout: trimOutput ? stdoutRaw.trim() : stdoutRaw,
+    stderr: trimOutput ? stderrRaw.trim() : stderrRaw,
+    exitCode: proc.exitCode,
+  };
+}
+
 export function runGitCommand(
   cwd: string,
   args: string[],

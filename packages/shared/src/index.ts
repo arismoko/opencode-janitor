@@ -14,7 +14,6 @@ export * from './review/prompt-builder';
 export * as configSchemas from './schemas/config';
 export {
   AgentRuntimeConfig,
-  DiffConfig,
   ScopeConfig,
   ScopeIdSchema,
   TriggerIdSchema,

@@ -22,7 +22,3 @@ export type TriggerId = keyof typeof TRIGGERS;
 export const TRIGGER_IDS: readonly TriggerId[] = Object.keys(
   TRIGGERS,
 ) as TriggerId[];
-
-export function isTriggerId(value: string): value is TriggerId {
-  return value in TRIGGERS;
-}

@@ -13,6 +13,9 @@ export function renderReportsView({
   deleteReport,
   setSelectedReportId,
   transcript,
+  sessionEvents,
+  sessionHasMore,
+  loadMoreSessionEvents,
 }) {
   return html`
     ${renderReportsMeta({ html, selectedRepo })}
@@ -31,6 +34,9 @@ export function renderReportsView({
         setDetailMode,
         deleteReport,
         transcript,
+        sessionEvents,
+        sessionHasMore,
+        loadMoreSessionEvents,
       })}
     </section>
   `;

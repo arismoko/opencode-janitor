@@ -54,14 +54,3 @@ export const ScopeConfig = z.object({
     ]),
 });
 export type ScopeConfig = z.infer<typeof ScopeConfig>;
-
-// ---------------------------------------------------------------------------
-// Diff limits config
-// ---------------------------------------------------------------------------
-
-export const DiffConfig = z.object({
-  maxPatchBytes: z.number().int().min(10_000).default(200_000),
-  maxFilesInPatch: z.number().int().min(1).default(50),
-  maxHunksPerFile: z.number().int().min(1).default(8),
-});
-export type DiffConfig = z.infer<typeof DiffConfig>;

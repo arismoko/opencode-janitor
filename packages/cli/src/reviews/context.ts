@@ -6,58 +6,30 @@
  */
 import type { ChangedFile, CommitContext } from '@opencode-janitor/shared';
 import type { TriggerContext } from '../runtime/agent-runtime-spec';
-import { ghCliEnv, resolveDefaultBranch, resolveHeadSha } from '../utils/git';
+import {
+  resolveDefaultBranch,
+  resolveHeadSha,
+  runGhCommand,
+  runGitWithAllowedExitCodes,
+} from '../utils/git';
 
 const MAX_PATCH_CHARS = 200_000;
-
-function runGitWithAllowedExitCodes(
-  cwd: string,
-  args: string[],
-  allowedExitCodes: number[],
-): string {
-  const proc = Bun.spawnSync({
-    cmd: ['git', '-C', cwd, ...args],
-    stdout: 'pipe',
-    stderr: 'pipe',
-  });
-
-  const stdout = proc.stdout.toString('utf8').trim();
-  const stderr = proc.stderr.toString('utf8').trim();
-  if (!allowedExitCodes.includes(proc.exitCode)) {
-    const command = ['git', '-C', cwd, ...args].join(' ');
-    const details = stderr || stdout || 'no output';
-    throw new Error(
-      `Git command failed (${proc.exitCode}): ${command}\n${details}`,
-    );
-  }
-
-  return stdout;
-}
 
 function runGit(cwd: string, args: string[]): string {
   return runGitWithAllowedExitCodes(cwd, args, [0]);
 }
 
 function runGh(cwd: string, args: string[]): string {
-  const proc = Bun.spawnSync({
-    cmd: ['gh', ...args],
-    cwd,
-    stdout: 'pipe',
-    stderr: 'pipe',
-    env: ghCliEnv(),
-  });
-
-  const stdout = proc.stdout.toString('utf8').trim();
-  const stderr = proc.stderr.toString('utf8').trim();
-  if (proc.exitCode !== 0) {
+  const result = runGhCommand(cwd, args);
+  if (result.exitCode !== 0) {
     const command = ['gh', ...args].join(' ');
-    const details = stderr || stdout || 'no output';
+    const details = result.stderr || result.stdout || 'no output';
     throw new Error(
-      `GitHub command failed (${proc.exitCode}): ${command}\n${details}`,
+      `GitHub command failed (${result.exitCode}): ${command}\n${details}`,
     );
   }
 
-  return stdout;
+  return result.stdout;
 }
 
 function parseNameStatus(linesRaw: string): ChangedFile[] {

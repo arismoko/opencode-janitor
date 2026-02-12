@@ -306,17 +306,6 @@ export function deleteReviewRun(db: Database, reviewRunId: string): boolean {
   })();
 }
 
-export function getReviewRunBySessionId(
-  db: Database,
-  sessionId: string,
-): ReviewRunRow | null {
-  return (
-    (db
-      .query('SELECT * FROM review_runs WHERE session_id = ? LIMIT 1')
-      .get(sessionId) as ReviewRunRow | null) ?? null
-  );
-}
-
 export function findReviewRunContextBySessionId(
   db: Database,
   sessionId: string,

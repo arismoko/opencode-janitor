@@ -28,6 +28,7 @@ describe('trigger modules', () => {
 
   it('manual module builds payload from request input', async () => {
     const payload = await MANUAL_TRIGGER_MODULE.fromManualRequest!({
+      agent: 'janitor',
       scope: 'pr',
       input: { prNumber: 123 },
       note: 'please review',
@@ -35,11 +36,24 @@ describe('trigger modules', () => {
       prNumber: 123,
     });
 
+    expect(payload.agent).toBe('janitor');
     expect(payload.requestedScope).toBe('pr');
     expect(payload.input).toEqual({ prNumber: 123 });
     expect(payload.note).toBe('please review');
     expect(payload.sha).toBe('abc');
     expect(payload.prNumber).toBe(123);
+  });
+
+  it('manual module drops invalid fields via shared payload schema', async () => {
+    const payload = await MANUAL_TRIGGER_MODULE.fromManualRequest!({
+      agent: 'not-a-real-agent',
+      scope: 'not-a-scope',
+      input: ['bad'],
+      note: 123,
+      prNumber: -1,
+    });
+
+    expect(payload).toEqual({});
   });
 });
 

@@ -18,7 +18,6 @@ const FRONTEND_ASSET_NAMES = [
   'components/capability-driven-manual-modal.js',
   'components/dashboard-header.js',
   'components/flash-toast.js',
-  'components/manual-review-modal.js',
   'components/repo-picker.js',
   'helpers.js',
   'selectors/dashboard-selectors.js',

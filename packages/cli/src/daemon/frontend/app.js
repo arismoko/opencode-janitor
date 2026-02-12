@@ -78,7 +78,14 @@ function App() {
     selectedRepoId,
   });
 
-  const { detail, setDetail, transcript } = useReportDetail({
+  const {
+    detail,
+    setDetail,
+    sessionEvents,
+    transcript,
+    sessionHasMore,
+    loadMoreSessionEvents,
+  } = useReportDetail({
     selectedReport,
     selectedReportId,
     reportsLength: reports.length,
@@ -177,6 +184,9 @@ function App() {
             deleteReport,
             setSelectedReportId,
             transcript,
+            sessionEvents,
+            sessionHasMore,
+            loadMoreSessionEvents,
           })
         }
         ${

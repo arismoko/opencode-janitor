@@ -47,6 +47,33 @@
 - Agent commands are generated from `AGENTS` + `SCOPES` via `agent-command-factory`.
 - Scope CLI options come from scope definitions (e.g. PR scope contributes `--pr <number>`).
 
+## Session Event Model (Dashboard)
+
+- Session journal entries are projected from SDK events into typed topics:
+  - `session.delta`
+  - `session.text`
+  - `session.tool.start`
+  - `session.tool.completed`
+  - `session.tool.error`
+  - `session.step.start`
+  - `session.step.finish`
+  - `session.idle`
+  - `session.error`
+- All session topics persisted to `event_journal` must include correlated IDs from the running review context:
+  - `repoId`
+  - `triggerEventId`
+  - `reviewRunId`
+- Scheduler lifecycle topics (`review_run.succeeded`, `review_run.failed`, `review_run.requeued`) must also include `reviewRunId` and `triggerEventId` in both journal columns and payload.
+- Dashboard report detail exposes two session modes:
+  - `session` (structured timeline with tool cards, step boundaries, and lifecycle separators)
+  - `session-raw` (raw transcript view)
+
+## Dashboard Meta Semantics
+
+- Reports meta shows **Default branch** (from repo `default_branch`) instead of a generic "Branch" label.
+- Reports meta shows **Last event** from `latestEventTs`; there is no next-check field in the read model.
+- Read models do not surface legacy idle/check scheduling fields (`idleStreak`, `nextCommitCheckAt`, `nextPrCheckAt`).
+
 ## Quality Gates
 
 - Required checks:

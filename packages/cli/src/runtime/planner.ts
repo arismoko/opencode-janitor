@@ -2,7 +2,7 @@ import type { Database } from 'bun:sqlite';
 import {
   AGENTS,
   type AgentId,
-  isScopeId,
+  MANUAL_TRIGGER_DEFINITION,
   SCOPES,
   type ScopeId,
   TRIGGERS,
@@ -15,42 +15,15 @@ import {
   listTriggerEventsWithoutRuns,
 } from '../db/queries/trigger-event-queries';
 
-type ManualPayload = {
-  agent?: AgentId;
-  requestedScope?: ScopeId;
-  input?: Record<string, unknown>;
-  hasWorkspaceDiff?: boolean;
-};
-
-function parseManualPayload(payloadJson: string): ManualPayload {
+/**
+ * Parse a stored manual payload JSON string using the shared schema.
+ * Returns a partial payload on success, or `{}` on any failure.
+ */
+function parseManualPayload(payloadJson: string) {
   try {
-    const parsed = JSON.parse(payloadJson) as Record<string, unknown>;
-    const payload: ManualPayload = {};
-
-    if (typeof parsed.agent === 'string' && parsed.agent in AGENTS) {
-      payload.agent = parsed.agent as AgentId;
-    }
-
-    if (
-      typeof parsed.requestedScope === 'string' &&
-      isScopeId(parsed.requestedScope)
-    ) {
-      payload.requestedScope = parsed.requestedScope;
-    }
-
-    if (typeof parsed.hasWorkspaceDiff === 'boolean') {
-      payload.hasWorkspaceDiff = parsed.hasWorkspaceDiff;
-    }
-
-    if (
-      typeof parsed.input === 'object' &&
-      parsed.input !== null &&
-      !Array.isArray(parsed.input)
-    ) {
-      payload.input = parsed.input as Record<string, unknown>;
-    }
-
-    return payload;
+    const raw = JSON.parse(payloadJson);
+    const result = MANUAL_TRIGGER_DEFINITION.payloadSchema.safeParse(raw);
+    return result.success ? result.data : {};
   } catch {
     return {};
   }
@@ -75,8 +48,12 @@ function resolveScope(
 
   const manual = parseManualPayload(payloadJson);
   const scope = agent.resolveManualScope({
-    requestedScope: manual.requestedScope,
-    hasWorkspaceDiff: manual.hasWorkspaceDiff ?? false,
+    requestedScope: manual.requestedScope as ScopeId | undefined,
+    // hasWorkspaceDiff is computed at execution time, not stored in the
+    // payload.  At planning time we only have the serialised payload, so
+    // default to false — the runtime will re-derive it from the commit
+    // context when the review actually runs.
+    hasWorkspaceDiff: false,
     manualInput: manual.input,
     trigger: 'manual',
   });

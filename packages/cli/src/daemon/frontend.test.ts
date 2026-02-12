@@ -76,9 +76,6 @@ describe('frontend asset loading', () => {
     const header = getFrontendAsset(
       '/_dashboard/components/dashboard-header.js',
     );
-    const modal = getFrontendAsset(
-      '/_dashboard/components/manual-review-modal.js',
-    );
     const selectors = getFrontendAsset(
       '/_dashboard/selectors/dashboard-selectors.js',
     );
@@ -88,8 +85,6 @@ describe('frontend asset loading', () => {
     );
     expect(header).toBeDefined();
     expect(header?.body).toContain('export function renderDashboardHeader');
-    expect(modal).toBeDefined();
-    expect(modal?.body).toContain('export function renderManualReviewModal');
     expect(selectors).toBeDefined();
     expect(selectors?.body).toContain('export function selectFilteredActivity');
   });
@@ -116,6 +111,9 @@ describe('frontend asset loading', () => {
 
   it('returns null for unknown frontend asset path', () => {
     expect(getFrontendAsset('/_dashboard/unknown.css')).toBeNull();
+    expect(
+      getFrontendAsset('/_dashboard/components/manual-review-modal.js'),
+    ).toBeNull();
     expect(getFrontendAsset('/_dashboard/../app.js')).toBeNull();
     expect(getFrontendAsset('/v1/events')).toBeNull();
   });

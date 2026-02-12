@@ -3,6 +3,7 @@ import type { TriggerId } from '@opencode-janitor/shared';
 import type { z } from 'zod';
 import {
   getTriggerState,
+  listRepoIdsWithState,
   listTriggerStatesDue,
   upsertTriggerState,
 } from '../db/queries/trigger-state-queries';
@@ -20,6 +21,8 @@ export interface TriggerStateStore {
     nextCheckAt?: number | null,
   ): void;
   listDue(triggerId: TriggerId, now: number, limit: number): string[];
+  /** Return repo IDs that have any trigger_states row for this triggerId. */
+  listRepoIdsWithState(triggerId: TriggerId): string[];
 }
 
 export function createTriggerStateStore(db: Database): TriggerStateStore {
@@ -53,6 +56,10 @@ export function createTriggerStateStore(db: Database): TriggerStateStore {
       return listTriggerStatesDue(db, triggerId, now, limit).map(
         (row) => row.repo_id,
       );
+    },
+
+    listRepoIdsWithState(triggerId) {
+      return listRepoIdsWithState(db, triggerId);
     },
   };
 }

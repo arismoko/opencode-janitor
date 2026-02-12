@@ -7,7 +7,7 @@ import { listRepos } from '../db/queries/repo-queries';
 import { insertTriggerEvent } from '../db/queries/trigger-event-queries';
 import { planReviewRunsForEvent } from '../runtime/planner';
 import { TRIGGER_MODULES } from './modules';
-import { createTriggerStateStore } from './state-store';
+import { createTriggerStateStore, type TriggerStateStore } from './state-store';
 
 const DEFAULT_TICK_MS = 1000;
 
@@ -43,6 +43,58 @@ interface TickOptions extends TriggerEngineOptions {
   modules?: Partial<Record<TriggerId, TriggerModule>>;
 }
 
+/**
+ * Determine which (repo, trigger) pairs are due for probing.
+ *
+ * A repo is due for a given trigger if:
+ *   1. It has no trigger_states row at all (bootstrap / first run), OR
+ *   2. Its existing row has next_check_at IS NULL, OR
+ *   3. Its existing row has next_check_at <= now.
+ *
+ * listDue covers cases 2+3 (existing rows). Case 1 (missing rows) is handled
+ * by comparing against listRepoIdsWithState to find repos with no row.
+ */
+function collectDuePairs(
+  store: TriggerStateStore,
+  repos: Array<{ id: string; path: string }>,
+  modules: Partial<Record<TriggerId, TriggerModule>>,
+  config: CliConfig,
+): Array<{ repoId: string; repoPath: string; triggerId: TriggerId }> {
+  const pairs: Array<{
+    repoId: string;
+    repoPath: string;
+    triggerId: TriggerId;
+  }> = [];
+  const nowMs = Date.now();
+
+  for (const triggerId of TRIGGER_IDS) {
+    if (triggerId === 'manual') continue;
+
+    const module = modules[triggerId] as TriggerModule | undefined;
+    const triggerConfig = config.triggers[triggerId] as unknown as Record<
+      string,
+      unknown
+    >;
+    if (!module?.probe || !triggerConfig?.enabled) continue;
+
+    // Repos with existing state rows that are due (next_check_at IS NULL or <= now).
+    const dueRepoIds = store.listDue(triggerId, nowMs, repos.length);
+    const dueSet = new Set(dueRepoIds);
+
+    // Repos that have ANY state row for this trigger (used to detect bootstrap).
+    const hasStateSet = new Set(store.listRepoIdsWithState(triggerId));
+
+    for (const repo of repos) {
+      // Due if: already in the due set, OR no state row exists (bootstrap).
+      if (dueSet.has(repo.id) || !hasStateSet.has(repo.id)) {
+        pairs.push({ repoId: repo.id, repoPath: repo.path, triggerId });
+      }
+    }
+  }
+
+  return pairs;
+}
+
 export async function runTriggerEngineTick(
   options: TickOptions,
 ): Promise<void> {
@@ -54,71 +106,66 @@ export async function runTriggerEngineTick(
     (repo) => repo.enabled === 1 && repo.paused === 0,
   );
 
-  for (const repo of repos) {
-    for (const triggerId of TRIGGER_IDS) {
-      if (triggerId === 'manual') {
-        continue;
-      }
+  const duePairs = collectDuePairs(store, repos, modules, options.config);
 
-      const module = modules[triggerId] as TriggerModule | undefined;
-      const triggerConfig = options.config.triggers[
-        triggerId
-      ] as unknown as Record<string, unknown>;
-      if (!module?.probe || !triggerConfig?.enabled) {
-        continue;
-      }
+  for (const { repoId, repoPath, triggerId } of duePairs) {
+    const module = modules[triggerId] as TriggerModule;
+    const triggerConfig = options.config.triggers[
+      triggerId
+    ] as unknown as Record<string, unknown>;
 
-      try {
-        const state = store.load(repo.id, triggerId, module.stateSchema);
-        const result = await module.probe({
-          repoPath: repo.path,
-          state: state as Record<string, unknown>,
-          config: triggerConfig,
+    if (!module.probe) continue;
+
+    try {
+      const state = store.load(repoId, triggerId, module.stateSchema);
+      const result = await module.probe({
+        repoPath,
+        state: state as Record<string, unknown>,
+        config: triggerConfig,
+      });
+
+      const nextCheckAt =
+        typeof result.nextState === 'object' &&
+        result.nextState !== null &&
+        'nextCheckAt' in result.nextState
+          ? Number((result.nextState as Record<string, unknown>).nextCheckAt)
+          : null;
+      store.save(repoId, triggerId, result.nextState, nextCheckAt);
+
+      for (const emission of result.emissions) {
+        const payloadObject = emission.payload as Record<string, unknown>;
+        const subject = module.buildSubject(payloadObject);
+        const inserted = insertTriggerEvent(options.db, {
+          repoId,
+          triggerId,
+          eventKey: emission.eventKey,
+          subject,
+          payloadJson: JSON.stringify(payloadObject),
+          source: 'poll',
+          detectedAt: emission.detectedAt,
         });
 
-        const nextCheckAt =
-          typeof result.nextState === 'object' &&
-          result.nextState !== null &&
-          'nextCheckAt' in result.nextState
-            ? Number((result.nextState as Record<string, unknown>).nextCheckAt)
-            : null;
-        store.save(repo.id, triggerId, result.nextState, nextCheckAt);
-
-        for (const emission of result.emissions) {
-          const payloadObject = emission.payload as Record<string, unknown>;
-          const subject = module.buildSubject(payloadObject);
-          const inserted = insertTriggerEvent(options.db, {
-            repoId: repo.id,
-            triggerId,
-            eventKey: emission.eventKey,
-            subject,
-            payloadJson: JSON.stringify(payloadObject),
-            source: 'poll',
-            detectedAt: emission.detectedAt,
-          });
-
-          if (!inserted.inserted) {
-            continue;
-          }
-
-          const planned = planReviewRunsForEvent(
-            options.db,
-            options.config,
-            inserted.eventId,
-          );
-          if (planned.planned > 0) {
-            options.onJobEnqueued?.();
-          }
+        if (!inserted.inserted) {
+          continue;
         }
-      } catch (error) {
-        appendEvent(options.db, {
-          eventType: 'trigger.engine.error',
-          level: 'warn',
-          repoId: repo.id,
-          message: `Trigger probe failed for ${triggerId}: ${error instanceof Error ? error.message : String(error)}`,
-          payload: { triggerId },
-        });
+
+        const planned = planReviewRunsForEvent(
+          options.db,
+          options.config,
+          inserted.eventId,
+        );
+        if (planned.planned > 0) {
+          options.onJobEnqueued?.();
+        }
       }
+    } catch (error) {
+      appendEvent(options.db, {
+        eventType: 'trigger.engine.error',
+        level: 'warn',
+        repoId,
+        message: `Trigger probe failed for ${triggerId}: ${error instanceof Error ? error.message : String(error)}`,
+        payload: { triggerId },
+      });
     }
   }
 }

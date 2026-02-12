@@ -48,6 +48,21 @@ export function upsertTriggerState(
   );
 }
 
+/**
+ * Return all repo IDs that have a trigger_states row for the given triggerId.
+ * Used to distinguish "bootstrap" repos (no row) from repos with scheduled state.
+ */
+export function listRepoIdsWithState(
+  db: Database,
+  triggerId: TriggerStateRow['trigger_id'],
+): string[] {
+  return (
+    db
+      .query('SELECT repo_id FROM trigger_states WHERE trigger_id = ?')
+      .all(triggerId) as Array<{ repo_id: string }>
+  ).map((row) => row.repo_id);
+}
+
 export function listTriggerStatesDue(
   db: Database,
   triggerId: TriggerStateRow['trigger_id'],

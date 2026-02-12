@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { CliConfigSchema } from '../config/schema';
 import { ensureSchema } from '../db/migrations';
 import { addRepo } from '../db/queries/repo-queries';
+import { upsertTriggerState } from '../db/queries/trigger-state-queries';
 import { runTriggerEngineTick } from './engine';
 
 describe('runTriggerEngineTick', () => {
@@ -94,6 +95,79 @@ describe('runTriggerEngineTick', () => {
       .get(repo.id) as { count: number };
     expect(secondEvents.count).toBe(1);
     expect(secondRuns.count).toBe(1);
+
+    db.close();
+  });
+
+  it('probes bootstrap repos and skips repos scheduled in the future', async () => {
+    const db = new Database(':memory:');
+    db.exec('PRAGMA foreign_keys = ON');
+    ensureSchema(db);
+
+    const blockedRepo = addRepo(db, {
+      path: `${process.cwd()}/blocked`,
+      gitDir: `${process.cwd()}/blocked/.git`,
+      defaultBranch: 'main',
+    });
+    const bootstrapRepo = addRepo(db, {
+      path: `${process.cwd()}/bootstrap`,
+      gitDir: `${process.cwd()}/bootstrap/.git`,
+      defaultBranch: 'main',
+    });
+
+    // Existing state row with a future next_check_at => not due.
+    upsertTriggerState(db, {
+      repoId: blockedRepo.id,
+      triggerId: 'commit',
+      stateJson: JSON.stringify({ count: 0 }),
+      nextCheckAt: Date.now() + 60_000,
+      lastCheckedAt: Date.now(),
+    });
+
+    const config = CliConfigSchema.parse({
+      triggers: {
+        commit: { enabled: true, intervalSec: 1 },
+        pr: { enabled: false, intervalSec: 1, ttlSec: 1 },
+      },
+    });
+
+    const commitModule = {
+      stateSchema: z.object({ count: z.number().default(0) }),
+      probe: async ({ state }: { state: Record<string, unknown> }) => {
+        const count = Number(state.count ?? 0);
+        return {
+          nextState: { count: count + 1 },
+          emissions: [
+            {
+              eventKey: `sha-${count + 1}`,
+              payload: { sha: `sha-${count + 1}` },
+              detectedAt: Date.now(),
+            },
+          ],
+        };
+      },
+      buildSubject: (payload: Record<string, unknown>) =>
+        String(payload.sha ?? ''),
+    };
+
+    await runTriggerEngineTick({
+      db,
+      config,
+      maxAttempts: 3,
+      modules: {
+        commit: commitModule,
+      },
+    });
+
+    const blockedEvents = db
+      .query('SELECT COUNT(*) AS count FROM trigger_events WHERE repo_id = ?')
+      .get(blockedRepo.id) as { count: number };
+    const bootstrapEvents = db
+      .query('SELECT COUNT(*) AS count FROM trigger_events WHERE repo_id = ?')
+      .get(bootstrapRepo.id) as { count: number };
+
+    expect(blockedEvents.count).toBe(0);
+    expect(bootstrapEvents.count).toBe(1);
 
     db.close();
   });

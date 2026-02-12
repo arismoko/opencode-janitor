@@ -5,7 +5,6 @@ import { findRepoByIdOrPath } from '../../db/queries/repo-queries';
 import { insertTriggerEvent } from '../../db/queries/trigger-event-queries';
 import type { RuntimeContext } from '../../runtime/context';
 import { planReviewRunsForEvent } from '../../runtime/planner';
-import { buildManualPayload } from '../../runtime/review-job-payload';
 import { MANUAL_TRIGGER_MODULE } from '../../triggers/modules/manual';
 import { resolveHeadSha, resolvePrHeadShaAsync } from '../../utils/git';
 import { makeId } from '../../utils/ids';
@@ -63,14 +62,11 @@ export function createReviewOptions(rc: RuntimeContext): ReviewApi {
         sha,
         ...(prNumber ? { prNumber } : {}),
       });
-      const manualPayload = buildManualPayload({
-        agent,
-        requestedScope: payload.requestedScope,
-        input: payload.input,
-        note: payload.note,
-        sha: payload.sha,
-        prNumber: payload.prNumber,
-      });
+      // fromManualRequest validates and maps scope→requestedScope via the
+      // shared ManualTriggerPayloadSchema.  The result is already a valid
+      // ManualJobPayload shape — merge the caller's `agent` (which is always
+      // required at this level) to ensure it's present.
+      const manualPayload = { ...payload, agent };
       const subject = MANUAL_TRIGGER_MODULE.buildSubject(manualPayload);
 
       const inserted = insertTriggerEvent(rc.db, {
