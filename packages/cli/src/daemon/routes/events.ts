@@ -48,6 +48,11 @@ function handleEvents(url: URL, eventApi: EventApi): Response {
   return json(200, payload);
 }
 
+function handleClearEvents(eventApi: EventApi): Response {
+  const { deleted } = eventApi.clearEvents();
+  return json(200, { ok: true, deleted });
+}
+
 function handleEventsStream(
   request: Request,
   url: URL,
@@ -158,6 +163,11 @@ export function createEventRoutes(eventApi: EventApi): Route[] {
       method: 'GET',
       path: '/v1/events',
       handler: (_request, url) => handleEvents(url, eventApi),
+    },
+    {
+      method: 'DELETE',
+      path: '/v1/events',
+      handler: () => handleClearEvents(eventApi),
     },
     {
       method: 'GET',

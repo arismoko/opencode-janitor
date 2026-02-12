@@ -4,7 +4,7 @@ import { CliConfigSchema } from '../config/schema';
 import { ensureSchema } from '../db/migrations';
 import { addRepo } from '../db/queries/repo-queries';
 import { insertTriggerEvent } from '../db/queries/trigger-event-queries';
-import { planPendingReviewRuns, planReviewRunsForEvent } from './planner';
+import { planReviewRunsForEvent } from './planner';
 
 let db: Database;
 
@@ -119,6 +119,39 @@ describe('planReviewRunsForEvent', () => {
     expect(JSON.parse(row.scope_input_json)).toEqual({ prNumber: 123 });
   });
 
+  it('does not plan manual event when payload targets a different agent', () => {
+    const repo = addRepo(db, {
+      path: '/tmp/repo',
+      gitDir: '/tmp/repo/.git',
+      defaultBranch: 'main',
+    });
+
+    const event = insertTriggerEvent(db, {
+      repoId: repo.id,
+      triggerId: 'manual',
+      eventKey: 'manual-target-hunter',
+      subject: 'manual:hunter',
+      payloadJson: JSON.stringify({
+        agent: 'hunter',
+      }),
+      source: 'cli',
+      detectedAt: Date.now(),
+    });
+
+    const result = planReviewRunsForEvent(
+      db,
+      CliConfigSchema.parse({}),
+      event.eventId,
+    );
+
+    const rows = db
+      .query('SELECT agent FROM review_runs ORDER BY agent ASC')
+      .all() as Array<{ agent: string }>;
+
+    expect(result.planned).toBe(1);
+    expect(rows).toEqual([{ agent: 'hunter' }]);
+  });
+
   it('honors hard auto capability gate from config', () => {
     const repo = addRepo(db, {
       path: '/tmp/repo',
@@ -144,35 +177,5 @@ describe('planReviewRunsForEvent', () => {
 
     const result = planReviewRunsForEvent(db, config, event.eventId);
     expect(result.planned).toBe(0);
-  });
-});
-
-describe('planPendingReviewRuns', () => {
-  it('backfills unplanned trigger events into review runs', () => {
-    const repo = addRepo(db, {
-      path: '/tmp/repo',
-      gitDir: '/tmp/repo/.git',
-      defaultBranch: 'main',
-    });
-
-    insertTriggerEvent(db, {
-      repoId: repo.id,
-      triggerId: 'commit',
-      eventKey: 'sha-backfill-1',
-      subject: 'sha-backfill-1',
-      payloadJson: JSON.stringify({ sha: 'sha-backfill-1' }),
-      source: 'poll',
-      detectedAt: Date.now(),
-    });
-
-    const result = planPendingReviewRuns(db, CliConfigSchema.parse({}), 20);
-    expect(result.scanned).toBe(1);
-    expect(result.planned).toBe(1);
-
-    const rows = db
-      .query('SELECT agent, scope FROM review_runs ORDER BY queued_at DESC')
-      .all() as Array<{ agent: string; scope: string }>;
-    expect(rows).toHaveLength(1);
-    expect(rows[0]).toEqual({ agent: 'janitor', scope: 'commit-diff' });
   });
 });

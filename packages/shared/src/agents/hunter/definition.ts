@@ -1,6 +1,6 @@
-import { HunterOutput } from '../../review/finding-schemas';
-import { defineAgent } from '../define-agent';
-import { buildReviewAgentRuntime } from '../runtime';
+import { defineAgent } from '../core/define-agent';
+import { buildReviewAgentRuntime } from '../core/runtime';
+import { HunterOutput } from './schema';
 
 const HUNTER_ROLE = `You are The Hunter — the Bug Hunter / Adversarial Reviewer for pull requests.
 
@@ -39,7 +39,8 @@ function hasManualPrInput(
 export const HUNTER_AGENT_DEFINITION = defineAgent<
   'hunter',
   'commit' | 'pr' | 'manual',
-  'commit-diff' | 'workspace-diff' | 'repo' | 'pr'
+  'commit-diff' | 'workspace-diff' | 'repo' | 'pr',
+  typeof HunterOutput
 >({
   id: 'hunter',
   label: 'Hunter',
@@ -91,7 +92,7 @@ export const HUNTER_AGENT_DEFINITION = defineAgent<
     if (scope === 'repo') {
       return {
         metadataSuffix,
-        reason: trigger === 'manual' ? 'manual-repo' : undefined,
+        reason: (trigger as string) === 'manual' ? 'manual-repo' : undefined,
       };
     }
 

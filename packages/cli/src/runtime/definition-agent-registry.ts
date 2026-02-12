@@ -46,6 +46,11 @@ function buildPreparedContext(
   const hasWorkspaceDiff =
     input.trigger.commitContext.changedFiles.length > 0 ||
     input.trigger.commitContext.patch.trim().length > 0;
+  const promptConfig = {
+    scopeInclude: input.config.scope.include,
+    scopeExclude: input.config.scope.exclude,
+    maxFindings: input.config.agents[agent].maxFindings,
+  };
 
   if (scope === 'repo') {
     const reviewContext = buildReviewRunContext({
@@ -65,11 +70,7 @@ function buildPreparedContext(
 
     return {
       reviewContext,
-      promptConfig: {
-        scopeInclude: input.config.scope.include,
-        scopeExclude: input.config.scope.exclude,
-        maxFindings: input.config.agents[agent].maxFindings,
-      },
+      promptConfig,
     };
   }
 
@@ -96,11 +97,7 @@ function buildPreparedContext(
 
   return {
     reviewContext,
-    promptConfig: {
-      scopeInclude: input.config.scope.include,
-      scopeExclude: input.config.scope.exclude,
-      maxFindings: input.config.agents[agent].maxFindings,
-    },
+    promptConfig,
   };
 }
 

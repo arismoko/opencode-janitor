@@ -264,8 +264,8 @@ export function replaceReviewRunFindings(
     `
       INSERT INTO findings (
         id, repo_id, review_run_id, agent, severity, domain,
-        location, evidence, prescription, fingerprint, created_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        location, evidence, prescription, details_json, fingerprint, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `,
   );
 
@@ -282,6 +282,7 @@ export function replaceReviewRunFindings(
         row.location,
         row.evidence,
         row.prescription,
+        row.details_json,
         row.fingerprint,
         now,
       );

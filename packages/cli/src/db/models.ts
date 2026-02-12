@@ -87,6 +87,7 @@ export interface FindingRow {
   location: string;
   evidence: string;
   prescription: string;
+  details_json: string;
   fingerprint: string;
   created_at: number;
 }

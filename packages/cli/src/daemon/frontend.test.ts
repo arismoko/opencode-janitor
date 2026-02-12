@@ -109,12 +109,31 @@ describe('frontend asset loading', () => {
     expect(detail?.body).toContain('export function renderReportDetail');
   });
 
+  it('auto-serves dynamically added enrichment renderer modules', () => {
+    const registry = getFrontendAsset(
+      '/_dashboard/views/reports/finding-enrichments/core/registry.js',
+    );
+    const renderer = getFrontendAsset(
+      '/_dashboard/views/reports/finding-enrichments/renderers/agents/inspector/architecture-v1.js',
+    );
+    expect(registry).toBeDefined();
+    expect(registry?.body).toContain('ensureFindingEnrichmentRenderer');
+    expect(renderer).toBeDefined();
+    expect(renderer?.body).toContain('renderFindingEnrichment');
+  });
+
   it('returns null for unknown frontend asset path', () => {
     expect(getFrontendAsset('/_dashboard/unknown.css')).toBeNull();
     expect(
       getFrontendAsset('/_dashboard/components/manual-review-modal.js'),
     ).toBeNull();
+    expect(
+      getFrontendAsset(
+        '/_dashboard/views/reports/finding-enrichments/core/registry.test.js',
+      ),
+    ).toBeNull();
     expect(getFrontendAsset('/_dashboard/../app.js')).toBeNull();
+    expect(getFrontendAsset('/_dashboard/index.html')).toBeNull();
     expect(getFrontendAsset('/v1/events')).toBeNull();
   });
 });

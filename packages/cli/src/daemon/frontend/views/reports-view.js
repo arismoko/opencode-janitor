@@ -4,6 +4,7 @@ import { renderReportsMeta } from './reports/reports-meta.js';
 
 export function renderReportsView({
   html,
+  capabilities,
   selectedRepo,
   filteredReports,
   selectedReport,
@@ -14,6 +15,7 @@ export function renderReportsView({
   setSelectedReportId,
   transcript,
   sessionEvents,
+  timelineBlocks,
   sessionHasMore,
   loadMoreSessionEvents,
 }) {
@@ -28,6 +30,7 @@ export function renderReportsView({
       })}
       ${renderReportDetail({
         html,
+        capabilities,
         selectedReport,
         detail,
         detailMode,
@@ -35,6 +38,7 @@ export function renderReportsView({
         deleteReport,
         transcript,
         sessionEvents,
+        timelineBlocks,
         sessionHasMore,
         loadMoreSessionEvents,
       })}

@@ -5,6 +5,54 @@ import type {
   DashboardRepoStateRow,
 } from '../db/queries/dashboard-queries';
 
+type ParsedEnrichment = {
+  kind: string;
+  version: number;
+  payload: Record<string, unknown>;
+  collapsed?: boolean;
+};
+
+function parseEnrichmentsFromDetailsJson(
+  detailsJson: string | null | undefined,
+): ParsedEnrichment[] | undefined {
+  if (!detailsJson) return undefined;
+  try {
+    const parsed = JSON.parse(detailsJson) as {
+      enrichments?: unknown;
+    };
+
+    if (!Array.isArray(parsed?.enrichments)) {
+      return undefined;
+    }
+
+    const enrichments: ParsedEnrichment[] = [];
+    for (const section of parsed.enrichments) {
+      if (!section || typeof section !== 'object') continue;
+      const value = section as Record<string, unknown>;
+      if (typeof value.kind !== 'string' || value.kind.length === 0) continue;
+      if (
+        typeof value.version !== 'number' ||
+        !Number.isFinite(value.version)
+      ) {
+        continue;
+      }
+      if (!value.payload || typeof value.payload !== 'object') continue;
+      const collapsed =
+        typeof value.collapsed === 'boolean' ? value.collapsed : undefined;
+      enrichments.push({
+        kind: value.kind,
+        version: value.version,
+        payload: value.payload as Record<string, unknown>,
+        collapsed,
+      });
+    }
+
+    return enrichments.length > 0 ? enrichments : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 export function mapDashboardRepoRow(row: DashboardRepoStateRow) {
   return {
     id: row.id,
@@ -52,6 +100,7 @@ export function mapDashboardReportSummaryRow(row: DashboardReportSummaryRow) {
 }
 
 export function mapDashboardFindingRow(finding: DashboardReportFindingRow) {
+  const enrichments = parseEnrichmentsFromDetailsJson(finding.details_json);
   return {
     id: finding.id,
     repoId: finding.repo_id,
@@ -64,6 +113,7 @@ export function mapDashboardFindingRow(finding: DashboardReportFindingRow) {
     location: finding.location,
     evidence: finding.evidence,
     prescription: finding.prescription,
+    enrichments,
     createdAt: finding.created_at,
   };
 }

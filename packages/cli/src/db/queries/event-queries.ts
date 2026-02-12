@@ -51,6 +51,13 @@ export function listEvents(db: Database, limit: number): EventRow[] {
     .all(limit) as EventRow[];
 }
 
+export function clearEvents(db: Database): { deleted: number } {
+  const result = db.query('DELETE FROM event_journal').run() as {
+    changes?: number;
+  };
+  return { deleted: result.changes ?? 0 };
+}
+
 export function getLatestEventSeq(db: Database): number {
   const row = db
     .query('SELECT COALESCE(MAX(seq), 0) AS seq FROM event_journal')

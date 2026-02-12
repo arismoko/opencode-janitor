@@ -10,10 +10,8 @@ import {
 } from '@opencode-janitor/shared';
 import type { CliConfig } from '../config/schema';
 import { enqueueReviewRun } from '../db/queries/review-run-queries';
-import {
-  getTriggerEventById,
-  listTriggerEventsWithoutRuns,
-} from '../db/queries/trigger-event-queries';
+import { getTriggerEventById } from '../db/queries/trigger-event-queries';
+import { canAgentPlanForEvent } from './agent-eligibility-policy';
 
 /**
  * Parse a stored manual payload JSON string using the shared schema.
@@ -82,23 +80,6 @@ function resolveScope(
   return { scope, input };
 }
 
-function isAutoEligible(
-  config: CliConfig,
-  agentId: AgentId,
-  triggerId: TriggerId,
-): boolean {
-  if (triggerId === 'manual') {
-    return false;
-  }
-
-  const agentConfig = config.agents[agentId];
-  return (
-    agentConfig.enabled &&
-    agentConfig.autoTriggers.includes(triggerId) &&
-    AGENTS[agentId].capabilities.autoTriggers.includes(triggerId)
-  );
-}
-
 export function planReviewRunsForEvent(
   db: Database,
   config: CliConfig,
@@ -118,16 +99,18 @@ export function planReviewRunsForEvent(
     AgentId,
     (typeof AGENTS)[AgentId],
   ][]) {
-    const agentConfig = config.agents[agentId];
-    if (!agentConfig.enabled) {
-      continue;
-    }
-
-    if (triggerId === 'manual') {
-      if (manualPayload.agent && manualPayload.agent !== agentId) {
-        continue;
+    const eligibility = canAgentPlanForEvent(
+      config,
+      agentId,
+      triggerId,
+      manualPayload,
+    );
+    if (!eligibility.eligible) {
+      if (config.daemon.logLevel === 'debug') {
+        console.debug(
+          `[planner] skip agent=${agentId} trigger=${triggerId} event=${event.id}: ${eligibility.reason ?? 'ineligible'}`,
+        );
       }
-    } else if (!isAutoEligible(config, agentId, triggerId)) {
       continue;
     }
 
@@ -151,22 +134,4 @@ export function planReviewRunsForEvent(
   }
 
   return { planned };
-}
-
-export function planPendingReviewRuns(
-  db: Database,
-  config: CliConfig,
-  limit = 200,
-): { scanned: number; planned: number } {
-  const events = listTriggerEventsWithoutRuns(db, limit);
-  let planned = 0;
-
-  for (const event of events) {
-    planned += planReviewRunsForEvent(db, config, event.id).planned;
-  }
-
-  return {
-    scanned: events.length,
-    planned,
-  };
 }

@@ -62,6 +62,7 @@ export interface DashboardReportFindingRow {
   location: string;
   evidence: string;
   prescription: string;
+  details_json: string;
   created_at: number;
 }
 
@@ -207,6 +208,7 @@ export function listDashboardReportFindings(
         f.location,
         f.evidence,
         f.prescription,
+        f.details_json,
         f.created_at
       FROM findings f
       JOIN review_runs rr ON rr.id = f.review_run_id

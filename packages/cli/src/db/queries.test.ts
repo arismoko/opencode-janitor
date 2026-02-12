@@ -156,6 +156,7 @@ describe('review run queries', () => {
         location: 'src/a.ts:1',
         evidence: 'duplicate branch',
         prescription: 'extract helper',
+        details_json: '{}',
         fingerprint: 'dry:src/a.ts:1:P1',
       },
     ]);
@@ -176,6 +177,69 @@ describe('review run queries', () => {
     const findings = listDashboardReportFindings(db, enqueue.runId, 10);
     expect(findings).toHaveLength(1);
     expect(findings[0]!.review_run_id).toBe(enqueue.runId);
+    expect(findings[0]!.details_json).toBe('{}');
+  });
+
+  it('persists and returns findings.details_json payload', () => {
+    const db = createDb();
+    const repo = seedRepo(db);
+    const event = seedTriggerEvent(db, repo.id);
+
+    const enqueue = enqueueReviewRun(db, {
+      repoId: repo.id,
+      triggerEventId: event.eventId,
+      agent: 'inspector',
+      scope: 'repo',
+    });
+
+    claimNextQueuedReviewRun(db, 1);
+    markReviewRunRunning(db, enqueue.runId, 'sess-arch');
+    replaceReviewRunFindings(db, enqueue.runId, [
+      {
+        repo_id: repo.id,
+        agent: 'inspector',
+        severity: 'P1',
+        domain: 'DESIGN',
+        location: 'src/core.ts:10',
+        evidence: 'Layer boundary leak',
+        prescription: 'Introduce a port boundary',
+        details_json: JSON.stringify({
+          enrichments: [
+            {
+              kind: 'architecture',
+              version: 1,
+              payload: {
+                principles: ['DEPENDENCY_INVERSION'],
+                antiPattern: {
+                  label: 'LAYERING_VIOLATION',
+                  detail: 'Domain layer reaches infrastructure directly',
+                },
+                recommendedPattern: {
+                  label: 'HEXAGONAL_PORTS_ADAPTERS',
+                  detail:
+                    'Route dependencies through explicit ports to isolate adapters.',
+                },
+                rewritePlan: ['Define port', 'Move implementation to adapter'],
+                tradeoffs: ['More interfaces'],
+                impactScope: 'SUBSYSTEM',
+              },
+            },
+          ],
+        }),
+        fingerprint: 'design:src/core.ts:10:P1',
+      },
+    ]);
+
+    const findings = listDashboardReportFindings(db, enqueue.runId, 10);
+    expect(findings).toHaveLength(1);
+    const parsed = JSON.parse(findings[0]!.details_json) as {
+      enrichments?: Array<{
+        kind?: string;
+        payload?: { impactScope?: string };
+      }>;
+    };
+    expect(parsed.enrichments?.[0]?.kind).toBe('architecture');
+    expect(parsed.enrichments?.[0]?.payload?.impactScope).toBe('SUBSYSTEM');
   });
 
   it('requeues and recovers running runs', () => {

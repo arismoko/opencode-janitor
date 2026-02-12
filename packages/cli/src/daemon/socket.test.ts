@@ -105,6 +105,7 @@ function stubOptions(
           _filters?: EventFilterParams,
         ): EventRowWithSession[] => [makeEventRowWithSession()],
       ),
+      clearEvents: mock(() => ({ deleted: 1 })),
     },
     dashboard: {
       getDashboardSnapshot: mock(
@@ -406,8 +407,14 @@ describe('handleApiRequest — method validation', () => {
     expect(result).toBeNull();
   });
 
-  it('returns null for POST to GET-only /v1/events', () => {
+  it('returns null for POST to /v1/events', () => {
     const { request, url } = makeRequest('POST', '/v1/events');
+    const result = handleApiRequest(request, url, stubOptions());
+    expect(result).toBeNull();
+  });
+
+  it('returns null for PUT to /v1/events', () => {
+    const { request, url } = makeRequest('PUT', '/v1/events');
     const result = handleApiRequest(request, url, stubOptions());
     expect(result).toBeNull();
   });
@@ -838,6 +845,23 @@ describe('GET /v1/events — bounded query params', () => {
     expect(body.afterSeq).toBe(5);
     expect(Array.isArray(body.events)).toBe(true);
     expect(body.events.length).toBe(1);
+  });
+});
+
+describe('DELETE /v1/events', () => {
+  it('clears event journal and returns deleted count', async () => {
+    const opts = stubOptions({
+      event: {
+        clearEvents: mock(() => ({ deleted: 42 })),
+      },
+    });
+    const { request, url } = makeRequest('DELETE', '/v1/events');
+    const resp = handleApiRequest(request, url, opts) as Response;
+    expect(resp.status).toBe(200);
+    const body = (await resp.json()) as { ok: boolean; deleted: number };
+    expect(body.ok).toBe(true);
+    expect(body.deleted).toBe(42);
+    expect(opts.event.clearEvents).toHaveBeenCalledTimes(1);
   });
 });
 

@@ -57,7 +57,7 @@ function shouldResetSchema(db: Database): boolean {
       'trigger_event_id',
       'review_run_id',
     ]) &&
-    hasRequiredColumns(db, 'findings', ['review_run_id']) &&
+    hasRequiredColumns(db, 'findings', ['review_run_id', 'details_json']) &&
     hasRequiredColumns(db, 'review_runs', [
       'trigger_event_id',
       'scope',
@@ -171,6 +171,7 @@ export function ensureSchema(db: Database): void {
       location TEXT NOT NULL,
       evidence TEXT NOT NULL,
       prescription TEXT NOT NULL,
+      details_json TEXT NOT NULL DEFAULT '{}',
       fingerprint TEXT NOT NULL,
       created_at INTEGER NOT NULL
     ) STRICT;

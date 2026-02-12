@@ -9,7 +9,7 @@ import {
   getReviewRunById,
 } from '../db/queries/review-run-queries';
 import { insertTriggerEvent } from '../db/queries/trigger-event-queries';
-import { persistFailureOrRetry, persistSuccess } from './worker';
+import { createReviewRunPersistenceService } from './review-run-persistence';
 
 function setupClaimedRun() {
   const db = new Database(':memory:');
@@ -49,53 +49,34 @@ function setupClaimedRun() {
   return { db, repo, triggerEventId: triggerEvent.eventId, run };
 }
 
-describe('scheduler worker stage helpers', () => {
-  it('persistSuccess stores findings and emits correlated review_run.succeeded', () => {
+describe('review run persistence service', () => {
+  it('persistSucceeded stores findings and emits correlated review_run.succeeded', () => {
     const { db, run } = setupClaimedRun();
 
-    const prepared = {
-      spec: {
-        parseOutput: () => ({
-          findings: [
-            {
-              severity: 'P1',
-              domain: 'security',
-              location: 'src/file.ts:10',
-              evidence: 'unsafe pattern',
-              prescription: 'fix it',
-            },
-          ],
-        }),
-        onSuccess: () => [
-          {
-            repo_id: run.repo_id,
-            agent: run.agent,
-            severity: 'P1',
-            domain: 'security',
-            location: 'src/file.ts:10',
-            evidence: 'unsafe pattern',
-            prescription: 'fix it',
-            fingerprint: 'fp-1',
-          },
-        ],
+    const persistence = createReviewRunPersistenceService({
+      db,
+      retryBackoffMs: 1_000,
+    });
+    persistence.persistSucceeded(
+      run,
+      {
+        sessionId: 'ses_1',
+        rawOutput: '{"findings":[]}',
       },
-      runtimeRun: {
-        id: run.id,
-        repo_id: run.repo_id,
-        trigger_event_id: run.trigger_event_id,
-        trigger_id: run.trigger_id,
-        scope: run.scope,
-        path: run.path,
-        default_branch: run.default_branch,
-      },
-      prompt: 'prompt',
-      modelOverride: undefined,
-    } as any;
-
-    persistSuccess({ db }, run, prepared, {
-      sessionId: 'ses_1',
-      rawOutput: '{"findings":[]}',
-    } as any);
+      [
+        {
+          repo_id: run.repo_id,
+          agent: run.agent,
+          severity: 'P1',
+          domain: 'security',
+          location: 'src/file.ts:10',
+          evidence: 'unsafe pattern',
+          prescription: 'fix it',
+          details_json: '{}',
+          fingerprint: 'fp-1',
+        },
+      ],
+    );
 
     const row = getReviewRunById(db, run.id);
     expect(row?.status).toBe('succeeded');
@@ -125,11 +106,12 @@ describe('scheduler worker stage helpers', () => {
   it('persistFailureOrRetry requeues retryable failures and emits review_run.requeued', () => {
     const { db, run } = setupClaimedRun();
 
-    persistFailureOrRetry(
-      {
-        db,
-        config: { scheduler: { retryBackoffMs: 1_000 } } as any,
-      },
+    const persistence = createReviewRunPersistenceService({
+      db,
+      retryBackoffMs: 1_000,
+    });
+
+    persistence.persistFailureOrRetry(
       run,
       new Error('network timeout while contacting upstream'),
     );
@@ -155,11 +137,12 @@ describe('scheduler worker stage helpers', () => {
   it('persistFailureOrRetry marks terminal failures and emits review_run.failed', () => {
     const { db, run } = setupClaimedRun();
 
-    persistFailureOrRetry(
-      {
-        db,
-        config: { scheduler: { retryBackoffMs: 1_000 } } as any,
-      },
+    const persistence = createReviewRunPersistenceService({
+      db,
+      retryBackoffMs: 1_000,
+    });
+
+    persistence.persistFailureOrRetry(
       run,
       new Error('invalid output schema validation failed'),
     );

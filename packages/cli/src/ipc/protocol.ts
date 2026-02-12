@@ -154,6 +154,12 @@ export interface DashboardFinding {
   location: string;
   evidence: string;
   prescription: string;
+  enrichments?: Array<{
+    kind: string;
+    version: number;
+    payload: Record<string, unknown>;
+    collapsed?: boolean;
+  }>;
   createdAt: number;
 }
 

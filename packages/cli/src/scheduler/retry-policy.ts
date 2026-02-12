@@ -49,7 +49,7 @@ const TERMINAL_ERROR_PATTERNS = [
 
 const CANCELLED_ERROR_PATTERNS = [/cancelled/i, /canceled/i, /aborted/i];
 
-function toErrorMessage(error: unknown): string {
+export function toErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 

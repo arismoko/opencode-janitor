@@ -3,6 +3,7 @@ import { parseAgentOutput } from './output-codec';
 
 const HunterOutput = 'hunter' as const;
 const JanitorOutput = 'janitor' as const;
+const InspectorOutput = 'inspector' as const;
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -24,6 +25,33 @@ const validJanitorFinding = {
   severity: 'P2',
   evidence: 'unused helper introduced in this change',
   prescription: 'remove the helper and inline the logic',
+};
+
+const validInspectorFinding = {
+  domain: 'DESIGN',
+  location: 'src/runtime/flow.ts:77',
+  severity: 'P1',
+  evidence: 'Execution flow mixes orchestration and adapter concerns.',
+  prescription: 'Split orchestration policy from infrastructure adapters.',
+  architecture: {
+    principles: ['DEPENDENCY_INVERSION', 'EXPLICIT_BOUNDARIES'],
+    antiPattern: {
+      label: 'LAYERING_VIOLATION',
+      detail: 'Domain policy reaches into transport/storage details.',
+    },
+    recommendedPattern: {
+      label: 'HEXAGONAL_PORTS_ADAPTERS',
+      detail:
+        'Introduce explicit ports for orchestration dependencies and isolate adapters.',
+    },
+    rewritePlan: [
+      'Define orchestrator port contracts.',
+      'Implement adapters behind ports.',
+      'Inject adapters at composition root.',
+    ],
+    tradeoffs: ['Additional interfaces', 'Requires dependency wiring updates'],
+    impactScope: 'SUBSYSTEM',
+  },
 };
 
 /** Wrap findings in a fenced JSON block */
@@ -221,6 +249,56 @@ describe('parseAgentOutput', () => {
       expect(result.output.findings[0]?.domain).toBe('YAGNI');
       expect(result.output.findings[0]?.severity).toBe('P2');
     });
+
+    it('normalizes inspector recommended pattern aliases', () => {
+      const payload = {
+        findings: [
+          {
+            ...validInspectorFinding,
+            severity: 'p1',
+            architecture: {
+              ...validInspectorFinding.architecture,
+              recommendedPattern: {
+                label: 'Template Method',
+                detail:
+                  'Lift shared workflow into a template and keep variant hooks isolated.',
+              },
+            },
+          },
+        ],
+      };
+
+      const result = parseAgentOutput(JSON.stringify(payload), InspectorOutput);
+      expect(result.meta.status).toBe('ok');
+      expect(
+        result.output.findings[0]?.architecture.recommendedPattern.label,
+      ).toBe('TEMPLATE_METHOD');
+    });
+
+    it('normalizes ports/adapters alias to HEXAGONAL_PORTS_ADAPTERS', () => {
+      const payload = {
+        findings: [
+          {
+            ...validInspectorFinding,
+            severity: 'p1',
+            architecture: {
+              ...validInspectorFinding.architecture,
+              recommendedPattern: {
+                label: 'Ports and Adapters',
+                detail:
+                  'Separate domain policy from transport and storage concerns via ports.',
+              },
+            },
+          },
+        ],
+      };
+
+      const result = parseAgentOutput(JSON.stringify(payload), InspectorOutput);
+      expect(result.meta.status).toBe('ok');
+      expect(
+        result.output.findings[0]?.architecture.recommendedPattern.label,
+      ).toBe('HEXAGONAL_PORTS_ADAPTERS');
+    });
   });
 
   // -------------------------------------------------------------------------
@@ -250,6 +328,47 @@ describe('parseAgentOutput', () => {
       const raw = JSON.stringify(payload);
 
       const result = parseAgentOutput(raw, HunterOutput);
+      expect(result.meta.status).toBe('invalid_output');
+      expect(result.output.findings).toEqual([]);
+    });
+
+    it('fails closed for inspector finding without architecture block', () => {
+      const payload = {
+        findings: [
+          {
+            domain: 'DESIGN',
+            location: 'src/runtime.ts:10',
+            severity: 'P1',
+            evidence: 'Missing architecture payload should fail.',
+            prescription: 'Include architecture block.',
+          },
+        ],
+      };
+
+      const result = parseAgentOutput(JSON.stringify(payload), InspectorOutput);
+      expect(result.meta.status).toBe('invalid_output');
+      expect(result.output.findings).toEqual([]);
+    });
+
+    it('fails closed for unsupported inspector pattern label', () => {
+      const payload = {
+        findings: [
+          {
+            ...validInspectorFinding,
+            severity: 'p1',
+            architecture: {
+              ...validInspectorFinding.architecture,
+              recommendedPattern: {
+                label: 'Totally Unknown Pattern',
+                detail:
+                  'Non-canonical pattern with unsupported label should fail.',
+              },
+            },
+          },
+        ],
+      };
+
+      const result = parseAgentOutput(JSON.stringify(payload), InspectorOutput);
       expect(result.meta.status).toBe('invalid_output');
       expect(result.output.findings).toEqual([]);
     });

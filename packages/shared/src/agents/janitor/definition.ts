@@ -1,6 +1,6 @@
-import { JanitorOutput } from '../../review/finding-schemas';
-import { defineAgent } from '../define-agent';
-import { buildReviewAgentRuntime } from '../runtime';
+import { defineAgent } from '../core/define-agent';
+import { buildReviewAgentRuntime } from '../core/runtime';
+import { JanitorOutput } from './schema';
 
 const JANITOR_ROLE = `You are The Janitor — the Cleanup Crew / Maintenance Engineer for codebases.
 
@@ -31,7 +31,8 @@ const JANITOR_RULES = `- Evidence must cite 2+ independent signals for structura
 export const JANITOR_AGENT_DEFINITION = defineAgent<
   'janitor',
   'commit' | 'pr' | 'manual',
-  'commit-diff' | 'workspace-diff' | 'repo' | 'pr'
+  'commit-diff' | 'workspace-diff' | 'repo' | 'pr',
+  typeof JanitorOutput
 >({
   id: 'janitor',
   label: 'Janitor',
@@ -72,7 +73,7 @@ export const JANITOR_AGENT_DEFINITION = defineAgent<
     if (scope === 'repo') {
       return {
         metadataSuffix,
-        reason: trigger === 'manual' ? 'manual-repo' : undefined,
+        reason: (trigger as string) === 'manual' ? 'manual-repo' : undefined,
       };
     }
 

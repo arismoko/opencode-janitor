@@ -55,6 +55,7 @@ export interface ParsedFinding {
   location: string;
   evidence: string;
   prescription: string;
+  [key: string]: unknown;
 }
 
 export interface ParsedAgentOutput {

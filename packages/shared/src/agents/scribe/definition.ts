@@ -1,6 +1,6 @@
-import { ScribeOutput } from '../../review/finding-schemas';
-import { defineAgent } from '../define-agent';
-import { buildReviewAgentRuntime } from '../runtime';
+import { defineAgent } from '../core/define-agent';
+import { buildReviewAgentRuntime } from '../core/runtime';
+import { ScribeOutput } from './schema';
 
 const SCRIBE_ROLE = `You are The Scribe — the Documentation Guardian for codebases.
 
@@ -37,7 +37,8 @@ const SCRIBE_RULES = `Severity guide:
 export const SCRIBE_AGENT_DEFINITION = defineAgent<
   'scribe',
   'commit' | 'pr' | 'manual',
-  'commit-diff' | 'workspace-diff' | 'repo' | 'pr'
+  'commit-diff' | 'workspace-diff' | 'repo' | 'pr',
+  typeof ScribeOutput
 >({
   id: 'scribe',
   label: 'Scribe',
@@ -71,7 +72,7 @@ export const SCRIBE_AGENT_DEFINITION = defineAgent<
 
     return {
       metadataSuffix,
-      reason: trigger === 'manual' ? 'manual-repo' : undefined,
+      reason: (trigger as string) === 'manual' ? 'manual-repo' : undefined,
     };
   },
 });

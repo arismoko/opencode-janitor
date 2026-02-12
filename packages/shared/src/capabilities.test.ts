@@ -80,6 +80,24 @@ describe('capabilities view', () => {
 
     const hunter = capabilities.agents.find((agent) => agent.id === 'hunter');
     expect(hunter?.manualScopes).toEqual(['workspace-diff', 'repo', 'pr']);
+    expect(hunter?.findingEnrichments).toEqual([]);
+
+    const inspector = capabilities.agents.find(
+      (agent) => agent.id === 'inspector',
+    );
+    expect(inspector?.findingEnrichments).toEqual([
+      {
+        kind: 'architecture',
+        title: 'Architecture',
+        renderer: 'inspector.architecture.v1',
+        collapsedByDefault: true,
+      },
+    ]);
+
+    const janitor = capabilities.agents.find((agent) => agent.id === 'janitor');
+    const scribe = capabilities.agents.find((agent) => agent.id === 'scribe');
+    expect(janitor?.findingEnrichments).toEqual([]);
+    expect(scribe?.findingEnrichments).toEqual([]);
 
     const manual = capabilities.triggers.find(
       (trigger) => trigger.id === 'manual',

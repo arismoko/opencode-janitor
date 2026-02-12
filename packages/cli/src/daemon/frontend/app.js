@@ -82,13 +82,14 @@ function App() {
     detail,
     setDetail,
     sessionEvents,
+    timelineBlocks,
     transcript,
     sessionHasMore,
     loadMoreSessionEvents,
   } = useReportDetail({
+    isReportsView: view === 'reports',
     selectedReport,
     selectedReportId,
-    reportsLength: reports.length,
     detailMode,
     events,
     onError(error) {
@@ -121,9 +122,13 @@ function App() {
     }
   };
 
-  const clearActivityLog = () => {
-    clearEvents();
-    showFlash('Activity log cleared');
+  const clearActivityLog = async () => {
+    try {
+      const deleted = await clearEvents();
+      showFlash(`Cleared ${deleted} events`);
+    } catch (error) {
+      showFlash(error.message || String(error), 'error');
+    }
   };
 
   const { runningJobs, queuedJobs } = selectJobCounts(repos);
@@ -175,6 +180,7 @@ function App() {
           view === 'reports' &&
           renderReportsView({
             html,
+            capabilities,
             selectedRepo,
             filteredReports,
             selectedReport,
@@ -185,6 +191,7 @@ function App() {
             setSelectedReportId,
             transcript,
             sessionEvents,
+            timelineBlocks,
             sessionHasMore,
             loadMoreSessionEvents,
           })

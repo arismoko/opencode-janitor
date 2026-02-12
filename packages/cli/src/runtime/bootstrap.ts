@@ -3,7 +3,6 @@ import { defaultDbPath } from '../config/paths';
 import { acquireProcessLock } from '../daemon/lock';
 import { openDatabase } from '../db/connection';
 import { ensureSchema } from '../db/migrations';
-import { appendEvent } from '../db/queries/event-queries';
 import { recoverRunningReviewRuns } from '../db/queries/review-run-queries';
 import { startScheduler } from '../scheduler/worker';
 import { startTriggerEngine } from '../triggers/engine';
@@ -11,7 +10,6 @@ import { createAgentConfigMap } from './agent-factory';
 import type { RuntimeContext, ShutdownContext } from './context';
 import { createDefinitionAgentRegistry } from './definition-agent-registry';
 import { startOpencodeChild } from './opencode-child';
-import { planPendingReviewRuns } from './planner';
 import { createSessionCompletionBus } from './session-completion-bus';
 import { createSessionEventProjector } from './session-event-projector';
 
@@ -93,17 +91,6 @@ export async function bootstrapRuntime(
       registry,
       completionBus,
     });
-
-    const pending = planPendingReviewRuns(db, config);
-    if (pending.planned > 0) {
-      appendEvent(db, {
-        eventType: 'planner.backfill',
-        level: 'info',
-        message: `Planned ${pending.planned} review runs from ${pending.scanned} pending trigger events`,
-        payload: pending,
-      });
-      scheduler.wake();
-    }
 
     const watch = startTriggerEngine({
       db,

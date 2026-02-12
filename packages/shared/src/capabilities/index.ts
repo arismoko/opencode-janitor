@@ -13,6 +13,12 @@ export type AgentCapabilityView = {
     alias?: string;
     description: string;
   };
+  findingEnrichments: Array<{
+    kind: string;
+    title: string;
+    renderer: string;
+    collapsedByDefault: boolean;
+  }>;
 };
 
 export type ScopeCapabilityView = {
@@ -54,6 +60,14 @@ export function buildCapabilitiesView(): CapabilitiesView {
       alias: agent.cli.alias,
       description: agent.cli.description,
     },
+    findingEnrichments: (agent.findingEnrichments?.definitions ?? []).map(
+      (definition) => ({
+        kind: definition.kind,
+        title: definition.title,
+        renderer: definition.renderer,
+        collapsedByDefault: definition.collapsedByDefault,
+      }),
+    ),
   }));
 
   const scopes = Object.values(SCOPES).map((scope) => ({

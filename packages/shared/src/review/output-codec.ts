@@ -8,18 +8,9 @@
 import type { z } from 'zod';
 import { AGENTS, type AgentId } from '../agents';
 import type { ParseMeta } from '../types/finding';
-import type {
-  HunterOutput,
-  InspectorOutput,
-  JanitorOutput,
-  ScribeOutput,
-} from './finding-schemas';
 
 type AgentOutputById = {
-  janitor: JanitorOutput;
-  hunter: HunterOutput;
-  inspector: InspectorOutput;
-  scribe: ScribeOutput;
+  [K in AgentId]: z.infer<(typeof AGENTS)[K]['outputSchema']>;
 };
 
 /** Parsed agent output with validation metadata */
@@ -38,9 +29,12 @@ export function parseAgentOutput<TAgent extends AgentId>(
   raw: string,
   agent: TAgent,
 ): ParseResult<AgentOutputById[TAgent]> {
-  const schema = AGENTS[agent].outputSchema as z.ZodType<
+  const definition = AGENTS[agent];
+  const schema = definition.outputSchema as unknown as z.ZodType<
     AgentOutputById[TAgent]
   >;
+  const normalizeFinding =
+    'normalizeFinding' in definition ? definition.normalizeFinding : undefined;
 
   if (!raw.trim()) {
     return {
@@ -63,7 +57,7 @@ export function parseAgentOutput<TAgent extends AgentId>(
   const parsed = schema.safeParse(extracted);
   if (!parsed.success) {
     // Try lenient: normalize fields and retry
-    const normalized = normalizeFindings(extracted);
+    const normalized = normalizeFindings(extracted, normalizeFinding);
     const retry = schema.safeParse(normalized);
     if (!retry.success) {
       return {
@@ -86,6 +80,7 @@ export function parseAgentOutput<TAgent extends AgentId>(
  */
 function normalizeFindings(
   obj: Record<string, unknown>,
+  normalizeFinding?: (finding: Record<string, unknown>) => void,
 ): Record<string, unknown> {
   if (!obj.findings || !Array.isArray(obj.findings)) return obj;
 
@@ -102,6 +97,8 @@ function normalizeFindings(
           normalized[key] = (normalized[key] as string).toUpperCase();
         }
       }
+
+      normalizeFinding?.(normalized);
 
       return normalized;
     }),

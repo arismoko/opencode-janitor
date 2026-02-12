@@ -41,6 +41,7 @@ export interface EventApi {
     limit: number,
     filters?: EventFilterParams,
   ) => EventRowWithSession[];
+  clearEvents: () => { deleted: number };
 }
 
 export interface DashboardApi {

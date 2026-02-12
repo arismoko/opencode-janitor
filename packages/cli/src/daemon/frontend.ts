@@ -1,9 +1,8 @@
 /**
- * Loads the dashboard SPA HTML from the frontend source/build folder.
- * Caches the result in memory after the first read.
+ * Loads dashboard SPA HTML and serves frontend module assets.
  */
-import { existsSync, readFileSync } from 'node:fs';
-import { dirname, resolve } from 'node:path';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
+import { basename, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -12,81 +11,117 @@ const HTML_PATH_CANDIDATES = [
   resolve(__dirname, '../src/daemon/frontend/index.html'),
 ];
 
-const FRONTEND_ASSET_NAMES = [
-  'app.js',
-  'api.js',
-  'components/capability-driven-manual-modal.js',
-  'components/dashboard-header.js',
-  'components/flash-toast.js',
-  'components/repo-picker.js',
-  'helpers.js',
-  'selectors/dashboard-selectors.js',
-  'state/use-capabilities.js',
-  'state/use-dashboard-data.js',
-  'state/use-flash.js',
-  'state/use-report-detail.js',
-  'state/use-report-selection.js',
-  'state/use-repo-selection.js',
-  'styles.css',
-  'ui-constants.js',
-  'views/activity-view.js',
-  'views/reports/report-detail.js',
-  'views/reports/reports-list.js',
-  'views/reports/reports-meta.js',
-  'views/reports-view.js',
-] as const;
+const FRONTEND_ROOT_CANDIDATES = [
+  resolve(__dirname, 'frontend'),
+  resolve(__dirname, '../src/daemon/frontend'),
+];
 
-type FrontendAssetName = (typeof FRONTEND_ASSET_NAMES)[number];
-const FRONTEND_ASSET_SET = new Set<string>(FRONTEND_ASSET_NAMES);
+const ALLOWED_ASSET_EXTENSIONS = new Set(['.js', '.css']);
 
 export interface FrontendAsset {
   contentType: string;
   body: string;
 }
 
-let cached: string | null = null;
-const assetCache = new Map<FrontendAssetName, string>();
+let cachedHtml: string | null = null;
+let indexedAssets: Map<string, string> | null = null;
+const assetBodyCache = new Map<string, string>();
+
+function isAllowedAssetPath(relativePath: string): boolean {
+  const fileName = basename(relativePath);
+  if (fileName.includes('.test.')) {
+    return false;
+  }
+  const lastDot = relativePath.lastIndexOf('.');
+  if (lastDot < 0) return false;
+  const ext = relativePath.slice(lastDot);
+  return ALLOWED_ASSET_EXTENSIONS.has(ext);
+}
+
+function indexFrontendDir(
+  absoluteDir: string,
+  relativeDir: string,
+  out: Map<string, string>,
+): void {
+  const entries = readdirSync(absoluteDir, { withFileTypes: true });
+
+  for (const entry of entries) {
+    const relativePath = relativeDir
+      ? `${relativeDir}/${entry.name}`
+      : entry.name;
+    const absolutePath = resolve(absoluteDir, entry.name);
+
+    if (entry.isDirectory()) {
+      indexFrontendDir(absolutePath, relativePath, out);
+      continue;
+    }
+
+    if (!entry.isFile()) {
+      continue;
+    }
+
+    if (!isAllowedAssetPath(relativePath)) {
+      continue;
+    }
+
+    // First root wins (built assets preferred over source fallback).
+    if (!out.has(relativePath)) {
+      out.set(relativePath, absolutePath);
+    }
+  }
+}
+
+function getIndexedAssets(): Map<string, string> {
+  if (indexedAssets) {
+    return indexedAssets;
+  }
+
+  const indexed = new Map<string, string>();
+  for (const root of FRONTEND_ROOT_CANDIDATES) {
+    if (!existsSync(root)) {
+      continue;
+    }
+    indexFrontendDir(root, '', indexed);
+  }
+
+  indexedAssets = indexed;
+  return indexedAssets;
+}
+
+function toAssetName(pathname: string): string | null {
+  if (!pathname.startsWith('/_dashboard/')) {
+    return null;
+  }
+
+  const name = pathname.slice('/_dashboard/'.length);
+  if (!name || name.startsWith('/') || name.includes('..')) {
+    return null;
+  }
+
+  if (!isAllowedAssetPath(name)) {
+    return null;
+  }
+
+  return name;
+}
+
+function assetContentType(assetName: string): string {
+  return assetName.endsWith('.css')
+    ? 'text/css; charset=utf-8'
+    : 'text/javascript; charset=utf-8';
+}
 
 export function getDashboardHtml(): string {
-  if (!cached) {
+  if (!cachedHtml) {
     const htmlPath = HTML_PATH_CANDIDATES.find((path) => existsSync(path));
     if (!htmlPath) {
       throw new Error(
         `Dashboard HTML not found. Tried: ${HTML_PATH_CANDIDATES.join(', ')}`,
       );
     }
-    cached = readFileSync(htmlPath, 'utf-8');
+    cachedHtml = readFileSync(htmlPath, 'utf-8');
   }
-  return cached;
-}
-
-function toAssetName(pathname: string): FrontendAssetName | null {
-  if (!pathname.startsWith('/_dashboard/')) {
-    return null;
-  }
-
-  const name = pathname.slice('/_dashboard/'.length);
-  if (name.includes('..') || name.startsWith('/')) {
-    return null;
-  }
-
-  if (FRONTEND_ASSET_SET.has(name)) {
-    return name as FrontendAssetName;
-  }
-  return null;
-}
-
-function resolveAssetPathCandidates(assetName: FrontendAssetName): string[] {
-  return [
-    resolve(__dirname, `frontend/${assetName}`),
-    resolve(__dirname, `../src/daemon/frontend/${assetName}`),
-  ];
-}
-
-function assetContentType(assetName: FrontendAssetName): string {
-  return assetName.endsWith('.css')
-    ? 'text/css; charset=utf-8'
-    : 'text/javascript; charset=utf-8';
+  return cachedHtml;
 }
 
 export function getFrontendAsset(pathname: string): FrontendAsset | null {
@@ -95,17 +130,15 @@ export function getFrontendAsset(pathname: string): FrontendAsset | null {
     return null;
   }
 
-  let body = assetCache.get(assetName);
+  const assetPath = getIndexedAssets().get(assetName);
+  if (!assetPath) {
+    return null;
+  }
+
+  let body = assetBodyCache.get(assetName);
   if (!body) {
-    const pathCandidates = resolveAssetPathCandidates(assetName);
-    const assetPath = pathCandidates.find((path) => existsSync(path));
-    if (!assetPath) {
-      throw new Error(
-        `Frontend asset not found (${assetName}). Tried: ${pathCandidates.join(', ')}`,
-      );
-    }
     body = readFileSync(assetPath, 'utf-8');
-    assetCache.set(assetName, body);
+    assetBodyCache.set(assetName, body);
   }
 
   return {

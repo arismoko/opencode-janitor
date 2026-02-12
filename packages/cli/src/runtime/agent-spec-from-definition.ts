@@ -5,9 +5,9 @@ import {
   type PromptConfig,
   parseAgentOutput,
   type ReviewContext,
-  type TriggerId,
   toAgentProfile,
 } from '@opencode-janitor/shared';
+import { canAgentRunForTrigger } from './agent-eligibility-policy';
 import type {
   AgentRuntimeSpec,
   BuildPromptInput,
@@ -23,25 +23,12 @@ export interface AgentSpecFromDefinitionOptions {
   buildPreparedContext: (input: PrepareContextInput) => PreparedAgentContext;
 }
 
-function supportsAutoTrigger(
-  configuredAutoTriggers: readonly TriggerId[],
-  capabilities: readonly TriggerId[],
-  trigger: TriggerId,
-): boolean {
-  return (
-    configuredAutoTriggers.includes(trigger) && capabilities.includes(trigger)
-  );
-}
-
 function buildPromptConfig(
   input: PrepareContextInput,
   agent: AgentId,
-): PromptConfig {
+): Pick<PromptConfig, 'promptHints'> {
   const definition = AGENTS[agent];
   return {
-    scopeInclude: input.config.scope.include,
-    scopeExclude: input.config.scope.exclude,
-    maxFindings: input.config.agents[agent].maxFindings,
     promptHints: definition.reviewPromptHints
       ? definition.reviewPromptHints({
           trigger: input.trigger.kind,
@@ -69,18 +56,7 @@ export function createAgentSpecFromDefinition(
     profile: toAgentProfile(definition.id),
     configKey: definition.id,
     supportsTrigger(config, kind) {
-      const agentConfig = config.agents[definition.id];
-      if (!agentConfig.enabled) {
-        return false;
-      }
-      if (kind === 'manual') {
-        return true;
-      }
-      return supportsAutoTrigger(
-        agentConfig.autoTriggers,
-        definition.capabilities.autoTriggers,
-        kind,
-      );
+      return canAgentRunForTrigger(config, definition.id, kind).eligible;
     },
     maxFindings(config) {
       return config.agents[definition.id].maxFindings;
@@ -124,6 +100,15 @@ export function createAgentSpecFromDefinition(
     },
     onSuccess(input: SuccessInput): PersistableFindingRow[] {
       return input.output.findings.map((finding) => ({
+        details_json: (() => {
+          const sections =
+            definition.findingEnrichments?.buildSections?.(
+              finding as Record<string, unknown>,
+            ) ?? [];
+          return sections.length > 0
+            ? JSON.stringify({ enrichments: sections })
+            : '{}';
+        })(),
         repo_id: input.run.repo_id,
         agent: definition.id,
         severity: finding.severity,

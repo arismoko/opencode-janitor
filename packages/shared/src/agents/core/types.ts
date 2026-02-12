@@ -42,6 +42,7 @@ export type AgentDefinition<
   TAgentId extends string = string,
   TTriggerId extends string = string,
   TScopeId extends string = string,
+  TOutputSchema extends z.ZodTypeAny = z.ZodTypeAny,
 > = {
   id: TAgentId;
   label: string;
@@ -49,7 +50,7 @@ export type AgentDefinition<
   role: string;
   domains: readonly string[];
   rules?: string;
-  outputSchema: z.ZodTypeAny;
+  outputSchema: TOutputSchema;
   defaults: {
     autoTriggers: readonly TTriggerId[];
     manualScope?: TScopeId;
@@ -72,4 +73,25 @@ export type AgentDefinition<
   reviewPromptHints?: (
     input: EnrichContextInput<TTriggerId, TScopeId>,
   ) => string[];
+  normalizeFinding?: (finding: Record<string, unknown>) => void;
+  findingEnrichments?: {
+    definitions: readonly FindingEnrichmentDefinition[];
+    buildSections?: (
+      finding: Record<string, unknown>,
+    ) => FindingEnrichmentSection[];
+  };
+};
+
+export type FindingEnrichmentSection = {
+  kind: string;
+  version: number;
+  payload: Record<string, unknown>;
+  collapsed?: boolean;
+};
+
+export type FindingEnrichmentDefinition = {
+  kind: string;
+  title: string;
+  renderer: string;
+  collapsedByDefault: boolean;
 };
