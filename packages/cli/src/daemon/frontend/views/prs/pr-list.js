@@ -36,6 +36,11 @@ export function renderPrList({
   setQuery,
   setSelectedPrNumber,
 }) {
+  const sortedList = [...list].sort(
+    (left, right) =>
+      new Date(right.updatedAt).getTime() - new Date(left.updatedAt).getTime(),
+  );
+
   return html`
     <section class="panel">
       <div class="toolbar">
@@ -76,11 +81,12 @@ export function renderPrList({
           list.length === 0 &&
           html`<div class="list-item muted">No pull requests match this filter.</div>`
         }
-        ${list.map((pr) => {
+        ${sortedList.map((pr) => {
           const isActive = selectedPrNumber === pr.number;
           return html`
             <button
               class=${`pr-list-item ${isActive ? 'active' : ''}`}
+              type="button"
               onClick=${() => setSelectedPrNumber(pr.number)}
             >
               <div class="row">
@@ -88,7 +94,7 @@ export function renderPrList({
                 <span class="badge">${pr.state}</span>
               </div>
               <div class="row muted" style="margin-top:6px;">
-                <span>@${pr.authorLogin || 'unknown'}</span>
+                <span>@${pr.authorLogin || 'unknown'} ${pr.isDraft ? '| draft' : ''}</span>
                 <span class="mono">${fmtAgo(new Date(pr.updatedAt).getTime())}</span>
               </div>
               <div class="row subtle" style="margin-top:6px;">

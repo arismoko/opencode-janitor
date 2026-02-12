@@ -259,6 +259,14 @@ export interface PrReviewComment {
   updatedAt: string;
 }
 
+export interface PrCommit {
+  oid: string;
+  shortOid: string;
+  messageHeadline: string;
+  authoredDate: string;
+  authorLogins: string[];
+}
+
 export interface PrDetail extends PrSummary {
   body: string;
   baseRefName: string;
@@ -267,6 +275,7 @@ export interface PrDetail extends PrSummary {
   deletions: number;
   changedFiles: number;
   commits: number;
+  commitHistory: PrCommit[];
   merged: boolean;
   mergeStateStatus: string | null;
   issueComments: PrIssueComment[];

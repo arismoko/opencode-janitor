@@ -1,6 +1,7 @@
 import { resolve as resolvePath } from 'node:path';
 import { findRepoByIdOrPath } from '../../db/queries/repo-queries';
 import type {
+  PrCommit,
   PrDetail,
   PrIssueComment,
   PrListBucket,
@@ -171,6 +172,54 @@ function toReviewComments(raw: unknown): PrReviewComment[] {
   return result;
 }
 
+function toPrCommitHistory(raw: unknown): PrCommit[] {
+  if (!Array.isArray(raw)) return [];
+  const history: PrCommit[] = [];
+
+  for (const row of raw) {
+    if (!row || typeof row !== 'object') continue;
+    const source = row as Record<string, unknown>;
+    const oid = typeof source.oid === 'string' ? source.oid : '';
+    const rawAuthors =
+      source.authors && typeof source.authors === 'object'
+        ? (source.authors as { nodes?: unknown[] }).nodes
+        : null;
+    const authorLogins = Array.isArray(rawAuthors)
+      ? [
+          ...new Set(
+            rawAuthors
+              .map((entry) => {
+                if (!entry || typeof entry !== 'object') return null;
+                const login = (entry as { login?: unknown }).login;
+                return typeof login === 'string' && login.trim()
+                  ? login.trim()
+                  : null;
+              })
+              .filter((value): value is string => typeof value === 'string'),
+          ),
+        ]
+      : [];
+
+    history.push({
+      oid,
+      shortOid: oid ? oid.slice(0, 7) : '',
+      messageHeadline:
+        typeof source.messageHeadline === 'string'
+          ? source.messageHeadline
+          : typeof source.message === 'string'
+            ? source.message.split('\n')[0] || '(no commit message)'
+            : '(no commit message)',
+      authoredDate:
+        typeof source.authoredDate === 'string'
+          ? source.authoredDate
+          : new Date(0).toISOString(),
+      authorLogins,
+    });
+  }
+
+  return history;
+}
+
 function resolveRepoPath(rc: RuntimeContext, repoOrId: string): string {
   const normalized = resolvePath(repoOrId);
   const repo =
@@ -256,7 +305,7 @@ export function createPrOptions(
           'view',
           String(prNumber),
           '--json',
-          'number,title,state,url,author,updatedAt,reviewDecision,isDraft,mergeable,reviewRequests,body,baseRefName,headRefName,additions,deletions,changedFiles,commits,merged,mergeStateStatus,comments',
+          'number,title,state,url,author,updatedAt,reviewDecision,isDraft,mergeable,reviewRequests,body,baseRefName,headRefName,additions,deletions,changedFiles,commits,mergedAt,mergeStateStatus,comments',
         ]),
         'gh pr view failed',
       );
@@ -280,6 +329,7 @@ export function createPrOptions(
 
       const summary = toPrSummary(rawPr);
       const commitsRaw = rawPr.commits;
+      const commitHistory = toPrCommitHistory(commitsRaw);
       const commits = Array.isArray(commitsRaw)
         ? commitsRaw.length
         : typeof commitsRaw === 'number' && Number.isFinite(commitsRaw)
@@ -309,7 +359,11 @@ export function createPrOptions(
             ? rawPr.changedFiles
             : 0,
         commits,
-        merged: Boolean(rawPr.merged),
+        commitHistory,
+        merged:
+          typeof rawPr.mergedAt === 'string' && rawPr.mergedAt.length > 0
+            ? true
+            : summary.state.toUpperCase() === 'MERGED',
         mergeStateStatus:
           typeof rawPr.mergeStateStatus === 'string'
             ? rawPr.mergeStateStatus

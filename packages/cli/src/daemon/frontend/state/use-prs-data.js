@@ -275,6 +275,30 @@ export function usePrsData({ isPrsView, selectedRepo, onError }) {
     [repoOrId, selectedPrNumber, reconcile],
   );
 
+  const enqueueAgentReview = useCallback(
+    async ({ agent, note, focusPath }) => {
+      if (!repoOrId || !selectedPrNumber) {
+        throw new Error('Select a pull request before triggering review');
+      }
+      const trimmedNote = typeof note === 'string' ? note.trim() : '';
+      const trimmedFocusPath =
+        typeof focusPath === 'string' ? focusPath.trim() : '';
+
+      return api('/v1/reviews/enqueue', {
+        method: 'POST',
+        body: JSON.stringify({
+          repoOrId,
+          agent,
+          scope: 'pr',
+          input: { prNumber: selectedPrNumber },
+          ...(trimmedNote ? { note: trimmedNote } : {}),
+          ...(trimmedFocusPath ? { focusPath: trimmedFocusPath } : {}),
+        }),
+      });
+    },
+    [repoOrId, selectedPrNumber],
+  );
+
   return {
     bucket,
     setBucket,
@@ -293,5 +317,6 @@ export function usePrsData({ isPrsView, selectedRepo, onError }) {
     addComment,
     requestReviewers,
     replyToComment,
+    enqueueAgentReview,
   };
 }

@@ -178,12 +178,35 @@ function App() {
     },
   });
 
-  const runPrAction = async (label, action) => {
+  class PrActionHandledError extends Error {}
+
+  const runPrAction = async ({
+    successLabel,
+    failureLabel,
+    action,
+    isSuccess,
+  }) => {
     try {
-      await action();
-      showFlash(label);
+      const result = await action();
+      const succeeded =
+        typeof isSuccess === 'function' ? isSuccess(result) : true;
+
+      if (!succeeded) {
+        const message = failureLabel || 'Action completed without changes';
+        showFlash(message, 'error');
+        throw new PrActionHandledError(message);
+      }
+
+      if (successLabel) {
+        showFlash(successLabel);
+      }
+      return result;
     } catch (error) {
+      if (error instanceof PrActionHandledError) {
+        throw error;
+      }
       showFlash(error.message || String(error), 'error');
+      throw error;
     }
   };
 
@@ -272,22 +295,38 @@ function App() {
           renderPrsView({
             html,
             selectedRepo,
+            capabilities,
             prs: prsData,
             onSelectPr: prsData.setSelectedPrNumber,
             onBucketChange: prsData.setBucket,
             onQueryInput: prsData.setQuery,
             onMerge: (method) =>
-              runPrAction('PR merge requested', () => prsData.mergePr(method)),
+              runPrAction({
+                successLabel: 'PR merge requested',
+                action: () => prsData.mergePr(method),
+              }),
             onAddComment: (body) =>
-              runPrAction('PR comment posted', () => prsData.addComment(body)),
+              runPrAction({
+                successLabel: 'PR comment posted',
+                action: () => prsData.addComment(body),
+              }),
             onRequestReviewers: (reviewers) =>
-              runPrAction('Reviewers requested', () =>
-                prsData.requestReviewers(reviewers),
-              ),
+              runPrAction({
+                successLabel: 'Reviewers requested',
+                action: () => prsData.requestReviewers(reviewers),
+              }),
             onReply: (commentId, body) =>
-              runPrAction('Reply posted', () =>
-                prsData.replyToComment(commentId, body),
-              ),
+              runPrAction({
+                successLabel: 'Reply posted',
+                action: () => prsData.replyToComment(commentId, body),
+              }),
+            onTriggerReview: (payload) =>
+              runPrAction({
+                successLabel: 'PR review enqueued',
+                failureLabel: 'No review run was queued for this PR',
+                action: () => prsData.enqueueAgentReview(payload),
+                isSuccess: (response) => response?.enqueued === true,
+              }),
           })
         }
       </main>

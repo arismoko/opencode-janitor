@@ -5,6 +5,7 @@ import { renderPrList } from './prs/pr-list.js';
 export function renderPrsView({
   html,
   selectedRepo,
+  capabilities,
   prs,
   onSelectPr,
   onBucketChange,
@@ -13,6 +14,7 @@ export function renderPrsView({
   onAddComment,
   onRequestReviewers,
   onReply,
+  onTriggerReview,
 }) {
   if (!selectedRepo) {
     return html`
@@ -43,6 +45,7 @@ export function renderPrsView({
           selectedSummary: prs.selectedSummary,
           detail: prs.detail,
           detailLoading: prs.detailLoading,
+          onAddComment,
           onReply,
         })}
       </section>
@@ -51,9 +54,11 @@ export function renderPrsView({
           html,
           selectedPrNumber: prs.selectedPrNumber,
           detail: prs.detail,
+          capabilities,
           onMerge,
           onAddComment,
           onRequestReviewers,
+          onTriggerReview,
         })}
       </section>
     </section>

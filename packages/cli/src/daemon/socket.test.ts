@@ -208,6 +208,7 @@ function stubOptions(
           deletions: 2,
           changedFiles: 3,
           commits: 1,
+          commitHistory: [],
           merged: false,
           mergeStateStatus: 'CLEAN',
           issueComments: [],

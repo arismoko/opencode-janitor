@@ -124,8 +124,15 @@ describe('createPrOptions', () => {
               additions: 100,
               deletions: 12,
               changedFiles: 8,
-              commits: 3,
-              merged: false,
+              commits: [
+                {
+                  oid: 'abcdef1234567890',
+                  messageHeadline: 'feat: add PR tab',
+                  authoredDate: '2026-02-12T01:03:00Z',
+                  authors: { nodes: [{ login: 'dev-b' }] },
+                },
+              ],
+              mergedAt: null,
               mergeStateStatus: 'CLEAN',
               comments: [
                 {
@@ -177,6 +184,7 @@ describe('createPrOptions', () => {
     const response = await pr.getPrDetail({ repoOrId: repo.id, prNumber: 77 });
     expect(calls).toHaveLength(3);
     expect(response.detail.number).toBe(77);
+    expect(response.detail.commitHistory).toHaveLength(1);
     expect(response.detail.issueComments).toHaveLength(1);
     expect(response.detail.reviewComments).toHaveLength(1);
     expect(response.detail.reviewComments[0]?.path).toBe('src/app.ts');
