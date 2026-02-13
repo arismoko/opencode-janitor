@@ -43,7 +43,6 @@ export const DetectorSection = z.object({
   minPollSec: z.number().int().min(1).default(15),
   maxPollSec: z.number().int().min(1).default(60),
   probeConcurrency: z.number().int().min(1).default(4),
-  prTtlSec: z.number().int().min(0).default(300),
   pollJitterPct: z.number().int().min(0).max(50).default(10),
 });
 

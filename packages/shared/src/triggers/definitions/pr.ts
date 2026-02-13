@@ -4,7 +4,6 @@ import type { TriggerDefinition } from '../types';
 const PrTriggerConfigSchema = z.object({
   enabled: z.boolean().default(true),
   intervalSec: z.number().int().min(1).default(30),
-  ttlSec: z.number().int().min(1).default(300),
   postComment: z.boolean().default(true),
 });
 

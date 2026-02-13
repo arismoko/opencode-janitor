@@ -292,6 +292,12 @@ export function buildTriggerContextFromPayload(
     typeof payload.sha === 'string' && payload.sha.length > 0
       ? payload.sha
       : resolveHeadSha(repoPath);
+  const manualPrNumber =
+    typeof payload.prNumber === 'number' &&
+    Number.isInteger(payload.prNumber) &&
+    payload.prNumber > 0
+      ? payload.prNumber
+      : undefined;
   const note =
     typeof payload.note === 'string' && payload.note.trim().length > 0
       ? payload.note.trim()
@@ -301,10 +307,15 @@ export function buildTriggerContextFromPayload(
       ? payload.focusPath.trim()
       : undefined;
 
+  const commitContext = manualPrNumber
+    ? buildPrCommitContext(repoPath, manualSha, manualPrNumber)
+    : buildWorkspaceCommitContext(repoPath, manualSha);
+
   return {
     kind: 'manual',
     commitSha: manualSha,
-    commitContext: buildWorkspaceCommitContext(repoPath, manualSha),
+    commitContext,
+    ...(manualPrNumber ? { prNumber: manualPrNumber } : {}),
     ...(note ? { note } : {}),
     ...(focusPath ? { focusPath } : {}),
   };

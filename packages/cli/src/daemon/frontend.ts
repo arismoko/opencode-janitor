@@ -27,6 +27,18 @@ let cachedHtml: string | null = null;
 let indexedAssets: Map<string, string> | null = null;
 const assetBodyCache = new Map<string, string>();
 
+/**
+ * Invalidate all in-memory frontend asset caches.
+ *
+ * Used by the dev live-reload watcher to force re-reads from disk after
+ * file changes. No-op in production (callers should gate on dev mode).
+ */
+export function invalidateFrontendCaches(): void {
+  cachedHtml = null;
+  indexedAssets = null;
+  assetBodyCache.clear();
+}
+
 function isAllowedAssetPath(relativePath: string): boolean {
   const fileName = basename(relativePath);
   if (fileName.includes('.test.')) {

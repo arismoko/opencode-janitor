@@ -6,6 +6,7 @@ import { ensureSchema } from '../db/migrations';
 import { addRepo } from '../db/queries/repo-queries';
 import { upsertTriggerState } from '../db/queries/trigger-state-queries';
 import { runTriggerEngineTick } from './engine';
+import { createPrTriggerModule } from './modules/pr';
 
 describe('runTriggerEngineTick', () => {
   it('inserts trigger_events and deduped review_runs from emissions', async () => {
@@ -22,7 +23,7 @@ describe('runTriggerEngineTick', () => {
     const config = CliConfigSchema.parse({
       triggers: {
         commit: { enabled: true, intervalSec: 1 },
-        pr: { enabled: true, intervalSec: 1, ttlSec: 1 },
+        pr: { enabled: true, intervalSec: 1 },
       },
     });
 
@@ -127,7 +128,7 @@ describe('runTriggerEngineTick', () => {
     const config = CliConfigSchema.parse({
       triggers: {
         commit: { enabled: true, intervalSec: 1 },
-        pr: { enabled: false, intervalSec: 1, ttlSec: 1 },
+        pr: { enabled: false, intervalSec: 1 },
       },
     });
 
@@ -168,6 +169,71 @@ describe('runTriggerEngineTick', () => {
 
     expect(blockedEvents.count).toBe(0);
     expect(bootstrapEvents.count).toBe(1);
+
+    db.close();
+  });
+
+  it('unchanged pr key across ticks does not create a second event or run', async () => {
+    const db = new Database(':memory:');
+    db.exec('PRAGMA foreign_keys = ON');
+    ensureSchema(db);
+
+    addRepo(db, {
+      path: process.cwd(),
+      gitDir: `${process.cwd()}/.git`,
+      defaultBranch: 'main',
+    });
+
+    let now = 1_000;
+    const prModule = createPrTriggerModule({
+      now: () => now,
+      resolveCurrentPrKeyAsync: async () => '7:abc123',
+    });
+
+    const commitModule = {
+      stateSchema: z.object({}),
+      probe: async () => ({ nextState: {}, emissions: [] as never[] }),
+      buildSubject: () => 'noop',
+    };
+
+    const config = CliConfigSchema.parse({
+      triggers: {
+        commit: { enabled: false, intervalSec: 1 },
+        pr: { enabled: true, intervalSec: 1 },
+      },
+    });
+
+    const modules = {
+      commit: commitModule,
+      pr: prModule as unknown as typeof commitModule,
+    };
+
+    // Tick 1: bootstrap — emits initial PR event.
+    await runTriggerEngineTick({ db, config, maxAttempts: 3, modules });
+
+    const firstEvents = db
+      .query('SELECT COUNT(*) AS count FROM trigger_events')
+      .get() as { count: number };
+    const firstRuns = db
+      .query('SELECT COUNT(*) AS count FROM review_runs')
+      .get() as { count: number };
+    expect(firstEvents.count).toBe(1);
+    expect(firstRuns.count).toBeGreaterThanOrEqual(1);
+
+    // Advance time — same key, no re-emission.
+    now = 999_000;
+
+    // Tick 2: unchanged key — no new event, no new run.
+    await runTriggerEngineTick({ db, config, maxAttempts: 3, modules });
+
+    const secondEvents = db
+      .query('SELECT COUNT(*) AS count FROM trigger_events')
+      .get() as { count: number };
+    const secondRuns = db
+      .query('SELECT COUNT(*) AS count FROM review_runs')
+      .get() as { count: number };
+    expect(secondEvents.count).toBe(1);
+    expect(secondRuns.count).toBe(firstRuns.count);
 
     db.close();
   });

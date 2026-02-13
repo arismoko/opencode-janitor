@@ -2,53 +2,72 @@ import { describe, expect, it } from 'bun:test';
 import { AGENT_IDS, AGENTS } from '../agents';
 import { OUTPUT_SCHEMAS, Severity } from './finding-schemas';
 
-const architectureAgentId = AGENT_IDS.find(
-  (agentId) =>
-    (AGENTS[agentId].findingEnrichments?.definitions.length ?? 0) > 0,
+const architectureAgentId = AGENT_IDS.find((agentId) =>
+  AGENTS[agentId].findingEnrichments?.definitions.some(
+    (d) => d.kind === 'architecture',
+  ),
 );
 
 if (!architectureAgentId) {
   throw new Error('Expected at least one agent with finding enrichments.');
 }
 
-const baselineAgentId = AGENT_IDS.find(
-  (agentId) =>
-    (AGENTS[agentId].findingEnrichments?.definitions.length ?? 0) === 0,
+// Pick an agent whose schema we can construct a minimal valid finding for.
+// All agents now have enrichments, so we use a BUG-domain agent as
+// a simple representative and provide its required bugAnalysis block.
+const simpleAgentId = AGENT_IDS.find((agentId) =>
+  AGENTS[agentId].domains.includes('BUG'),
 );
 
-if (!baselineAgentId) {
-  throw new Error('Expected at least one baseline agent without enrichments.');
+if (!simpleAgentId) {
+  throw new Error('Expected a bug-domain agent for basic schema tests.');
 }
 
 describe('finding schemas', () => {
-  it('accepts valid output for a baseline agent schema', () => {
-    const parsed = OUTPUT_SCHEMAS[baselineAgentId].parse({
+  it('accepts valid output for a simple agent schema', () => {
+    const parsed = OUTPUT_SCHEMAS[simpleAgentId].parse({
       findings: [
         {
-          domain: AGENTS[baselineAgentId].domains[0] as string,
+          domain: AGENTS[simpleAgentId].domains[0] as string,
           location: 'src/file.ts:12',
           severity: 'P1',
           evidence: 'valid finding payload',
           prescription: 'apply a concrete fix',
+          bugAnalysis: {
+            category: 'LOGIC_ERROR',
+            failureMode: 'SILENT_WRONG_RESULT',
+            blastRadius: 'ISOLATED',
+            confidence: 'HIGH',
+            triggerConditions: ['specific condition triggers the defect'],
+            affectedPaths: ['src/file.ts:fn()'],
+          },
         },
       ],
     });
 
     expect(parsed.findings).toHaveLength(1);
     expect(parsed.findings[0]?.domain).toBe(
-      AGENTS[baselineAgentId].domains[0] as any,
+      AGENTS[simpleAgentId].domains[0] as any,
     );
   });
 
   it('rejects invalid severity values', () => {
-    const result = OUTPUT_SCHEMAS[baselineAgentId].safeParse({
+    const result = OUTPUT_SCHEMAS[simpleAgentId].safeParse({
       findings: [
         {
-          domain: AGENTS[baselineAgentId].domains[0] as string,
+          domain: AGENTS[simpleAgentId].domains[0] as string,
           location: 'src/api.ts:33',
           severity: 'LOW',
           evidence: 'bad enum value',
           prescription: 'use P0-P3 severity',
+          bugAnalysis: {
+            category: 'LOGIC_ERROR',
+            failureMode: 'CRASH',
+            blastRadius: 'ISOLATED',
+            confidence: 'HIGH',
+            triggerConditions: ['trigger'],
+            affectedPaths: ['path'],
+          },
         },
       ],
     });

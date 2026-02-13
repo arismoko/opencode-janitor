@@ -38,6 +38,7 @@ export interface ManualTriggerContext {
   kind: 'manual';
   commitSha: string;
   commitContext: CommitContext;
+  prNumber?: number;
   note?: string;
   focusPath?: string;
 }

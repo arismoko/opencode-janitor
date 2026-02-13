@@ -21,6 +21,9 @@ export function canAgentRunForTrigger(
   }
 
   if (triggerId === 'manual') {
+    if (!config.triggers.manual.enabled) {
+      return { eligible: false, reason: 'trigger_disabled' };
+    }
     return { eligible: true };
   }
 

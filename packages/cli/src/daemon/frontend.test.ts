@@ -151,6 +151,16 @@ describe('frontend asset loading', () => {
     expect(renderer?.body).toContain('renderFindingEnrichment');
   });
 
+  it('serves synced agent renderer modules at expected path', () => {
+    const asset = getFrontendAsset(
+      '/_dashboard/views/reports/finding-enrichments/renderers/agents/inspector/architecture-v1.js',
+    );
+    expect(asset).toBeDefined();
+    expect(asset?.contentType).toBe('text/javascript; charset=utf-8');
+    expect(asset?.body).toContain('renderFindingEnrichment');
+    expect(asset?.body).toContain('renderArchitectureV1');
+  });
+
   it('returns null for unknown frontend asset path', () => {
     expect(getFrontendAsset('/_dashboard/unknown.css')).toBeNull();
     expect(

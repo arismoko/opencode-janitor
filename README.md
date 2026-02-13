@@ -129,7 +129,6 @@ PR comment posting for PR-triggered runs is enabled by default. Disable it with:
     "pr": {
       "enabled": true,
       "intervalSec": 30,
-      "ttlSec": 300,
       "postComment": false
     }
   }

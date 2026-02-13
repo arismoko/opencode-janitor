@@ -62,8 +62,10 @@ export async function bootstrapRuntime(
     Object.entries(agentDefinitions).map(([name, def]) => [name, def.config]),
   );
 
+  let child: Awaited<ReturnType<typeof startOpencodeChild>> | undefined;
+
   try {
-    const child = await startOpencodeChild({
+    child = await startOpencodeChild({
       host: config.opencode.serverHost,
       port: config.opencode.serverPort,
       startTimeoutMs: config.opencode.serverStartTimeoutMs,
@@ -118,6 +120,9 @@ export async function bootstrapRuntime(
     };
   } catch (error) {
     try {
+      if (child) {
+        await child.close();
+      }
       db.close(false);
     } finally {
       lock.release();

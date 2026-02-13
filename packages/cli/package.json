@@ -7,12 +7,13 @@
   "license": "MIT",
   "private": true,
   "scripts": {
+    "sync:agent-renderers": "bun run scripts/sync-agent-renderers.ts",
     "build:frontend": "mkdir -p dist/frontend && cp -r src/daemon/frontend/. dist/frontend/",
     "build:cli": "bun build src/index.ts --outdir dist --target bun --format esm",
-    "build": "bun run build:cli && bun run build:frontend",
+    "build": "bun run sync:agent-renderers && bun run build:cli && bun run build:frontend",
     "typecheck": "tsc --noEmit",
-    "test": "bun test",
-    "dev": "bun run src/index.ts"
+    "test": "bun run sync:agent-renderers && bun test",
+    "dev": "JANITOR_DEV=1 bun run src/index.ts"
   },
   "dependencies": {
     "@opencode-ai/sdk": "^1.1.19",

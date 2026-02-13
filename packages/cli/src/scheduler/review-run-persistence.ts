@@ -70,6 +70,7 @@ export function createReviewRunPersistenceService(options: {
           agent: run.agent,
           findingsCount: findings.length,
           reviewRunId: run.id,
+          triggerEventId: run.trigger_event_id,
         },
       });
     },
@@ -96,6 +97,7 @@ export function createReviewRunPersistenceService(options: {
           payload: {
             agent: run.agent,
             reviewRunId: run.id,
+            triggerEventId: run.trigger_event_id,
           },
         });
       } else if (classification.outcome === 'cancelled') {
@@ -110,6 +112,7 @@ export function createReviewRunPersistenceService(options: {
           payload: {
             agent: run.agent,
             reviewRunId: run.id,
+            triggerEventId: run.trigger_event_id,
           },
         });
       } else {
@@ -136,6 +139,7 @@ export function createReviewRunPersistenceService(options: {
             agent: run.agent,
             errorCode: classification.errorCode,
             reviewRunId: run.id,
+            triggerEventId: run.trigger_event_id,
           },
         });
       }

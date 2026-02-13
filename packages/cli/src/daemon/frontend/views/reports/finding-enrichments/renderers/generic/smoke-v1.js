@@ -8,11 +8,11 @@ export function renderFindingEnrichment({ html, section }) {
 
   return {
     summaryChips: html`
-      <span class="architecture-chip">smoke v${section.version}</span>
-      <span class="architecture-chip">${keys.length} keys</span>
+      <span class="enrichment-chip">smoke v${section.version}</span>
+      <span class="enrichment-chip">${keys.length} keys</span>
     `,
     body: html`
-      <p class="architecture-copy">Generic smoke renderer loaded successfully.</p>
+      <p class="enrichment-copy">Generic smoke renderer loaded successfully.</p>
     `,
   };
 }

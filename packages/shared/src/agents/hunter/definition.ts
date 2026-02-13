@@ -102,4 +102,36 @@ export const HUNTER_AGENT_DEFINITION = defineAgent<
 
     return { metadataSuffix };
   },
+  reviewPromptHints: () => [
+    'Every finding must include bugAnalysis: { category, failureMode, blastRadius, confidence, triggerConditions (1-4 strings), affectedPaths (1-5 strings) }.',
+    'category must be one of: RACE_CONDITION, NULL_DEREF, OFF_BY_ONE, TYPE_COERCION, BOUNDARY_VIOLATION, RESOURCE_LEAK, MISSING_VALIDATION, STATE_CORRUPTION, LOGIC_ERROR, CONTRACT_VIOLATION, UNHANDLED_EDGE_CASE, OTHER.',
+    'failureMode must be one of: CRASH, DATA_CORRUPTION, SILENT_WRONG_RESULT, HANG, SECURITY_BYPASS, DEGRADED_PERFORMANCE, PARTIAL_FAILURE, OTHER.',
+    'blastRadius must be one of: ISOLATED, MODULE, SYSTEM_WIDE.',
+    'confidence must be one of: CERTAIN, HIGH, MEDIUM, SPECULATIVE.',
+    'triggerConditions: list the concrete steps or conditions that trigger the defect (1-4 items).',
+    'affectedPaths: list the call-chain or data-flow paths the defect propagates through (1-5 items).',
+  ],
+  findingEnrichments: {
+    definitions: [
+      {
+        kind: 'bug-analysis',
+        title: 'Bug Diagnosis',
+        renderer: 'hunter.bug-analysis.v1',
+        collapsedByDefault: true,
+      },
+    ],
+    buildSections: (finding) => {
+      const bugAnalysis = finding.bugAnalysis;
+      if (!bugAnalysis || typeof bugAnalysis !== 'object') {
+        return [];
+      }
+      return [
+        {
+          kind: 'bug-analysis',
+          version: 1,
+          payload: bugAnalysis as Record<string, unknown>,
+        },
+      ];
+    },
+  },
 });

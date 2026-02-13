@@ -2,17 +2,19 @@ import { describe, expect, it } from 'bun:test';
 import { AGENT_IDS, AGENTS } from '@opencode-janitor/shared';
 import { createAgentSpecFromDefinition } from './agent-spec-from-definition';
 
-const architectureAgentId = AGENT_IDS.find(
-  (agentId) =>
-    (AGENTS[agentId].findingEnrichments?.definitions.length ?? 0) > 0,
+const architectureAgentId = AGENT_IDS.find((agentId) =>
+  AGENTS[agentId].findingEnrichments?.definitions.some(
+    (d) => d.kind === 'architecture',
+  ),
 );
-const baselineAgentId = AGENT_IDS.find(
-  (agentId) =>
-    (AGENTS[agentId].findingEnrichments?.definitions.length ?? 0) === 0,
+const cleanupAgentId = AGENT_IDS.find((agentId) =>
+  AGENTS[agentId].findingEnrichments?.definitions.some(
+    (d) => d.kind === 'cleanup-map',
+  ),
 );
 
-if (!architectureAgentId || !baselineAgentId) {
-  throw new Error('Expected both enriched and baseline agent profiles.');
+if (!architectureAgentId || !cleanupAgentId) {
+  throw new Error('Expected both architecture and cleanup agent profiles.');
 }
 
 function makeSpec(agent: (typeof AGENT_IDS)[number]) {
@@ -80,8 +82,8 @@ describe('createAgentSpecFromDefinition.onSuccess', () => {
     expect(details.enrichments?.[0]?.version).toBe(1);
   });
 
-  it('keeps baseline agents details_json as empty object', () => {
-    const spec = makeSpec(baselineAgentId);
+  it('serializes cleanup enrichments for cleanup-map findings', () => {
+    const spec = makeSpec(cleanupAgentId);
     const rows = spec.onSuccess({
       run: baseRun,
       reviewRunId: baseRun.id,
@@ -93,12 +95,29 @@ describe('createAgentSpecFromDefinition.onSuccess', () => {
             location: 'src/a.ts:1',
             evidence: 'Duplicated branch',
             prescription: 'Extract helper',
+            cleanupMap: {
+              action: 'EXTRACT',
+              effort: 'SMALL',
+              linesAffected: 12,
+              targets: ['src/a.ts:branchA', 'src/b.ts:branchB'],
+              safetyNote:
+                'Both branches are identical and share no mutable state.',
+            },
           },
         ],
       },
     });
 
     expect(rows).toHaveLength(1);
-    expect(rows[0]!.details_json).toBe('{}');
+    const details = JSON.parse(rows[0]!.details_json) as {
+      enrichments?: Array<{
+        kind?: string;
+        version?: number;
+        payload?: unknown;
+      }>;
+    };
+    expect(details.enrichments).toHaveLength(1);
+    expect(details.enrichments?.[0]?.kind).toBe('cleanup-map');
+    expect(details.enrichments?.[0]?.version).toBe(1);
   });
 });

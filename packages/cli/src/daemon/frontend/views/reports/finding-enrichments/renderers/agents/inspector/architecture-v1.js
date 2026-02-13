@@ -1,3 +1,4 @@
+// Synced from agent source by sync-agent-renderers. Do not edit.
 function formatLabel(value) {
   if (typeof value !== 'string' || !value) return '-';
   return value.toLowerCase().replaceAll('_', ' ');

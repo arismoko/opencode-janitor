@@ -8,6 +8,7 @@ import type { SocketContext } from '../runtime/context';
 import { toWebUrl } from '../utils/web-url';
 import { CLI_VERSION } from '../version';
 import { generateAuthToken, writeAuthToken } from './auth';
+import { createDevWatcher, type DevWatcher, isDevMode } from './dev-watcher';
 import { createSocketServer, type DaemonStatusSnapshot } from './socket';
 import { createSocketOptions } from './socket-options';
 import { createWebServer } from './web';
@@ -48,6 +49,7 @@ export async function runDaemon(options: RunDaemonOptions): Promise<void> {
 
   let server: ReturnType<typeof createSocketServer> | null = null;
   let webServer: ReturnType<typeof createWebServer> | null = null;
+  let devWatcher: DevWatcher | null = null;
   try {
     // Generate and persist auth token for the web server.
     const authToken = generateAuthToken();
@@ -55,14 +57,21 @@ export async function runDaemon(options: RunDaemonOptions): Promise<void> {
 
     const socketOptions = createSocketOptions(rc, statusSnapshot, shutdown);
 
+    // Start dev-mode watcher if JANITOR_DEV is set.
+    if (isDevMode()) {
+      devWatcher = createDevWatcher();
+    }
+
     server = createSocketServer(socketOptions);
     webServer = createWebServer({
       hostname: rc.config.daemon.webHost,
       port: rc.config.daemon.webPort,
       apiOptions: socketOptions,
       authToken,
+      devWatcher: devWatcher ?? undefined,
     });
   } catch (error) {
+    devWatcher?.stop();
     server?.stop(true);
     webServer?.stop(true);
     await shutdownRuntime(rc, {
@@ -123,6 +132,7 @@ export async function runDaemon(options: RunDaemonOptions): Promise<void> {
 
     server?.stop(true);
     webServer?.stop(true);
+    devWatcher?.stop();
     resolveStop?.();
   }
 

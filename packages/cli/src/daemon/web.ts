@@ -10,6 +10,7 @@
  */
 
 import { toWebUrl } from '../utils/web-url';
+import type { DevWatcher } from './dev-watcher';
 import { getDashboardHtml, getFrontendAsset } from './frontend';
 import {
   buildRouteMap,
@@ -24,6 +25,8 @@ export interface WebServerOptions {
   apiOptions: SocketServerOptions;
   /** Auth token for mutating endpoints. If omitted, auth is disabled. */
   authToken?: string;
+  /** Dev-mode watcher for live reload. Enables SSE reload endpoint. */
+  devWatcher?: DevWatcher;
 }
 
 /** Methods that mutate state and require auth. */
@@ -74,6 +77,57 @@ function checkAuth(request: Request, expectedToken: string): Response | null {
 
 let cachedHtml: string | null = null;
 
+/**
+ * Build the inline JS snippet that subscribes to the dev live-reload SSE
+ * stream and triggers a full page refresh on `reload` events.
+ *
+ * The script relies on the browser's built-in EventSource reconnection
+ * behavior for transient errors — it must NOT call `es.close()` on error,
+ * otherwise a single blip permanently disables live reload.
+ */
+export function buildDevReloadScript(): string {
+  return '(function(){try{var es=new EventSource("/_dev/live-reload");es.addEventListener("reload",function(){window.location.reload()})}catch(e){}})()';
+}
+
+/**
+ * Handle the `/_dev/live-reload` SSE endpoint.
+ *
+ * Registers the client's stream controller with the dev watcher so it
+ * receives `reload` events when files change.
+ */
+function handleLiveReload(request: Request, devWatcher: DevWatcher): Response {
+  const stream = new ReadableStream<Uint8Array>({
+    start(controller) {
+      devWatcher.addClient(controller);
+
+      const cleanup = () => {
+        devWatcher.removeClient(controller);
+        try {
+          controller.close();
+        } catch {
+          // already closed
+        }
+      };
+
+      if (request.signal.aborted) {
+        cleanup();
+        return;
+      }
+
+      request.signal.addEventListener('abort', cleanup, { once: true });
+    },
+  });
+
+  return new Response(stream, {
+    status: 200,
+    headers: {
+      'content-type': 'text/event-stream',
+      'cache-control': 'no-cache',
+      connection: 'keep-alive',
+    },
+  });
+}
+
 export function createWebServer(
   options: WebServerOptions,
 ): ReturnType<typeof Bun.serve> {
@@ -98,19 +152,40 @@ export function createWebServer(
         return new Response(null, { status: 204, headers: corsHeaders });
       }
 
-      // Serve frontend SPA (inject auth token for mutating API calls)
+      // Dev-mode live-reload SSE stream
+      if (
+        request.method === 'GET' &&
+        url.pathname === '/_dev/live-reload' &&
+        options.devWatcher
+      ) {
+        return handleLiveReload(request, options.devWatcher);
+      }
+
+      // Serve frontend SPA (inject auth token and dev-mode reload script)
       if (
         request.method === 'GET' &&
         (url.pathname === '/' || url.pathname === '/index.html')
       ) {
-        if (!cachedHtml) {
-          cachedHtml = getDashboardHtml();
-        }
+        // In dev mode, bypass local cache — frontend.ts cache is invalidated
+        // by the watcher, so getDashboardHtml() re-reads from disk.
+        const baseHtml = options.devWatcher
+          ? getDashboardHtml()
+          : (cachedHtml ??= getDashboardHtml());
+
         // Inject the auth token into the page so the SPA can use it.
         const tokenScript = options.authToken
           ? `<script>window.__JANITOR_AUTH_TOKEN__=${JSON.stringify(options.authToken)};</script>`
           : '';
-        const html = cachedHtml.replace('</head>', `${tokenScript}</head>`);
+
+        // In dev mode, inject a live-reload listener script.
+        const devScript = options.devWatcher
+          ? `<script>${buildDevReloadScript()}</script>`
+          : '';
+
+        const html = baseHtml.replace(
+          '</head>',
+          `${tokenScript}${devScript}</head>`,
+        );
         return new Response(html, {
           status: 200,
           headers: {

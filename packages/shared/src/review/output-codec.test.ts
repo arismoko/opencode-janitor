@@ -8,9 +8,10 @@ const bugAgentId = AGENT_IDS.find((agentId) =>
 const cleanupAgentId = AGENT_IDS.find((agentId) =>
   AGENTS[agentId].domains.includes('YAGNI'),
 );
-const architectureAgentId = AGENT_IDS.find(
-  (agentId) =>
-    (AGENTS[agentId].findingEnrichments?.definitions.length ?? 0) > 0,
+const architectureAgentId = AGENT_IDS.find((agentId) =>
+  AGENTS[agentId].findingEnrichments?.definitions.some(
+    (d) => d.kind === 'architecture',
+  ),
 );
 
 if (!bugAgentId || !cleanupAgentId || !architectureAgentId) {
@@ -32,6 +33,14 @@ const validHunterFinding = {
   severity: 'P1',
   evidence: 'null dereference when user is undefined',
   prescription: 'add null check before accessing user.name',
+  bugAnalysis: {
+    category: 'NULL_DEREF',
+    failureMode: 'CRASH',
+    blastRadius: 'ISOLATED',
+    confidence: 'HIGH',
+    triggerConditions: ['user object is undefined when accessed'],
+    affectedPaths: ['src/api.ts:getUser() -> src/api.ts:formatName()'],
+  },
 };
 
 /** Minimal valid cleanup finding */
@@ -41,6 +50,13 @@ const validJanitorFinding = {
   severity: 'P2',
   evidence: 'unused helper introduced in this change',
   prescription: 'remove the helper and inline the logic',
+  cleanupMap: {
+    action: 'DELETE',
+    effort: 'TRIVIAL',
+    linesAffected: 5,
+    targets: ['src/utils.ts:unusedHelper'],
+    safetyNote: 'No callers found across the codebase.',
+  },
 };
 
 const validInspectorFinding = {
@@ -425,6 +441,14 @@ describe('parseAgentOutput', () => {
             severity: 'P0',
             evidence: 'null pointer dereference',
             prescription: 'add null guard',
+            bugAnalysis: {
+              category: 'NULL_DEREF',
+              failureMode: 'CRASH',
+              blastRadius: 'ISOLATED',
+              confidence: 'CERTAIN',
+              triggerConditions: ['user is null'],
+              affectedPaths: ['src/api.ts:handle()'],
+            },
           },
           {
             domain: 'BUG',
@@ -432,6 +456,14 @@ describe('parseAgentOutput', () => {
             severity: 'P1',
             evidence: 'SQL injection via unsanitized input',
             prescription: 'use parameterized queries',
+            bugAnalysis: {
+              category: 'MISSING_VALIDATION',
+              failureMode: 'SECURITY_BYPASS',
+              blastRadius: 'SYSTEM_WIDE',
+              confidence: 'HIGH',
+              triggerConditions: ['user input passes through to query'],
+              affectedPaths: ['src/auth.ts:login()'],
+            },
           },
           {
             domain: 'CORRECTNESS',
@@ -439,6 +471,14 @@ describe('parseAgentOutput', () => {
             severity: 'P3',
             evidence: 'off-by-one in loop bound',
             prescription: 'change < to <=',
+            bugAnalysis: {
+              category: 'OFF_BY_ONE',
+              failureMode: 'SILENT_WRONG_RESULT',
+              blastRadius: 'ISOLATED',
+              confidence: 'MEDIUM',
+              triggerConditions: ['loop iterates to n-1 instead of n'],
+              affectedPaths: ['src/calc.ts:sum()'],
+            },
           },
         ],
       };

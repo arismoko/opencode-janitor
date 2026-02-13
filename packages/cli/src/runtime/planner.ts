@@ -2,6 +2,7 @@ import type { Database } from 'bun:sqlite';
 import {
   AGENTS,
   type AgentId,
+  isScopeId,
   MANUAL_TRIGGER_DEFINITION,
   SCOPES,
   type ScopeId,
@@ -45,16 +46,14 @@ function resolveScope(
   }
 
   const manual = parseManualPayload(payloadJson);
-  const scope = agent.resolveManualScope({
-    requestedScope: manual.requestedScope as ScopeId | undefined,
-    // hasWorkspaceDiff is computed at execution time, not stored in the
-    // payload.  At planning time we only have the serialised payload, so
-    // default to false — the runtime will re-derive it from the commit
-    // context when the review actually runs.
-    hasWorkspaceDiff: false,
-    manualInput: manual.input,
-    trigger: 'manual',
-  });
+  const requestedScope = manual.requestedScope;
+  if (typeof requestedScope !== 'string') {
+    return null;
+  }
+  if (!isScopeId(requestedScope)) {
+    return null;
+  }
+  const scope = requestedScope;
 
   if (!agent.capabilities.manualScopes.includes(scope)) {
     return null;

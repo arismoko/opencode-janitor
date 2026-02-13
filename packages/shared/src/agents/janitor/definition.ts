@@ -83,4 +83,35 @@ export const JANITOR_AGENT_DEFINITION = defineAgent<
 
     return { metadataSuffix };
   },
+  reviewPromptHints: () => [
+    'Every finding must include cleanupMap: { action, effort, linesAffected, targets (1-6 strings), safetyNote }.',
+    'action must be one of: DELETE, EXTRACT, INLINE, MERGE, REPLACE, SIMPLIFY, OTHER.',
+    'effort must be one of: TRIVIAL, SMALL, MEDIUM.',
+    'linesAffected: approximate number of lines to add/remove/change (integer >= 1).',
+    'targets: list the specific symbols, files, or code spans targeted by the cleanup (1-6 items).',
+    'safetyNote: brief explanation of why the cleanup is safe to perform without side effects.',
+  ],
+  findingEnrichments: {
+    definitions: [
+      {
+        kind: 'cleanup-map',
+        title: 'Cleanup Plan',
+        renderer: 'janitor.cleanup-map.v1',
+        collapsedByDefault: true,
+      },
+    ],
+    buildSections: (finding) => {
+      const cleanupMap = finding.cleanupMap;
+      if (!cleanupMap || typeof cleanupMap !== 'object') {
+        return [];
+      }
+      return [
+        {
+          kind: 'cleanup-map',
+          version: 1,
+          payload: cleanupMap as Record<string, unknown>,
+        },
+      ];
+    },
+  },
 });

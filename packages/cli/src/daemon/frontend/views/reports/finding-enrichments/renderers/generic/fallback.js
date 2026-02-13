@@ -1,10 +1,10 @@
 export function renderFindingEnrichment({ html, section }) {
   return {
     summaryChips: html`
-      <span class="architecture-chip">v${section.version}</span>
+      <span class="enrichment-chip">v${section.version}</span>
     `,
     body: html`
-      <p class="architecture-copy">
+      <p class="enrichment-copy">
         No renderer is registered for this enrichment type.
       </p>
     `,

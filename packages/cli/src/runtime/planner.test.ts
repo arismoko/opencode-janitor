@@ -148,6 +148,7 @@ describe('planReviewRunsForEvent', () => {
       subject: `manual:${prCapableAgent}`,
       payloadJson: JSON.stringify({
         agent: prCapableAgent,
+        requestedScope: 'repo',
       }),
       source: 'cli',
       detectedAt: Date.now(),
@@ -190,6 +191,33 @@ describe('planReviewRunsForEvent', () => {
       },
     });
 
+    const result = planReviewRunsForEvent(db, config, event.eventId);
+    expect(result.planned).toBe(0);
+  });
+
+  it('does not plan manual runs when manual trigger is disabled', () => {
+    const repo = addRepo(db, {
+      path: '/tmp/repo',
+      gitDir: '/tmp/repo/.git',
+      defaultBranch: 'main',
+    });
+
+    const event = insertTriggerEvent(db, {
+      repoId: repo.id,
+      triggerId: 'manual',
+      eventKey: 'manual-disabled',
+      subject: 'manual:repo',
+      payloadJson: JSON.stringify({
+        agent: prCapableAgent,
+        requestedScope: 'repo',
+      }),
+      source: 'cli',
+      detectedAt: Date.now(),
+    });
+
+    const config = CliConfigSchema.parse({
+      triggers: { manual: { enabled: false } },
+    });
     const result = planReviewRunsForEvent(db, config, event.eventId);
     expect(result.planned).toBe(0);
   });

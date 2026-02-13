@@ -1,0 +1,183 @@
+/* Synced from agent source by sync-agent-renderers. Do not edit. */
+/* Cleanup Plan enrichment renderer styles */
+
+.janitor-plan {
+  display: grid;
+  gap: 10px;
+}
+
+.janitor-plan-header {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.janitor-plan-cell {
+  border: 1px solid var(--border-subtle);
+  border-radius: 7px;
+  background: rgba(28, 26, 24, 0.45);
+  padding: 7px;
+  display: grid;
+  gap: 6px;
+}
+
+.janitor-plan-label {
+  color: var(--text-tertiary);
+  font:
+    600 9px / 1.2 "JetBrains Mono",
+    monospace;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.janitor-plan-section {
+  display: grid;
+  gap: 6px;
+}
+
+.janitor-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: rgba(40, 38, 36, 0.6);
+  padding: 2px 8px;
+  color: var(--text-primary);
+  font:
+    600 10px / 1.2 "JetBrains Mono",
+    monospace;
+}
+
+.janitor-chip.lg {
+  padding: 3px 10px;
+  font-size: 11px;
+}
+
+.janitor-chip.action {
+  color: #a8d4f0;
+  border-color: rgba(100, 160, 210, 0.45);
+  background: rgba(100, 160, 210, 0.1);
+}
+
+.janitor-chip.effort {
+  color: #c9c4be;
+  border-color: rgba(156, 150, 144, 0.45);
+}
+
+.janitor-chip.lines {
+  color: var(--text-secondary);
+  border-color: var(--border-subtle);
+  font-variant-numeric: tabular-nums;
+}
+
+.janitor-action-icon {
+  font-size: 11px;
+  line-height: 1;
+}
+
+.janitor-effort-gauge {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.janitor-effort-seg {
+  width: 16px;
+  height: 6px;
+  border-radius: 2px;
+  background: rgba(60, 58, 56, 0.5);
+  border: 1px solid var(--border-subtle);
+  transition:
+    background 0.15s ease,
+    border-color 0.15s ease;
+}
+
+.janitor-effort-seg.active.level-1 {
+  background: rgba(91, 175, 108, 0.45);
+  border-color: rgba(91, 175, 108, 0.55);
+}
+
+.janitor-effort-seg.active.level-2 {
+  background: rgba(212, 180, 120, 0.45);
+  border-color: rgba(212, 180, 120, 0.55);
+}
+
+.janitor-effort-seg.active.level-3 {
+  background: rgba(212, 155, 84, 0.5);
+  border-color: rgba(212, 155, 84, 0.6);
+}
+
+.janitor-effort-label {
+  margin-left: 4px;
+  color: var(--text-secondary);
+  font:
+    600 9px / 1 "JetBrains Mono",
+    monospace;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.janitor-lines-counter {
+  display: flex;
+  align-items: baseline;
+  gap: 3px;
+}
+
+.janitor-lines-number {
+  color: var(--text-primary);
+  font:
+    700 18px / 1 "JetBrains Mono",
+    monospace;
+  font-variant-numeric: tabular-nums;
+}
+
+.janitor-target-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.janitor-target-item {
+  display: inline-block;
+  border: 1px solid var(--border-subtle);
+  border-radius: 4px;
+  background: rgba(28, 26, 24, 0.5);
+  padding: 3px 7px;
+  color: var(--text-primary);
+  font:
+    400 10.5px / 1.3 "JetBrains Mono",
+    monospace;
+  word-break: break-all;
+}
+
+.janitor-safety {
+  display: flex;
+  gap: 7px;
+  align-items: flex-start;
+  border: 1px solid rgba(91, 175, 108, 0.3);
+  border-radius: 6px;
+  background: rgba(91, 175, 108, 0.06);
+  padding: 7px 9px;
+}
+
+.janitor-safety-icon {
+  color: #8dc892;
+  font-size: 12px;
+  line-height: 1;
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+
+.janitor-safety-text {
+  color: var(--text-primary);
+  font:
+    400 11px / 1.4 "Space Grotesk",
+    sans-serif;
+}
+
+@media (max-width: 980px) {
+  .janitor-plan-header {
+    grid-template-columns: 1fr 1fr;
+  }
+}

@@ -112,14 +112,16 @@ describe('capabilities view', () => {
     const enriched = capabilities.agents.find(
       (agent) => agent.id === enrichedAgent,
     );
-    expect(enriched?.findingEnrichments).toEqual([
-      {
-        kind: 'architecture',
-        title: 'Architecture',
-        renderer: enrichedRenderer,
-        collapsedByDefault: true,
-      },
-    ]);
+    const expectedDefinitions =
+      AGENTS[enrichedAgent].findingEnrichments?.definitions ?? [];
+    expect(enriched?.findingEnrichments).toEqual(
+      expectedDefinitions.map((d) => ({
+        kind: d.kind,
+        title: d.title,
+        renderer: d.renderer,
+        collapsedByDefault: d.collapsedByDefault,
+      })),
+    );
 
     const manual = capabilities.triggers.find(
       (trigger) => trigger.id === 'manual',

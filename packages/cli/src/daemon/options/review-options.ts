@@ -1,5 +1,9 @@
 import { resolve as resolvePath } from 'node:path';
-import type { ScopeId } from '@opencode-janitor/shared';
+import {
+  AGENTS,
+  MANUAL_TRIGGER_DEFINITION,
+  type ScopeId,
+} from '@opencode-janitor/shared';
 import { appendEvent } from '../../db/queries/event-queries';
 import { findRepoByIdOrPath } from '../../db/queries/repo-queries';
 import {
@@ -12,9 +16,22 @@ import { abortSession } from '../../reviews/runner';
 import type { RuntimeContext } from '../../runtime/context';
 import { planReviewRunsForEvent } from '../../runtime/planner';
 import { MANUAL_TRIGGER_MODULE } from '../../triggers/modules/manual';
-import { resolveHeadSha, resolvePrHeadShaAsync } from '../../utils/git';
+import {
+  resolveHeadSha,
+  resolvePrHeadShaAsync,
+  runGitCommand,
+} from '../../utils/git';
 import { makeId } from '../../utils/ids';
 import type { ReviewApi } from '../socket-types';
+
+type ReviewOptionsDeps = {
+  resolveHeadSha?: (repoPath: string) => string;
+  resolvePrHeadShaAsync?: (
+    repoPath: string,
+    prNumber: number,
+  ) => Promise<string>;
+  hasWorkspaceDiff?: (repoPath: string) => boolean;
+};
 
 function parsePrNumber(input?: Record<string, unknown>): number | undefined {
   const raw = input?.prNumber;
@@ -29,7 +46,7 @@ function requirePrNumberForPrScope(
   input?: Record<string, unknown>,
 ): number | undefined {
   if (scope !== 'pr') {
-    return parsePrNumber(input);
+    return undefined;
   }
 
   const prNumber = parsePrNumber(input);
@@ -41,7 +58,24 @@ function requirePrNumberForPrScope(
   return prNumber;
 }
 
-export function createReviewOptions(rc: RuntimeContext): ReviewApi {
+function detectWorkspaceDiff(repoPath: string): boolean {
+  const result = runGitCommand(repoPath, ['status', '--porcelain']);
+  if (result.exitCode !== 0) {
+    const details = result.stderr || result.stdout || 'no output';
+    throw new Error(`Failed to detect workspace diff: ${details}`);
+  }
+  return result.stdout.trim().length > 0;
+}
+
+export function createReviewOptions(
+  rc: RuntimeContext,
+  deps?: ReviewOptionsDeps,
+): ReviewApi {
+  const resolveHeadShaFn = deps?.resolveHeadSha ?? resolveHeadSha;
+  const resolvePrHeadShaAsyncFn =
+    deps?.resolvePrHeadShaAsync ?? resolvePrHeadShaAsync;
+  const hasWorkspaceDiff = deps?.hasWorkspaceDiff ?? detectWorkspaceDiff;
+
   return {
     onEnqueueReview: async ({
       repoOrId,
@@ -62,15 +96,47 @@ export function createReviewOptions(rc: RuntimeContext): ReviewApi {
         );
       }
 
-      const prNumber = requirePrNumberForPrScope(scope, input);
+      if (!rc.config.triggers.manual.enabled) {
+        throw new Error('Manual trigger is disabled by config.');
+      }
+
+      const hasDiff = hasWorkspaceDiff(repo.path);
+      const configuredDefaultScope = rc.config.agents[agent].manualDefaultScope;
+      const requestedScope = scope ?? configuredDefaultScope;
+      const resolvedScope = AGENTS[agent].resolveManualScope({
+        requestedScope,
+        hasWorkspaceDiff: hasDiff,
+        manualInput: input,
+        trigger: 'manual',
+      });
+
+      if (!AGENTS[agent].capabilities.manualScopes.includes(resolvedScope)) {
+        throw new Error(
+          `Agent ${agent} does not support manual scope ${resolvedScope}`,
+        );
+      }
+
+      if (!MANUAL_TRIGGER_DEFINITION.allowedScopes.includes(resolvedScope)) {
+        throw new Error(`Manual trigger does not allow scope ${resolvedScope}`);
+      }
+
+      const prNumber = requirePrNumberForPrScope(resolvedScope, input);
       const sha = prNumber
-        ? await resolvePrHeadShaAsync(repo.path, prNumber)
-        : resolveHeadSha(repo.path);
+        ? await resolvePrHeadShaAsyncFn(repo.path, prNumber)
+        : resolveHeadShaFn(repo.path);
+
+      const filteredInput =
+        resolvedScope !== 'pr' && input
+          ? (() => {
+              const { prNumber: _, ...rest } = input;
+              return Object.keys(rest).length > 0 ? rest : undefined;
+            })()
+          : input;
 
       const payload = await MANUAL_TRIGGER_MODULE.fromManualRequest({
         agent,
-        scope,
-        input,
+        scope: resolvedScope,
+        input: filteredInput,
         note,
         focusPath,
         sha,
@@ -111,7 +177,7 @@ export function createReviewOptions(rc: RuntimeContext): ReviewApi {
             sha,
             subject,
             agent,
-            ...(scope ? { scope } : {}),
+            scope: resolvedScope,
             ...(input ? { input } : {}),
             ...(note ? { note } : {}),
             ...(focusPath ? { focusPath } : {}),

@@ -253,8 +253,7 @@ Locked Decisions
         },
         "pr": {
           "enabled": true,
-          "intervalSec": 30,
-          "ttlSec": 300
+          "intervalSec": 30
         },
         "manual": {
           "enabled": true

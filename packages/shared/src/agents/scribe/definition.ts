@@ -75,4 +75,35 @@ export const SCRIBE_AGENT_DEFINITION = defineAgent<
       reason: (trigger as string) === 'manual' ? 'manual-repo' : undefined,
     };
   },
+  reviewPromptHints: () => [
+    'Every finding must include docAlignment: { docType, staleness, docSource, codeSource, discrepancy }.',
+    'docType must be one of: README, API_REFERENCE, CHANGELOG, CONFIG_GUIDE, MIGRATION_GUIDE, TUTORIAL, INLINE_COMMENT, TYPE_DOC, OTHER.',
+    'staleness must be one of: CURRENT, STALE, OBSOLETE, MISSING.',
+    'docSource: the doc file and section that is wrong or missing (e.g. "README.md#configuration").',
+    'codeSource: the code symbol or file that is the source of truth (e.g. "src/config.ts:Config").',
+    'discrepancy: what the doc says vs what the code actually does.',
+  ],
+  findingEnrichments: {
+    definitions: [
+      {
+        kind: 'doc-alignment',
+        title: 'Doc Alignment',
+        renderer: 'scribe.doc-alignment.v1',
+        collapsedByDefault: true,
+      },
+    ],
+    buildSections: (finding) => {
+      const docAlignment = finding.docAlignment;
+      if (!docAlignment || typeof docAlignment !== 'object') {
+        return [];
+      }
+      return [
+        {
+          kind: 'doc-alignment',
+          version: 1,
+          payload: docAlignment as Record<string, unknown>,
+        },
+      ];
+    },
+  },
 });

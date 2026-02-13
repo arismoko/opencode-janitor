@@ -63,7 +63,6 @@ describe('default values from empty input', () => {
     expect(det.minPollSec).toBe(15);
     expect(det.maxPollSec).toBe(60);
     expect(det.probeConcurrency).toBe(4);
-    expect(det.prTtlSec).toBe(300);
     expect(det.pollJitterPct).toBe(10);
   });
 

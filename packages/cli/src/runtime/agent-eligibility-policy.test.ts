@@ -81,6 +81,16 @@ describe('agent eligibility policy', () => {
     });
   });
 
+  it('disables manual trigger when config flag is off', () => {
+    const config = CliConfigSchema.parse({
+      triggers: { manual: { enabled: false } },
+    });
+    expect(canAgentRunForTrigger(config, secondAgent, 'manual')).toEqual({
+      eligible: false,
+      reason: 'trigger_disabled',
+    });
+  });
+
   it('enforces manual target-agent filtering for planning', () => {
     const config = CliConfigSchema.parse({});
 

@@ -5,6 +5,7 @@ import { z } from 'zod';
 import { createTriggerStateStore } from '../state-store';
 import { COMMIT_TRIGGER_MODULE } from './commit';
 import { MANUAL_TRIGGER_MODULE } from './manual';
+import { createPrTriggerModule } from './pr';
 
 const defaultAgent = AGENT_IDS[0];
 
@@ -59,6 +60,32 @@ describe('trigger modules', () => {
     });
 
     expect(payload).toEqual({});
+  });
+
+  it('pr module does not re-emit when key is unchanged regardless of elapsed time', async () => {
+    let now = 1_000;
+    const pr = createPrTriggerModule({
+      now: () => now,
+      resolveCurrentPrKeyAsync: async () => '7:abc123',
+    });
+
+    const first = await pr.probe({
+      repoPath: '/tmp/repo',
+      state: {},
+      config: { enabled: true, intervalSec: 10 },
+    });
+    expect(first.emissions).toHaveLength(1);
+    expect(first.emissions[0]?.eventKey).toBe('7:abc123');
+    expect(first.emissions[0]?.payload.key).toBe('7:abc123');
+
+    // Advance well past any previous TTL boundary — still no emission.
+    now = 999_000;
+    const second = await pr.probe({
+      repoPath: '/tmp/repo',
+      state: first.nextState,
+      config: { enabled: true, intervalSec: 10 },
+    });
+    expect(second.emissions).toHaveLength(0);
   });
 });
 

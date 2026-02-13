@@ -22,6 +22,8 @@ function buildTriggerMetadata(input: PrepareContextInput): string[] {
   ];
   if (input.trigger.kind === 'pr') {
     metadata.unshift(`PR: #${input.trigger.prNumber}`);
+  } else if (input.trigger.kind === 'manual' && input.trigger.prNumber) {
+    metadata.unshift(`PR: #${input.trigger.prNumber}`);
   }
   return metadata;
 }
@@ -48,7 +50,9 @@ function toSharedTriggerContext(input: PrepareContextInput): TriggerContext {
     sha: input.trigger.commitSha,
     ...(input.trigger.kind === 'pr'
       ? { prNumber: input.trigger.prNumber }
-      : {}),
+      : input.trigger.kind === 'manual' && input.trigger.prNumber
+        ? { prNumber: input.trigger.prNumber }
+        : {}),
   };
 }
 
@@ -101,8 +105,9 @@ function buildPreparedContext(
     reviewContext: {
       mode: 'diff',
       label:
-        scope === 'pr' && input.trigger.kind === 'pr'
-          ? `PR #${input.trigger.prNumber} @ ${input.trigger.commitSha.slice(0, 8)}`
+        (scope === 'pr' && input.trigger.kind === 'pr') ||
+        (input.trigger.kind === 'manual' && input.trigger.prNumber)
+          ? `PR #${input.trigger.kind === 'pr' ? input.trigger.prNumber : input.trigger.prNumber} @ ${input.trigger.commitSha.slice(0, 8)}`
           : `${input.trigger.commitSha.slice(0, 8)} - ${input.trigger.commitContext.subject}`,
       changedFiles: input.trigger.commitContext.changedFiles,
       patch: input.trigger.commitContext.patch,
